@@ -108,7 +108,7 @@ for CGNS files.
 **2. Run it:**
 
 ```bash
-git clone https://github.com/<you>/MeshViewer.git
+git clone https://github.com/mdefontenay/MeshViewer.git
 cd MeshViewer
 python mesh_viewer.py path/to/file.step
 ```
