@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# py2app build output (the app and .dmg go in GitHub Releases, not in git)
+build/
+dist/
+*.dmg
+
+# macOS
+.DS_Store
+
+# tools
+.ruff_cache/

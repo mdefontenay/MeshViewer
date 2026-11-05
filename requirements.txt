@@ -1,0 +1,7 @@
+# Runtime
+numpy
+pyvista
+pyvistaqt
+PySide6
+h5py            # CGNS
+cadquery-ocp    # STEP (OpenCASCADE)
