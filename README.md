@@ -76,7 +76,7 @@ pyenv or conda Pythons, or Python 3.14 yet.
 
 ```bash
 brew install python@3.13
-git clone https://github.com/<you>/MeshViewer.git
+git clone https://github.com/mdefontenay/MeshViewer.git
 cd MeshViewer
 ./build_app.sh            # quick build, installed in /Applications
 ```
@@ -89,6 +89,41 @@ cd MeshViewer
 - `./make_dmg.sh` builds the self-contained app, checks it (`--selftest`) and
   packs `dist/Mesh Viewer <version>.dmg`.
 - Run without building: `.venv/bin/python mesh_viewer.py file.step`
+
+## Already have Python? Run it without the 1 GB app
+
+The self-contained app is big because it carries its own copy of Python, Qt,
+VTK and OpenCASCADE (I liked the self-contained aspect). If you already have Python with these packages, you don't
+need any of that.
+
+**1. Install what's missing:**
+
+```bash
+pip install numpy pyvista pyvistaqt PySide6 h5py cadquery-ocp
+```
+
+`cadquery-ocp` is only needed for STEP / IGES / BREP files, and `h5py` only
+for CGNS files.
+
+**2. Run it:**
+
+```bash
+git clone https://github.com/<you>/MeshViewer.git
+cd MeshViewer
+python mesh_viewer.py path/to/file.step
+```
+
+**Optional: a small app in /Applications that uses your Python.** It gives
+you the Dock icon and double-click-to-open, but only weighs a few MB because it
+uses your installed packages. This needs Python 3.12 or 3.13 from Homebrew or
+python.org:
+
+```bash
+python3.13 -m venv --system-site-packages .venv   # reuse your packages
+./build_app.sh                                    # quick build, no re-download
+```
+
+Keep the MeshViewer folder where it is: this app runs the code from it.
 
 ## Using it
 
