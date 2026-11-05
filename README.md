@@ -1,7 +1,7 @@
 # Mesh Viewer
 
-A fast, native-feeling macOS viewer for **CFD meshes** (CGNS, UGRID) and **CAD
-files** (STEP, IGES, BREP, STL, …). Double-click a file and inspect it: show or
+A fast, native-feeling macOS viewer for **CAD files** (STEP, IGES, BREP, STL, …)
+and **CFD meshes** (CGNS, UGRID). Double-click a file and inspect it: show or
 hide parts, cut it with a section plane, measure distances, areas and volumes,
 and export clean screenshots.
 
@@ -11,6 +11,16 @@ and export clean screenshots.
   <img src="docs/screenshots/measure_dark.png" width="49%" alt="Distance measurement in dark mode">
   <img src="docs/screenshots/section_light.png" width="49%" alt="Section plane">
 </p>
+
+## Small Disclamer
+
+I just wanted to make it clear here: I am a mechanical engineer. I have studied
+physics and mechanical engineering, not software engineering. Therefore yes, this
+program has entirely been made using Claude Opus 5.5. I was tired of not having
+a quick and simple way to preview my CAD/mesh files on my MacBook, so I 'made' this
+program. I chose each functionalities it should have, but I didn't implement them
+myself. I am sharing this work as I liked how it ended up looking and felt like
+others could benefit from it.
 
 ## Features
 
