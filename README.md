@@ -5,7 +5,7 @@ files** (STEP, IGES, BREP, STL, …). Double-click a file and inspect it: show o
 hide parts, cut it with a section plane, measure distances, areas and volumes,
 and export clean screenshots.
 
-![Mesh Viewer: a STEP assembly with its parts list](docs/screenshots/main_light.png)
+![Mesh Viewer: a STEP assembly with its parts list](docs/screenshots/main_dark.png)
 
 <p align="center">
   <img src="docs/screenshots/measure_dark.png" width="49%" alt="Distance measurement in dark mode">
