@@ -12,7 +12,7 @@ and export clean screenshots.
   <img src="docs/screenshots/section_light.png" width="49%" alt="Section plane">
 </p>
 
-## Small Disclamer
+## Small AI Disclamer
 
 I just wanted to make it clear here: I am a mechanical engineer. I have studied
 physics and mechanical engineering, not software engineering. Therefore yes, this
@@ -27,7 +27,7 @@ others could benefit from it.
 - **Meshes and CAD in one app**: CGNS and FUN3D/AFLR3 UGRID meshes with their
   named boundaries, and CAD files read with OpenCASCADE, with an adjustable mesh
   quality for STEP/IGES/BREP.
-- **Parts list**: groups similar names into fold-out rows, has a filter, and
+- **McMaster Parts list**: groups similar names into fold-out rows, has a filter, and
   checkboxes to show or hide parts. McMaster-Carr parts are collected at the top,
   and right-clicking one gives **Search in McMaster**.
 - **Section plane**: set its origin and normal, slide it, flip it, or drag it in
