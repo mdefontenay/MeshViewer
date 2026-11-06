@@ -1,7 +1,7 @@
-"""Appearance sheet = HOW things look, the same in every window (v2.25 groups):
+"""Appearance sheet = HOW things look, the same in every window (v2.8.2 groups):
     Window      theme, parts list spacing
     Background  default gradient, a colour, or an image
-    Model       shading (v2.27: light and shadow, or flat colours)
+    Model       shading (v2.8.4: light and shadow, or flat colours)
     Axes        label size
     Edges       line thickness, hide while the view moves
 WHAT is shown (axes, grid, edges, faces…) is switched on / off in the
@@ -88,7 +88,7 @@ class AppearanceDialog(QDialog):
         form.setHorizontalSpacing(12)
         form.setVerticalSpacing(10)
 
-        # v2.25: groups named after what they style (the toolbar has the on / off toggles).
+        # v2.8.2: groups named after what they style (the toolbar has the on / off toggles).
         # ---- Window ------------------------------------------------------------------
         form.addRow(_group_title("Window"))
         self.theme, w = _segmented(self, (("system", "System"), ("light", "Light"),
@@ -140,7 +140,7 @@ class AppearanceDialog(QDialog):
         fl.addWidget(self.axis_font)
         fl.addWidget(self.axis_font_value)
         fl.addStretch(1)
-        # ---- Model (v2.27) -------------------------------------------------------------
+        # ---- Model (v2.8.4) -------------------------------------------------------------
         form.addRow(_separator())
         form.addRow(_group_title("Model"))
         self.shading = Switch(bool(a["shading"]))

@@ -1,5 +1,6 @@
-"""Side panel: Mesh quality (STEP) · Section · Edit · Measure · Boundaries/Parts.
-(v2.28: Display moved to toolbar toggles.)
+"""Side panel: Info · Mesh quality (STEP) · Section · Edit · Measure · CFD mode (CAD,
+v2.11) · Cell quality (meshes) · CFD (meshes, v2.10) · Boundaries/Parts.
+(v2.8.5: Display moved to toolbar toggles.)
 
 Talks only to a Scene. Selection works both ways: click a part in the 3D
 view -> it is selected in the list; select it in the list -> highlighted in 3D.
@@ -16,7 +17,11 @@ from PySide6.QtWidgets import (
 from .scene import Scene
 from .icons import icon
 from .edit_panel import EditPanel
+from .cfd_panel import CfdPanel
+from .inflation_panel import InflationPanel
+from .info_panel import InfoPanel
 from .measure_panel import MeasurePanel
+from .quality_panel import QualityPanel
 from .section_panel import SectionPanel
 from .part_tree import PartTree, mcmaster_number
 from .widgets import CollapsibleSection, Menu, NoWheelSlider
@@ -35,9 +40,9 @@ def _divider():
 
 class Sidebar(QWidget):
     quality_requested = Signal(int)     # window re-tessellates in the background
-    renamed = Signal()                  # v2.26: a part was renamed (window: unsaved dot)
+    renamed = Signal()                  # v2.8.3: a part was renamed (window: unsaved dot)
 
-    # (v2.28: the Display section is gone — its switches are toolbar toggles now)
+    # (v2.8.5: the Display section is gone — its switches are toolbar toggles now)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -51,6 +56,16 @@ class Sidebar(QWidget):
         lay.setContentsMargins(14, 10, 12, 10)
         lay.setSpacing(8)
         self._lay = lay
+
+        # ---- Info: what's in the file (v2.9; v2.10 first, remembered open / closed) --
+        self.info_panel = InfoPanel()
+        # v2.11.1: always starts closed
+        self.info_section = CollapsibleSection("Info", self.info_panel, "info",
+                                               remember=False, start_open=False)
+        self.info_section.toggled.connect(self.info_panel.activate)
+        self.info_panel.activate(self.info_section.expanded)
+        lay.addWidget(self.info_section)
+        lay.addWidget(_divider())
 
         # ---- Mesh quality (STEP only) -------------------------------------
         quality = QWidget()
@@ -93,11 +108,11 @@ class Sidebar(QWidget):
                                                   trailing=self.section_panel.enable,
                                                   remember=False, start_open=False)
         lay.addWidget(self.section_section)
-        # Switching the section on opens its controls (v2.16); off closes them (v2.25)
+        # Switching the section on opens its controls (v2.5.5); off closes them (v2.8.2)
         self.section_panel.enable.toggled.connect(self.section_section.set_expanded)
         lay.addWidget(_divider())
 
-        # ---- Edit: rotate / mirror / move (v2.24: always here, starts closed) ----
+        # ---- Edit: rotate / mirror / move (v2.8.1: always here, starts closed) ----
         self.edit_panel = EditPanel()
         self.edit_section = CollapsibleSection("Edit", self.edit_panel, "edit",
                                                remember=False, start_open=False)
@@ -112,6 +127,49 @@ class Sidebar(QWidget):
         lay.addWidget(self.measure_section)
         lay.addWidget(_divider())
 
+        # ---- NEW (v2.11): CFD mode — inflation layer calculator (CAD files only) ------
+        self.inflation_panel = InflationPanel()
+        self.inflation_section = CollapsibleSection(
+            "CFD mode", self.inflation_panel, "cfdmode", trailing=self.inflation_panel.enable,
+            remember=False, start_open=False)
+        self.inflation_panel.enable.toggled.connect(self.inflation_section.set_expanded)
+        self.inflation_box = QWidget()             # section + divider, hidden for meshes
+        ib = QVBoxLayout(self.inflation_box)
+        ib.setContentsMargins(0, 0, 0, 0)
+        ib.setSpacing(8)
+        ib.addWidget(self.inflation_section)
+        ib.addWidget(_divider())
+        lay.addWidget(self.inflation_box)
+
+        # ---- NEW (v2.9): Cell quality (mesh files only) ---------------------------
+        self.cell_panel = QualityPanel()
+        self.cell_section = CollapsibleSection("Cell quality", self.cell_panel, "cells",
+                                               remember=False, start_open=False)
+        self.cell_section.toggled.connect(self.cell_panel.activate)
+        self.cell_panel.wants_section.connect(self._section_for_colors)
+        self.cell_box = QWidget()                  # section + divider, hidden for CAD
+        cb = QVBoxLayout(self.cell_box)
+        cb.setContentsMargins(0, 0, 0, 0)
+        cb.setSpacing(8)
+        cb.addWidget(self.cell_section)
+        cb.addWidget(_divider())
+        lay.addWidget(self.cell_box)
+        self.cell_panel.computed.connect(self.info_panel.refresh)    # volume row
+
+        # ---- NEW (v2.10): CFD — y+ estimate, flow vectors ----------------------------
+        self.cfd_panel = CfdPanel()
+        self.cfd_section = CollapsibleSection("CFD", self.cfd_panel, "cfd",
+                                              remember=False, start_open=False)
+        self.cfd_section.toggled.connect(self.cfd_panel.activate)
+        self.cfd_panel.measured.connect(self.info_panel.refresh)     # volume row
+        self.cfd_box = QWidget()                   # section + divider, meshes only (v2.11)
+        fb = QVBoxLayout(self.cfd_box)
+        fb.setContentsMargins(0, 0, 0, 0)
+        fb.setSpacing(8)
+        fb.addWidget(self.cfd_section)
+        fb.addWidget(_divider())
+        lay.addWidget(self.cfd_box)
+
         # ---- Boundaries / Parts -----------------------------------------
         parts = QWidget()
         pl = QVBoxLayout(parts)
@@ -124,7 +182,7 @@ class Sidebar(QWidget):
         self.filter.textChanged.connect(self._apply_filter)
         pl.addWidget(self.filter)
 
-        # "3 parts selected · Clear" — NEW (v2.10): always shown (greyed at 0), so
+        # "3 parts selected · Clear" — NEW (v2.4.2): always shown (greyed at 0), so
         # selecting something no longer pushes the list down.
         self.sel_bar = QWidget()
         self.sel_bar.setObjectName("SelectionBar")
@@ -189,8 +247,17 @@ class Sidebar(QWidget):
         self.scene = scene
         scene.on_pick = self.show_selection
         self.section_panel.bind(scene.section)
+        self.section_section.set_expanded(scene.section.enabled)    # v2.9: restored on
         self.edit_panel.bind(scene)
         self.measure_panel.bind(scene)
+        self.cell_box.setVisible(scene.model.kind == "mesh")         # v2.9
+        self.cell_panel.bind(scene)
+        self.info_panel.bind(scene)
+        self.cfd_panel.bind(scene)                                    # v2.10
+        self.cfd_box.setVisible(not scene.model.is_cad)               # v2.11: meshes
+        self.inflation_box.setVisible(scene.model.is_cad)             # v2.11: CAD
+        self.inflation_panel.bind(scene)
+        self.inflation_section.set_expanded(self.inflation_panel.enabled)
 
         m = scene.model
         self.quality_box.setVisible(scene.can_retessellate)
@@ -209,6 +276,7 @@ class Sidebar(QWidget):
             f"{m.group_title}  ({len(scene.names)})")
         self.list.populate(scene)
         self.list.set_selected(scene.selected_parts)
+        self.cfd_panel.refresh_names()                 # v2.10: boundary list (renames)
         self._apply_filter(self.filter.text())
 
         n_faces = sum(p.n_cells for p in m.parts.values())
@@ -319,11 +387,11 @@ class Sidebar(QWidget):
             menu.addAction(f"Hide{what}", lambda: self._visibility_changed(names, False))
             menu.addAction(f"Isolate{what}", lambda: self._isolate(names))
             menu.addAction("Zoom To", lambda: self.scene.zoom_to(names))
-            if len(names) == 1 and clicked == names:           # v2.26
+            if len(names) == 1 and clicked == names:           # v2.8.3
                 menu.addAction("Rename…", lambda: self.rename(names[0]))
-            menu.addAction("Colour…", lambda: self.choose_color(names))           # v2.29
+            menu.addAction("Colour…", lambda: self.choose_color(names))           # v2.8.6
             # McMaster-Carr parts -> open their catalogue page
-            # NEW (v2.11): only the part / group that was right-clicked, not the selection
+            # NEW (v2.4.3): only the part / group that was right-clicked, not the selection
             numbers = sorted({mcmaster_number(n) for n in clicked} - {None})
             if len(numbers) == 1:
                 menu.addSeparator()
@@ -342,7 +410,15 @@ class Sidebar(QWidget):
         menu.exec(global_pos)
         self.scene.end_stuck_drag()            # no zoom mode left behind
 
-    # ---- NEW (v2.29): part colour ------------------------------------------------------
+    def _section_for_colors(self):
+        """Colour by quality on a volume mesh: the colours show on the cut."""
+        sp = self.section_panel
+        if not sp.enable.isChecked():
+            sp.enable.setChecked(True)
+        if not sp.fill.isChecked():
+            sp.fill.setChecked(True)
+
+    # ---- NEW (v2.8.6): part colour ------------------------------------------------------
     def choose_color(self, names):
         if not self.scene or not names:
             return
@@ -355,8 +431,9 @@ class Sidebar(QWidget):
         self.scene.set_color(names, c.name())
         for n in names:
             self.list.set_color(n, self.scene.colors[n])
+        self.cfd_panel.refresh_colors()                # v2.11.4: Boundary menu dots
 
-    # ---- NEW (v2.26): rename a part ---------------------------------------------------
+    # ---- NEW (v2.8.3): rename a part ---------------------------------------------------
     def rename(self, name):
         """Edit the name in the list (or, with the sidebar hidden, in a small dialog)."""
         if not self.scene:

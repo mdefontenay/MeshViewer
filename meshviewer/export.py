@@ -1,4 +1,4 @@
-"""NEW (v2.23): save the open model (with its edits) in another format. No Qt.
+"""NEW (v2.8): save the open model (with its edits) in another format. No Qt.
 
     export(fmt, path, parts, volume=None)
 
@@ -7,8 +7,8 @@ volume: pv.UnstructuredGrid of the volume cells (mesh files), or None.
 
     stl        binary STL, everything merged (what most tools want)
     stl_ascii  text STL, one named "solid" per part (keeps the names)
-    obj        OBJ, one group per part
-    ply        binary PLY, everything merged
+    obj        OBJ, one group per part (+ .mtl with the part colours, v2.9)
+    ply        binary PLY, everything merged, a colour per face (v2.9)
     vtu        VTK unstructured grid: volume cells + boundary faces, with a
                "part" number per cell (0 = volume) — opens in ParaView
     ugrid      FUN3D / AFLR3 UGRID (.lb8.ugrid) + .mapbc with the boundary names
@@ -19,14 +19,15 @@ from pathlib import Path
 
 import numpy as np
 import pyvista as pv
-from vtkmodules.util.numpy_support import vtk_to_numpy
 from vtkmodules.vtkFiltersCore import vtkAppendFilter, vtkAppendPolyData
+
+from .polys import faces_by_size
 
 FORMATS = {   # key: (menu text, file extension)
     "stl": ("STL — binary, all parts merged", ".stl"),
     "stl_ascii": ("STL — text, one named solid per part", ".stl"),
-    "obj": ("OBJ — one group per part", ".obj"),
-    "ply": ("PLY — binary, all parts merged", ".ply"),
+    "obj": ("OBJ — one group per part, with colours", ".obj"),
+    "ply": ("PLY — binary, merged, with colours", ".ply"),
     "vtu": ("VTU — volume + boundaries (ParaView)", ".vtu"),
     "ugrid": ("UGRID + .mapbc — FUN3D / AFLR3", ".lb8.ugrid"),
 }
@@ -42,13 +43,24 @@ def available(kind: str, exact_cad: bool):
     return keys
 
 
-def export(fmt: str, path, parts: dict, volume=None):
+def export(fmt: str, path, parts: dict, volume=None, colors=None):
+    """colors (v2.9): {part name: "#rrggbb"} — written by OBJ (.mtl beside it)
+    and PLY (a colour per face); the other formats have no colours."""
     path = Path(path)
     if not parts:
         raise ValueError("nothing to export (no visible parts)")
-    {"stl": _stl_binary, "stl_ascii": _stl_ascii, "obj": _obj, "ply": _ply,
-     "vtu": _vtu, "ugrid": _ugrid}[fmt](path, parts, volume)
+    writer = {"stl": _stl_binary, "stl_ascii": _stl_ascii, "obj": _obj, "ply": _ply,
+              "vtu": _vtu, "ugrid": _ugrid}[fmt]
+    if fmt in ("obj", "ply"):
+        writer(path, parts, volume, colors or {})
+    else:
+        writer(path, parts, volume)
     return path
+
+
+def _rgb(hex_color):
+    h = str(hex_color).lstrip("#")
+    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4)) if len(h) >= 6 else (190, 190, 190)
 
 
 # ---- helpers ------------------------------------------------------------------------
@@ -66,17 +78,6 @@ def _merged(parts):
     return pv.wrap(app.GetOutput())
 
 
-def _faces_by_size(poly):
-    """{n vertices: (m, n) int array} for the polygons of a surface (vectorised)."""
-    polys = poly.GetPolys()
-    if polys is None or polys.GetNumberOfCells() == 0:
-        return {}
-    off = vtk_to_numpy(polys.GetOffsetsArray()).astype(np.int64)
-    conn = vtk_to_numpy(polys.GetConnectivityArray()).astype(np.int64)
-    n, start = np.diff(off), off[:-1]
-    return {int(k): conn[start[n == k][:, None] + np.arange(k)] for k in np.unique(n)}
-
-
 # ---- writers ------------------------------------------------------------------------
 def _stl_binary(path, parts, volume):
     _merged(parts).triangulate().save(str(path), binary=True)
@@ -91,7 +92,7 @@ def _stl_ascii(path, parts, volume):
             tri = _plain(poly).triangulate()
             solid = "".join(c if c.isprintable() and not c.isspace() else "_" for c in name)
             f.write(f"solid {solid}\n")
-            t = _faces_by_size(tri).get(3)
+            t = faces_by_size(tri).get(3)
             if t is not None and len(t):
                 p = np.asarray(tri.points, dtype=float)
                 a, b, c = p[t[:, 0]], p[t[:, 1]], p[t[:, 2]]
@@ -101,28 +102,43 @@ def _stl_ascii(path, parts, volume):
             f.write(f"endsolid {solid}\n")
 
 
-def _obj(path, parts, volume):
-    with open(path, "w") as f:
+def _obj(path, parts, volume, colors):
+    mtl = path.with_suffix(".mtl")
+    with open(mtl, "w") as f:                     # v2.9: one material (colour) per part
         f.write("# Mesh Viewer export\n")
+        for i, name in enumerate(parts):
+            r, g, b = (c / 255 for c in _rgb(colors.get(name, "#bebebe")))
+            f.write(f"newmtl part{i}\nKd {r:.4f} {g:.4f} {b:.4f}\n"
+                    f"Ka 0 0 0\nKs 0.1 0.1 0.1\nNs 20\nd 1\n\n")
+    with open(path, "w") as f:
+        f.write(f"# Mesh Viewer export\nmtllib {mtl.name}\n")
         base = 1
-        for name, poly in parts.items():
+        for i, (name, poly) in enumerate(parts.items()):
             p = np.asarray(poly.points, dtype=float)
-            f.write(f"o {name}\ng {name}\n")
+            f.write(f"o {name}\ng {name}\nusemtl part{i}\n")
             np.savetxt(f, p, fmt="v %.9g %.9g %.9g")
-            for k, arr in _faces_by_size(poly).items():
+            for k, arr in faces_by_size(poly).items():
                 np.savetxt(f, arr + base, fmt="f" + " %d" * k)
             base += len(p)
 
 
-def _ply(path, parts, volume):
-    _merged(parts).save(str(path), binary=True)
+def _ply(path, parts, volume, colors):
+    """Binary PLY, everything merged, a colour per face (v2.9)."""
+    app = vtkAppendPolyData()
+    for name, poly in parts.items():
+        s = _plain(poly)
+        s.cell_data["RGB"] = np.tile(np.array(_rgb(colors.get(name, "#bebebe")), np.uint8),
+                                     (s.n_cells, 1))
+        app.AddInputData(s)
+    app.Update()
+    pv.wrap(app.GetOutput()).save(str(path), binary=True, texture="RGB")
 
 
 def _vtu(path, parts, volume):
     app = vtkAppendFilter()
     app.MergePointsOn()                       # boundaries share the volume's nodes
     if volume is not None:
-        v = volume.copy(deep=False)
+        v = pv.UnstructuredGrid(volume.cells, volume.celltypes, volume.points)  # no extra arrays
         v.cell_data["part"] = np.zeros(v.n_cells, dtype=np.int32)
         app.AddInputData(v)
     for i, poly in enumerate(parts.values(), start=1):
@@ -142,7 +158,7 @@ def _ugrid(path, parts, volume):
     surfs = []
     for poly in parts.values():
         s = _plain(poly)
-        if any(k > 4 for k in _faces_by_size(s)):
+        if any(k > 4 for k in faces_by_size(s)):
             s = s.triangulate()                # UGRID boundaries: triangles and quads only
         surfs.append(s)
     # One shared node list: the volume's nodes first, then any boundary node not
@@ -165,7 +181,7 @@ def _ugrid(path, parts, volume):
     for tag, (s, sp) in enumerate(zip(surfs, surf_pts), start=1):
         ids = gid[off: off + len(sp)]
         off += len(sp)
-        by = _faces_by_size(s)
+        by = faces_by_size(s)
         if 3 in by:
             tris.append(ids[by[3]])
             ttag.append(np.full(len(by[3]), tag))

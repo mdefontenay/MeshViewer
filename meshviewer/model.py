@@ -24,10 +24,10 @@ class Model:
     # Exact CAD geometry (STEP/IGES/BREP) for exact area / volume, else None.
     source: Optional[object] = None
     units: str = ""                 # "mm" when the reader converts to millimetres
-    # NEW (v2.19), meshes only: reads the 3D cells on demand (-> pv.UnstructuredGrid
+    # NEW (v2.7), meshes only: reads the 3D cells on demand (-> pv.UnstructuredGrid
     # or None) for the section's "Show cut mesh". None = format without volume cells.
     volume: Optional[Callable[[], object]] = None
-    # Edit section: rotations / mirrors (3×3 integers) and move (v2.24) applied so
+    # Edit section: rotations / mirrors (3×3 integers) and move (v2.8.1) applied so
     # far — new point = transform @ original + offset. Parts are moved in memory;
     # Export saves the result.
     transform: np.ndarray = field(default_factory=lambda: np.eye(3))

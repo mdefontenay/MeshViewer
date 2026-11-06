@@ -1,4 +1,4 @@
-"""NEW (v2.23): Export sheet — pick the file format (only those that fit the
+"""NEW (v2.8): Export sheet — pick the file format (only those that fit the
 open file), whether hidden parts are left out, then where to save."""
 from __future__ import annotations
 
@@ -82,6 +82,10 @@ class ExportDialog(QDialog):
                     if self.has_volume else "Boundaries only (this file has no volume cells).")
             if k == "ugrid":
                 text += " Boundary names go in the .mapbc beside it (BC types set to 0)."
+        elif k == "obj":
+            text = "Surfaces only. Part colours go in the .mtl beside it."
+        elif k == "ply":
+            text = "Surfaces only, with the part colours."
         else:
             text = "Surfaces only."
         done = [w for w, on in (("edits", self.edited), ("new part names", self.renamed)) if on]

@@ -12,7 +12,7 @@ LIGHT = dict(
     text="#1d1d1f", secondary="#6e6e73", sidebar="#ebebee", divider="rgba(0,0,0,0.10)",
     capsule="rgba(0,0,0,0.045)", capsule_border="rgba(0,0,0,0.08)",
     hover="rgba(0,0,0,0.07)", pressed="rgba(0,0,0,0.13)",
-    field="#ffffff", field_border="rgba(0,0,0,0.15)", field_solid="#ffffff",
+    field="#ffffff", field_border="rgba(0,0,0,0.15)", field_solid="#ffffff", page="#f5f5f7",
     menu="rgba(246,246,246,0.98)", menu_border="rgba(0,0,0,0.12)",
 )
 DARK = dict(
@@ -20,6 +20,7 @@ DARK = dict(
     capsule="rgba(255,255,255,0.07)", capsule_border="rgba(255,255,255,0.10)",
     hover="rgba(255,255,255,0.10)", pressed="rgba(255,255,255,0.17)",
     field="rgba(255,255,255,0.06)", field_border="rgba(255,255,255,0.14)", field_solid="#1e1e20",
+    page="#1c1c1e",
     menu="rgba(40,40,42,0.98)", menu_border="rgba(255,255,255,0.14)",
 )
 
@@ -88,19 +89,37 @@ QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
 QToolBar {{ spacing: 8px; padding: 3px 8px; border: none; }}
 
 /* ---- right-click menu: roomy and rounded, like macOS ---- */
-/* v2.25: choice button that opens the right-click-style menu (widgets.MenuSelect) */
+/* v2.8.2: choice button that opens the right-click-style menu (widgets.MenuSelect) */
 #MenuSelect {{
     background: {field}; border: 1px solid {field_border}; border-radius: 6px;
     padding: 3px 28px 3px 10px; text-align: left; color: {text}; min-height: 18px;
 }}
 #MenuSelect:hover {{ border-color: {accent}; }}
-/* v2.27: Edit ▸ Apply, the list of changes, renaming a part in the list (an
+/* v2.8.4: Edit ▸ Apply, the list of changes, renaming a part in the list (an
    opaque field: a see-through one showed the old name under the new one) */
 #ApplyButton {{ background: {accent}; color: white; border: none; border-radius: 6px;
     padding: 4px 10px; min-height: 18px; font-weight: 600; }}
 #ApplyButton:hover {{ background: {accent}; border: 1px solid rgba(255,255,255,0.35); }}
 #ApplyButton:pressed {{ background: {pressed}; }}
 #HistoryLine {{ color: {text}; font-size: 12px; }}
+/* v2.10: "?" links to a web page, number boxes with a typo */
+#HelpButton {{ color: {secondary}; background: transparent; border: 1px solid {field_border};
+    border-radius: 8px; font-size: 10px; font-weight: 600; padding: 0; }}
+#HelpButton:hover {{ color: {accent}; border-color: {accent}; }}
+QLineEdit[invalid="true"] {{ border: 1px solid #ff453a; }}
+QLineEdit:disabled {{ color: {secondary}; background: {capsule}; border-color: {capsule_border}; }}
+/* v2.11: CFD mode — the Inflation page and the bar under the 3D view */
+#InflationView, #InflationPage {{ background: {page}; border: none; }}
+#PageTitle {{ color: {text}; font-size: 17px; font-weight: 700; }}
+#TileValue {{ color: {text}; font-size: 17px; font-weight: 600; }}
+#ViewBar {{ background: {page}; border-top: 1px solid {divider}; }}
+/* v2.11.1: sub-groups in a section, the "Values" pop-up */
+#SubHeader {{ color: {text}; font-size: 12px; font-weight: 600; }}
+#ValuesBody {{ background: {menu}; border: 1px solid {menu_border}; border-radius: 10px; }}
+#ValuesBody QLabel {{ background: transparent; }}
+#FormulasScroll, #FormulasInner {{ background: transparent; }}
+#ValueText {{ color: {text}; font-weight: 600; }}
+#SmallNote {{ color: {secondary}; font-size: 12px; }}
 #RenameField {{ background: {field_solid}; color: {text}; border: 1px solid {accent};
     border-radius: 4px; padding: 0px 3px; selection-background-color: {accent};
     selection-color: white; }}

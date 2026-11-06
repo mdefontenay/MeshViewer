@@ -3,6 +3,10 @@
 Distance  — click two points on the model (or on a section cut face).
             Gives ΔX, ΔY, ΔZ and the straight-line (minimum) distance.
 Area      — of the selected parts / boundaries, or of selected CAD faces.
+Point     — (v2.9) a clicked point measured from the origin (0, 0, 0): its
+            coordinates and distance (drawn like Distance, v2.10), and its
+            distance to the section plane when the section is on.
+Angle     — (v2.9) click two faces: the angle between them (their planes).
 Volume    — when the selection encloses a volume (one closed solid, or several
             surfaces that together close up, e.g. wing skins + tip + root).
 
@@ -70,10 +74,11 @@ class Measure:
     def __init__(self, scene):
         self.scene = scene
         self.p = scene.p
-        self.mode = "off"            # "off" | "distance" | "area"
+        self.mode = "off"            # "off" | "distance" | "point" | "angle" | "area"
         self.pick_faces = False      # area mode on CAD: pick single CAD faces
         self.snap = False            # distance: snap to the nearest mesh vertex
         self.points = []             # up to 2 picked 3D points
+        self.normals = []            # angle: the faces' normals at those points
         self.display_unit = scene.model.units or None   # unit chosen in the toolbar
         self.on_changed = None       # UI hook: called with self.result()
         self._overlay = None
@@ -83,6 +88,7 @@ class Measure:
     def set_mode(self, mode):
         self.mode = mode
         self.points = []
+        self.normals = []
         if mode != "area":
             self.scene.clear_face_selection(render=False)
         self._draw()
@@ -95,14 +101,16 @@ class Measure:
         self._changed()
 
     def forget_points(self):
-        """NEW (v2.23): drop picked distance points (the model moved), keep the selection."""
+        """NEW (v2.8): drop picked distance points (the model moved), keep the selection."""
         if self.points:
             self.points = []
+            self.normals = []
             self._draw()
             self._changed()
 
     def clear(self):
         self.points = []
+        self.normals = []
         self.scene.clear_face_selection(render=False)
         self.scene.set_selection([], notify=True)
         self._draw()
@@ -118,16 +126,43 @@ class Measure:
             ids = poly.get_cell(cell_id).point_ids
             pts = poly.points[ids]
             pos = pts[np.argmin(np.linalg.norm(pts - pos, axis=1))]
-        if len(self.points) >= 2:
+        keep = 1 if self.mode == "point" else 2
+        if len(self.points) >= keep:
             self.points = []
         self.points.append(pos)
+        self._draw()
+        self._changed()
+
+    # ---- NEW (v2.9): angle between two faces ------------------------------------
+    def add_face(self, pos, name, cell_id):
+        """Angle mode: a click on a face (a triangle / quad of a part), or on a
+        section cut face (its normal is the plane's)."""
+        if pos is None or name is None:
+            return
+        if cell_id is None or cell_id < 0:
+            if not self.scene.section.enabled:
+                return
+            n = np.asarray(self.scene.section.normal, dtype=float)
+        else:
+            pts = np.asarray(self.scene.model.parts[name].get_cell(cell_id).points, dtype=float)
+            if len(pts) < 3:
+                return
+            c = pts.mean(axis=0)
+            n = np.cross(pts - c, np.roll(pts, -1, axis=0) - c).sum(axis=0)   # Newell normal
+        length = np.linalg.norm(n)
+        if length < 1e-300:
+            return
+        if len(self.points) >= 2:
+            self.points, self.normals = [], []
+        self.points.append(np.asarray(pos, dtype=float))
+        self.normals.append(n / length)
         self._draw()
         self._changed()
 
     # ---- units -----------------------------------------------------------------
     def set_display_unit(self, unit):
         self.display_unit = unit if unit in UNITS else None
-        self.scene.refresh_grid(render=False)       # NEW (v2.17): axis numbers + "(unit)"
+        self.scene.refresh_grid(render=False)       # NEW (v2.5.6): axis numbers + "(unit)"
         self._draw()
         self._changed()
 
@@ -153,6 +188,23 @@ class Measure:
                 d = d * s
                 r.update(dx=float(d[0]), dy=float(d[1]), dz=float(d[2]),
                          distance=float(np.linalg.norm(d)))
+            return r
+        if self.mode == "point":          # v2.10: measured from the origin
+            r = {"mode": "point", **base}
+            if self.points:
+                p = self.points[0]
+                r["xyz"] = (p * s).tolist()
+                r["distance"] = float(np.linalg.norm(p)) * s
+                sec = self.scene.section
+                if sec.enabled:
+                    r["to_plane"] = float(np.dot(p - sec.origin, sec.normal)) * s
+            return r
+        if self.mode == "angle":
+            r = {"mode": "angle", **base, "n": len(self.normals)}
+            if len(self.normals) == 2:
+                c = float(np.clip(np.dot(*self.normals), -1, 1))
+                r["normals"] = float(np.degrees(np.arccos(c)))
+                r["planes"] = float(np.degrees(np.arccos(abs(c))))
             return r
         if self.mode == "area":
             r = {"mode": "area", **base, **self._area_volume()}
@@ -230,7 +282,7 @@ class Measure:
 
     # ---- screenshots: show the same markers in an off-screen window -----------
     def add_to(self, ren_win, camera, k, clone=lambda a: a):
-        actors = [*self._marker_actors, *self.scene.origin_actors()]   # v2.18: + origin
+        actors = [*self._marker_actors, *self.scene.origin_actors()]   # v2.6: + origin
         if not actors:
             return
         ren_win.SetNumberOfLayers(3)
@@ -303,29 +355,40 @@ class Measure:
         self._marker_actors.append(a)
         return a
 
+    def _dots(self, pts):
+        dots = self._add(pv.PolyData(np.array(pts, dtype=float)), POINT_GRAY)
+        dots.GetProperty().SetRepresentationToPoints()
+        dots.GetProperty().SetPointSize(POINT_PX)
+        dots.GetProperty().SetRenderPointsAsSpheres(True)
+
     def _draw(self):
         if self._marker_actors:
             for a in self._marker_actors:
                 self._layer().RemoveActor(a)
                 self._layer(text=True).RemoveActor(a)
         self._marker_actors = []
-        if self.mode == "distance" and self.points:
-            if len(self.points) == 2:
-                a, b = self.points
+        if self.mode == "angle" and self.points:      # dots + short normal lines
+            size = self.scene.section.diag * 0.06
+            for p, n in zip(self.points, self.normals):
+                self._add(pv.Line(p, p + n * size), AXIS_COLORS[2], 2.5, lit=False)
+            self._dots(self.points)
+        # v2.10: Point = a distance from the origin (0, 0, 0) to the clicked point
+        pts = [np.zeros(3), self.points[0]] if self.mode == "point" and self.points \
+            else self.points
+        if self.mode in ("distance", "point") and pts:
+            if len(pts) == 2:
+                a, b = pts
                 self._add(pv.Line(a, b), LINE_GRAY, 3.0, lit=False)
                 corner1, corner2 = np.array([b[0], a[1], a[2]]), np.array([b[0], b[1], a[2]])
                 for (p0, p1), c in zip(((a, corner1), (corner1, corner2), (corner2, b)),
                                        AXIS_COLORS):
                     if np.linalg.norm(p1 - p0) > 1e-12:
-                        self._add(pv.Line(p0, p1), c, 2.5, lit=False)   # v2.16: was 1.5
-            # NEW (v2.16): picked points are screen-size dots (fixed pixels), not
+                        self._add(pv.Line(p0, p1), c, 2.5, lit=False)   # v2.5.5: was 1.5
+            # NEW (v2.5.5): picked points are screen-size dots (fixed pixels), not
             # spheres in model units that grew huge when zooming in. Drawn last = on top.
-            dots = self._add(pv.PolyData(np.array(self.points, dtype=float)), POINT_GRAY)
-            dots.GetProperty().SetRepresentationToPoints()
-            dots.GetProperty().SetPointSize(POINT_PX)
-            dots.GetProperty().SetRenderPointsAsSpheres(True)
-            if len(self.points) == 2:
-                a, b = self.points
+            self._dots(pts)
+            if len(pts) == 2:
+                a, b = pts
                 label = vtkBillboardTextActor3D()
                 s, unit = self.unit_scale()
                 label.SetInput(" " + fmt(float(np.linalg.norm(b - a)) * s, unit) + " ")

@@ -33,7 +33,7 @@ class Section:
         self.p = scene.p
         self.enabled = False
         self.fill = scene.model.is_cad     # closed CAD solids: fill; CFD boxes: outline only
-        # NEW (v2.19): meshes with volume cells show the cut cells instead of a fill
+        # NEW (v2.7): meshes with volume cells show the cut cells instead of a fill
         self.has_volume = scene.model.volume is not None
         self._volume = None                # pv.UnstructuredGrid once loaded, False if none
         self._volume_orig = None           # as read from the file (Edit recomputes from it)
@@ -47,13 +47,14 @@ class Section:
         self._cap_part = None              # cap cell -> index into scene.names
         self._outline = None               # one actor with all cut lines
         self._widget = None
-        self._handles = []                 # widget sphere / cones, sized per frame (v2.21)
+        self._handles = []                 # widget sphere / cones, sized per frame (v2.7.2)
         self._size_obs = None
         self._plate = None                 # our own translucent plane (always drawn)
         self._plate_edge = None
         self.reset_bounds()
         self.origin = self.center.copy()
         self.normal = np.array([1.0, 0.0, 0.0])
+        self.normal_raw = self.normal.copy()   # v2.10: as typed (not rescaled to length 1)
         self._apply_plane()
 
     # ---- geometry helpers ----------------------------------------------
@@ -80,6 +81,7 @@ class Section:
         self.enabled = bool(on)
         for actor in self.scene.clippable_actors():
             self.clip(actor)
+        self._measure_follows()
         self._sync_widget()
         self._sync_plate()
         if caps or not on:
@@ -95,20 +97,28 @@ class Section:
             length = np.linalg.norm(n)
             if length < 1e-12:
                 return                       # (0,0,0) is not a direction: ignore
-            self.normal = n / length
+            self.normal = n / length         # used for cutting (unit length)
+            self.normal_raw = n.copy()       # v2.10: shown as typed
         self._apply_plane()
         self._sync_widget()
+        self._measure_follows()
         if caps:
             self.update_caps()
         else:
             self._hide_caps()                # stale caps would float in the wrong place
             self.p.render()
 
+    def _measure_follows(self):
+        """Measure ▸ Point shows the distance to this plane (v2.9)."""
+        m = getattr(self.scene, "measure", None)
+        if m is not None and m.mode == "point" and m.points:
+            m._changed()
+
     def set_offset(self, d, caps=True):
         self.set_plane(origin=self.center + d * self.normal, caps=caps)
 
     def flip(self):
-        self.set_plane(normal=-self.normal)
+        self.set_plane(normal=-self.normal_raw)
 
     def set_fill(self, on, caps=True):
         self.fill = bool(on)
@@ -151,7 +161,7 @@ class Section:
         outlines, caps = vtkAppendPolyData(), vtkAppendPolyData()
         n_lines = n_caps = 0
         cap_part = []
-        cut_mesh = self.fill and self._cut_volume(plane)     # NEW (v2.19)
+        cut_mesh = self.fill and self._cut_volume(plane)     # NEW (v2.7)
 
         for i in self._parts_touching_plane():
             name = self.scene.names[i]
@@ -188,12 +198,12 @@ class Section:
         self.p.render()
 
     def sync_shading(self):
-        """Filled cut faces follow Appearance ▸ Shading (v2.25)."""
+        """Filled cut faces follow Appearance ▸ Shading (v2.8.2)."""
         if self._caps is not None:
             self._caps.GetProperty().SetLighting(self.scene.state.get("shading", True))
 
     def recolor(self):
-        """Filled cut faces take the parts' current colours (v2.29)."""
+        """Filled cut faces take the parts' current colours (v2.8.6)."""
         if self._caps is None:
             return
         rgb = np.array([_darker(self.scene.colors[n]) for n in self.scene.names]) * 255
@@ -210,13 +220,14 @@ class Section:
     def cap_actors(self):
         return [a for a in (self._caps, self._vol_cut) if a is not None]
 
-    # ---- NEW (v2.19): cut cells of a volume mesh -------------------------------------
+    # ---- NEW (v2.7): cut cells of a volume mesh -------------------------------------
     def volume_grid(self):
         """The volume cells (read the first time, with the Edit-mode rotations /
         mirrors applied), or None for files without them. Also used by Export."""
         if not self.has_volume:
             return None
         if self._volume is None:                       # first time: read the cells
+            print("Reading volume cells …")
             try:
                 self._volume_orig = self.scene.model.volume() or False
                 self._volume = self._volume_orig
@@ -238,6 +249,7 @@ class Section:
         r, t = change
         self.origin = np.asarray(r) @ self.origin + np.asarray(t)
         self.normal = np.asarray(r) @ self.normal
+        self.normal_raw = np.asarray(r) @ self.normal_raw
         self._apply_plane()
         if self._volume:
             m = self.scene.model
@@ -252,15 +264,21 @@ class Section:
         if self._vol_cutter is None:
             self._vol_cutter = vtkPlaneCutter()        # multi-threaded, builds a search tree
             self._vol_cutter.SetInputData(self._volume)
-            self._vol_cutter.InterpolateAttributesOff()
+        # v2.9: Cell quality ▸ Colour by quality -> each cut cell gets its colour
+        rgb = self.scene.quality.rgb
+        colored = rgb is not None and len(rgb) == self._volume.n_cells
+        if colored:
+            self._volume.cell_data["QualityRGB"] = rgb
+        self._vol_cutter.SetInterpolateAttributes(colored)
         self._vol_cutter.SetPlane(plane)
         self._vol_cutter.Update()
         cut = pv.wrap(self._vol_cutter.GetOutput())
         if cut.n_cells:
             t = self.scene.theme_colors()
-            # v2.21: edges look like the model's mesh edges (same colour and width)
+            # v2.7.2: edges look like the model's mesh edges (same colour and width)
+            look = dict(scalars="QualityRGB", rgb=True) if colored else dict(color=t["cut_fill"])
             self._vol_cut = self.p.add_mesh(
-                cut, color=t["cut_fill"], show_edges=True, edge_color=t["edge"],
+                cut, **look, show_edges=True, edge_color=t["edge"],
                 line_width=1, lighting=False, pickable=False, reset_camera=False)
             self.sync_cut_edges()
         return True
@@ -406,7 +424,7 @@ class Section:
             self._widget.GetSelectedPlaneProperty().SetOpacity(0.06)  # visible one
             self._widget.GetEdgesProperty().SetOpacity(0.0)    # VTK draws these red
             self._widget.DrawPlaneOn()
-            self._widget.SetDiagonalRatio(0.2)         # v2.21: shorter normal arrow
+            self._widget.SetDiagonalRatio(0.2)         # v2.7.2: shorter normal arrow
             self._find_handles(before)
         if self._widget is not None:
             if want:
@@ -416,7 +434,7 @@ class Section:
             else:
                 self._widget.Off()
 
-    # ---- NEW (v2.21): handles keep the same size on screen at any zoom -----------------
+    # ---- NEW (v2.7.2): handles keep the same size on screen at any zoom -----------------
     HANDLE_PT = {"vtkSphereSource": 13.0, "vtkConeSource": 16.0}   # size in points
 
     def _renderer_actors(self):
@@ -471,6 +489,7 @@ class Section:
         self.origin = np.asarray(origin, dtype=float)
         n = np.asarray(normal, dtype=float)
         self.normal = n / (np.linalg.norm(n) or 1.0)
+        self.normal_raw = self.normal.copy()          # dragged in 3D: a unit vector
         self._apply_plane()
         self._hide_caps()
         if self.on_widget_moved:

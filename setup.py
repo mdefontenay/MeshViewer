@@ -70,7 +70,8 @@ OPTIONS = {
     # Standalone builds only: copy these packages whole (VTK and PyVista load
     # many modules lazily, which py2app's import scanner would otherwise miss).
     "packages": ["meshviewer", "pyvista", "pyvistaqt", "vtkmodules", "qtpy",
-                 "numpy", "h5py", "OCP", "scooby", "pooch"],
+                 "numpy", "h5py", "OCP", "scooby", "pooch",
+                 "matplotlib"],          # v2.11.3: draws the CFD formulas (mathtext)
     "includes": ["vtk"],
     # Not used by the app (py2app would otherwise pull them in from the venv).
     "excludes": ["tkinter", "pip", "wheel"],

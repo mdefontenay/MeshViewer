@@ -3,14 +3,13 @@ from __future__ import annotations
 
 import subprocess
 import sys
-import traceback
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QRunnable, QSettings, Qt, QThreadPool, QTimer, Signal
+from PySide6.QtCore import QSettings, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QCursor, QKeySequence
 from PySide6.QtWidgets import (
-    QApplication, QFileDialog, QLabel, QMainWindow, QMessageBox, QScrollArea, QSplitter, QStackedWidget,
-    QSizePolicy, QToolBar, QWidget,
+    QApplication, QFileDialog, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QScrollArea,
+    QSizePolicy, QSplitter, QStackedWidget, QToolBar, QVBoxLayout, QWidget,
 )
 from pyvistaqt import QtInteractor
 
@@ -19,41 +18,19 @@ from ..export import available as available_formats
 from ..export import export as write_export
 from ..formats import load, supported_extensions
 from ..model import MissingDependency
+from . import memory
 from .icons import icon
+from .jobs import run_job
 from .scene import Scene
 from .sidebar import Sidebar
 from .style import accent, is_dark
 from .appearance_dialog import AppearanceDialog
 from .export_dialog import ExportDialog
+from .inflation_view import InflationView
 from .screenshot_dialog import ScreenshotDialog
 from .widgets import Capsule
 
 FILE_FILTER = "Meshes and CAD (" + " ".join(f"*{e}" for e in supported_extensions()) + ")"
-
-
-# ---------------------------------------------------------------------------
-# Background loading, so the window stays responsive on big files
-# ---------------------------------------------------------------------------
-
-class _JobSignals(QObject):
-    done = Signal(object)          # result
-    failed = Signal(object)        # Exception
-
-
-class _Job(QRunnable):
-    """Runs fn() on a worker thread; result/exception come back as signals."""
-
-    def __init__(self, fn):
-        super().__init__()
-        self.fn = fn
-        self.signals = _JobSignals()
-
-    def run(self):
-        try:
-            self.signals.done.emit(self.fn())
-        except Exception as exc:       # reported in the window
-            traceback.print_exc()
-            self.signals.failed.emit(exc)
 
 
 def _settings():
@@ -87,10 +64,42 @@ class ViewerWindow(QMainWindow):
         self.stack = QStackedWidget()
         self.stack.addWidget(self.empty)
         self.stack.addWidget(self.plotter)
+        # NEW (v2.11): CFD mode (CAD) — the Inflation page, and a bar under the view
+        # with a pill to switch between the 3D model and that page.
+        self.inflation_view = InflationView()
+        self.stack.addWidget(self.inflation_view)
+        self.view_area = QWidget()
+        va = QVBoxLayout(self.view_area)
+        va.setContentsMargins(0, 0, 0, 0)
+        va.setSpacing(0)
+        va.addWidget(self.stack, 1)
+        self.view_bar = QWidget()
+        self.view_bar.setObjectName("ViewBar")
+        self.view_bar.setAttribute(Qt.WA_StyledBackground, True)
+        vb = QHBoxLayout(self.view_bar)
+        vb.setContentsMargins(10, 6, 10, 6)
+        group = QActionGroup(self)
+        group.setExclusive(True)
+        self.a_page_model = QAction("3D model", self)
+        self.a_page_model.setToolTip("Show the CAD model")
+        self.a_page_cfd = QAction("Inflation layers", self)
+        self.a_page_cfd.setToolTip("Show the inflation layer plots (CFD mode)")
+        for a in (self.a_page_model, self.a_page_cfd):
+            a.setCheckable(True)
+            group.addAction(a)
+        self.a_page_model.setChecked(True)
+        self.a_page_model.triggered.connect(lambda: self._show_page("model"))
+        self.a_page_cfd.triggered.connect(lambda: self._show_page("cfd"))
+        vb.addWidget(Capsule([self.a_page_model, self.a_page_cfd], name="Segmented"))
+        vb.addStretch(1)
+        va.addWidget(self.view_bar)
+        self.view_bar.setVisible(False)
 
         self.sidebar = Sidebar()
         self.sidebar.quality_requested.connect(self._retessellate)
-        self.sidebar.renamed.connect(self._edited_changed)        # v2.26
+        self.sidebar.renamed.connect(self._edited_changed)        # v2.8.3
+        self.sidebar.inflation_panel.mode_toggled.connect(self._cfd_mode)       # v2.11
+        self.sidebar.inflation_panel.changed.connect(self.inflation_view.set_result)
         ep = self.sidebar.edit_panel                                       # Edit section
         ep.edit_requested.connect(self._apply_edit)
         ep.undo_requested.connect(lambda: self._edit_step(lambda s: s.undo_edit()))
@@ -106,7 +115,7 @@ class ViewerWindow(QMainWindow):
         self.side_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.side_scroll.setMinimumWidth(self.sidebar.minimumWidth())
         self.splitter.addWidget(self.side_scroll)
-        self.splitter.addWidget(self.stack)
+        self.splitter.addWidget(self.view_area)
         self.splitter.setStretchFactor(1, 1)
         self.splitter.setSizes([300, 1100])
         self.splitter.setHandleWidth(1)
@@ -155,14 +164,13 @@ class ViewerWindow(QMainWindow):
                 a.setIcon(icon("nounit"))
             self.unit_group.addAction(a)
             self.a_units.append(a)
-        self.unit_group.triggered.connect(
-            lambda a: self.scene and self.scene.measure.set_display_unit(a.data()))
+        self.unit_group.triggered.connect(self._unit_chosen)
         self.a_fit = self._act("Fit", lambda: self.scene and self.scene.fit(), "Ctrl+0")
-        # NEW (v2.22): parallel projection is a toolbar toggle next to the views
+        # NEW (v2.7.3): parallel projection is a toolbar toggle next to the views
         self.a_parallel = self._act("Parallel Projection",
                                     lambda on: self.scene and self.scene.set_parallel(on),
                                     "Ctrl+5", checkable=True)
-        # NEW (v2.28): what is shown, as toolbar toggles (was the sidebar's Display
+        # NEW (v2.8.5): what is shown, as toolbar toggles (was the sidebar's Display
         # section). Edges: one pill; axes, grid, bounding box, origin: another.
         self.a_show = {}
         for key, text, tip in (
@@ -178,7 +186,7 @@ class ViewerWindow(QMainWindow):
             a.setIcon(icon(key))
             a.setToolTip(tip)
             self.a_show[key] = a
-        # Export (v2.23). (Edit lives in the sidebar since v2.24 — no button.)
+        # Export (v2.8). (Edit lives in the sidebar since v2.8.1 — no button.)
         self.a_export = self._act("Export…", self.export_model, "Ctrl+Shift+E")
         self.a_views = [
             self._act("Iso", lambda: self.scene and self.scene.view("iso"), "Ctrl+1"),
@@ -213,7 +221,7 @@ class ViewerWindow(QMainWindow):
         # Groups of related buttons, each in one capsule (macOS 27 toolbar style).
         tb.addWidget(Capsule([self.a_sidebar]))
         tb.addWidget(Capsule([self.a_fit, *self.a_views, self.a_parallel]))
-        s = self.a_show                                # v2.28: what is shown
+        s = self.a_show                                # v2.8.5: what is shown
         tb.addWidget(Capsule([s["mesh_edges"], s["feature_edges"], s["faces"]]))
         tb.addWidget(Capsule([s["axes"], s["grid"], s["bbox"], s["origin"]]))
         tb.addWidget(Capsule(self.a_units))            # measurement units
@@ -221,14 +229,15 @@ class ViewerWindow(QMainWindow):
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         tb.addWidget(spacer)
         # Screenshot, top right. (Section and Measure live in the sidebar.)
-        tb.addWidget(Capsule([self.a_export]))              # v2.23
+        tb.addWidget(Capsule([self.a_export]))              # v2.8
         tb.addWidget(Capsule([self.a_appearance, self.a_shot]))
         self.addToolBar(tb)
 
     def _build_menus(self):
         m = self.menuBar().addMenu("File")
-        m.addAction(self.ctl.about_action(m))     # NEW (v2.15): shown in the app menu on macOS
+        m.addAction(self.ctl.about_action(m))     # NEW (v2.5.4): shown in the app menu on macOS
         m.addAction(self.a_open)
+        self.ctl.add_recent_menu(m)                       # v2.9: Open Recent
         m.addSeparator()
         m.addAction(self.a_export)
         m.addAction(self.a_shot)
@@ -239,7 +248,7 @@ class ViewerWindow(QMainWindow):
         v.addAction(self.a_section)
         v.addAction(self.a_measure)
         v.addSeparator()
-        show = v.addMenu("Show")                      # v2.28: the toolbar toggles
+        show = v.addMenu("Show")                      # v2.8.5: the toolbar toggles
         for k, a in self.a_show.items():
             if k == "axes":
                 show.addSeparator()
@@ -267,7 +276,7 @@ class ViewerWindow(QMainWindow):
     def load(self, path: Path):
         self.path = Path(path)
         self.setWindowFilePath(str(self.path))      # native title + proxy icon
-        self.setWindowTitle(f"{self.path.name}[*]")      # [*]: "edited" marker (v2.23)
+        self.setWindowTitle(f"{self.path.name}[*]")      # [*]: "edited" marker (v2.8)
         self.empty.setText(f"Opening {self.path.name}…")
         QApplication.setOverrideCursor(Qt.WaitCursor)
         path = self.path
@@ -278,16 +287,15 @@ class ViewerWindow(QMainWindow):
         def job():
             print(f"Reading {path} …")
             return load(path, quality=quality)
-        self._job = _Job(job)
-        self._job.signals.done.connect(self._loaded)
-        self._job.signals.failed.connect(self._failed)
-        QThreadPool.globalInstance().start(self._job)
+        self._job = run_job(job, self._loaded, self._failed)
 
     def _loaded(self, model):
         QApplication.restoreOverrideCursor()
         if not model.parts:
             return self._failed(RuntimeError(f"No {model.group_title.lower()} found in this file."))
         self.scene = Scene(self.plotter, model, dark=is_dark(), accent=accent())
+        saved = memory.load(self.path)                   # v2.9: as you left it
+        memory.restore(self.scene, saved)
         self.sidebar.bind(self.scene)
         self.a_parallel.blockSignals(True)                  # show the scene's projection
         self.a_parallel.setChecked(self.scene.state["parallel"])
@@ -302,7 +310,13 @@ class ViewerWindow(QMainWindow):
         self.sidebar.measure_section.toggled.connect(self._measure_section_toggled)
         # Toolbar "Section" button and the sidebar switch stay in sync.
         self.sidebar.section_panel.enable.toggled.connect(self._section_switched)
+        self._section_switched(self.scene.section.enabled)
         self._set_loaded(True)
+        ip = self.sidebar.inflation_panel                  # v2.11: CFD mode as left
+        self.inflation_view.set_result(ip.result)
+        self._cfd_mode(model.is_cad and ip.enabled, open_page=False)
+        memory.restore_camera(self.scene, saved)
+        self.ctl.add_recent(self.path)                   # v2.9: File ▸ Open Recent
         self.plotter.render()
 
     def _failed(self, exc):
@@ -329,17 +343,14 @@ class ViewerWindow(QMainWindow):
         QApplication.setOverrideCursor(Qt.WaitCursor)
         fn = self.scene.model.retessellate
         self._pending_level = level
-        self._job = _Job(lambda: fn(level))
-        # Bound methods (not lambdas) so the result is handled on the UI thread.
-        self._job.signals.done.connect(self._retessellated)
-        self._job.signals.failed.connect(self._retessellate_failed)
-        QThreadPool.globalInstance().start(self._job)
+        self._job = run_job(lambda: fn(level), self._retessellated, self._retessellate_failed)
 
     def _retessellated(self, parts):
         level = self._pending_level
         QApplication.restoreOverrideCursor()
         self.scene.replace_parts(parts, level)
         self.sidebar.refresh_parts()
+        self.sidebar.info_panel.model_changed()
         _settings().setValue("step_quality", level)
 
     def _retessellate_failed(self, exc):
@@ -355,22 +366,22 @@ class ViewerWindow(QMainWindow):
 
     def apply_appearance(self):
         self.sidebar.list.set_density(self.ctl.appearance["density"])
-        self._sync_show()                                                # v2.28
+        self._sync_show()                                                # v2.8.5
         if self.scene:
             a = self.ctl.appearance
             self.scene.set_axis_font(a["axis_font"], rebuild=False)
             self.scene.set_edge_options(a["edge_width"], a["hide_edges_moving"], render=False)
-            self.scene.set_shading(a["shading"], render=False)          # v2.27
-            self.scene.set_axes_mode(a["axes"], rebuild=False, render=False)  # v2.21
+            self.scene.set_shading(a["shading"], render=False)          # v2.8.4
+            self.scene.set_axes_mode(a["axes"], rebuild=False, render=False)  # v2.7.2
             self.scene.set_background(*self.ctl.background())        # rebuilds grid + axes
 
-    # ---- NEW (v2.28): toolbar toggles for what is shown -----------------------------
+    # ---- NEW (v2.8.5): toolbar toggles for what is shown -----------------------------
     SCENE_TOGGLES = {"mesh_edges": "set_mesh_edges", "feature_edges": "set_feature_edges",
                      "faces": "set_faces", "bbox": "set_bbox", "origin": "set_origin"}
 
     def _show_toggled(self, key, on):
         if key in ("axes", "grid"):
-            # Axes and Grid together are the saved app-wide axes mode (as in v2.21)
+            # Axes and Grid together are the saved app-wide axes mode (as in v2.7.2)
             ax, gr = self.a_show["axes"].isChecked(), self.a_show["grid"].isChecked()
             mode = {(True, True): "both", (True, False): "axes",
                     (False, True): "grid", (False, False): "off"}[(ax, gr)]
@@ -396,6 +407,24 @@ class ViewerWindow(QMainWindow):
             a.blockSignals(True)
             a.setChecked(on)
             a.blockSignals(False)
+
+    # ---- NEW (v2.11): CFD mode (CAD files) ---------------------------------------------
+    def _cfd_mode(self, on, open_page=True):
+        """Show the bar with the 3D model / Inflation layers pill (and the page)."""
+        self.view_bar.setVisible(bool(on))
+        if on and open_page:
+            self.a_page_cfd.setChecked(True)
+            self._show_page("cfd")
+        elif not on:
+            self.a_page_model.setChecked(True)
+            self._show_page("model")
+
+    def _show_page(self, page):
+        if self.scene is None:
+            return
+        self.stack.setCurrentWidget(self.inflation_view if page == "cfd" else self.plotter)
+        if page == "model":
+            self.plotter.render()
 
     def _sync_units(self):
         """Select the file's unit (mm for STEP/IGES), or 'no units' for files without."""
@@ -441,7 +470,7 @@ class ViewerWindow(QMainWindow):
             finally:
                 QApplication.restoreOverrideCursor()
 
-    # ---- Edit section (v2.23; v2.24 no Edit button: always in the sidebar) --------
+    # ---- Edit section (v2.8; v2.8.1 no Edit button: always in the sidebar) --------
     def _apply_edit(self, r, t, label):
         if self.scene and self.scene.apply_edit(r, t, label):
             self._edited_changed()
@@ -452,11 +481,20 @@ class ViewerWindow(QMainWindow):
             self._edited_changed()
 
     def _edited_changed(self):
-        edited = bool(self.scene and self.scene.has_changes)      # edits or renames
+        # v2.9: only edits count as unsaved — names, colours, the view are remembered
+        edited = bool(self.scene and self.scene.model.edited)
         self.setWindowModified(edited)                  # dot in the close button (macOS)
         self.sidebar.edit_panel.refresh()
+        self.sidebar.info_panel.model_changed()        # v2.9: new bounds
+        self.sidebar.cfd_panel.model_changed()         # v2.10: flow vectors, length
 
-    # ---- NEW (v2.23): Export ----------------------------------------------------------
+    def _unit_chosen(self, a):
+        if self.scene:
+            self.scene.measure.set_display_unit(a.data())
+            self.sidebar.info_panel.refresh()           # v2.9: Info in the new unit
+            self.sidebar.cfd_panel.model_changed()      # v2.10: mesh length in metres
+
+    # ---- NEW (v2.8): Export ----------------------------------------------------------
     def export_model(self):
         if not self.scene:
             return
@@ -485,7 +523,8 @@ class ViewerWindow(QMainWindow):
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
             volume = sc.section.volume_grid() if fmt in ("vtu", "ugrid") else None
-            write_export(fmt, fn, parts, volume=volume)
+            write_export(fmt, fn, parts, volume=volume,
+                         colors={n: sc.colors[n] for n in names})   # v2.9: OBJ / PLY
         except Exception as exc:                        # shown, not a crash
             QApplication.restoreOverrideCursor()
             QMessageBox.warning(self, "Export", f"Could not export:\n{exc}")
@@ -520,18 +559,27 @@ class ViewerWindow(QMainWindow):
                 self.ctl.open_path(Path(url.toLocalFile()), prefer=self)
 
     def closeEvent(self, e):
-        # NEW (v2.23): rotations / mirrors only live in memory until exported
-        if self.scene is not None and self.scene.has_changes:
+        # NEW (v2.8): rotations / mirrors only live in memory until exported
+        if self.scene is not None and self.scene.model.edited:
             box = QMessageBox(self)
             box.setIcon(QMessageBox.Warning)
-            box.setText(f"Close {self.path.name} without exporting your changes?")
-            box.setInformativeText("Moves, rotations, mirrors and new part names are only "
-                                   "kept if you export the file.")
+            box.setText(f"Close {self.path.name} without exporting your edits?")
+            box.setInformativeText("Moves, rotations and mirrors are only kept if you export "
+                                   "the file. (Names, colours and the view are remembered.)")
             box.setStandardButtons(QMessageBox.Discard | QMessageBox.Cancel)
             box.setDefaultButton(QMessageBox.Cancel)
             if box.exec() != QMessageBox.Discard:
                 e.ignore()
                 return
+        self.remember_view()
         self.plotter.close()
         self.ctl.forget(self)
         super().closeEvent(e)
+
+    def remember_view(self):
+        """v2.9: camera, colours, hidden parts, section… for the next time."""
+        if self.scene is not None and self.path is not None:
+            try:
+                memory.save(self.path, memory.capture(self.scene))
+            except Exception as exc:                    # never block closing
+                print(f"could not remember the view: {exc}")

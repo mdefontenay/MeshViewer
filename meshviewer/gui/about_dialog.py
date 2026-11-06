@@ -1,5 +1,5 @@
-"""NEW (v2.15): "About Mesh Viewer" — small window with the icon, version,
-credits and the versions of the main libraries. v2.28: Check for Updates
+"""NEW (v2.5.4): "About Mesh Viewer" — small window with the icon, version,
+credits and the versions of the main libraries. v2.8.5: Check for Updates
 (opens the latest release on GitHub)."""
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from .. import __version__
 
 AUTHOR = "Matthieu de Fontenay"
 BUILT_WITH = "Claude Opus 5.5"
-RELEASES = "https://github.com/mdefontenay/MeshViewer/releases/latest"   # v2.28
+RELEASES = "https://github.com/mdefontenay/MeshViewer/releases/latest"   # v2.8.5
 
 
 def _app_icon() -> QIcon:
@@ -83,7 +83,7 @@ class AboutDialog(QDialog):
 
         line("Mesh Viewer", "font-size: 17px; font-weight: 700;")
         line(f"Version {__version__}", obj="InfoLine")
-        # NEW (v2.28): the latest release on GitHub, to compare with the version above
+        # NEW (v2.8.5): the latest release on GitHub, to compare with the version above
         lay.addSpacing(6)
         check = QPushButton("Check for Updates…")
         check.setCursor(Qt.PointingHandCursor)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""NEW (v2.13): make the standalone app smaller (run by build_app.sh --standalone).
+"""NEW (v2.5.2): make the standalone app smaller (run by build_app.sh --standalone).
 
 Where the space went (2.2 GB): PySide6 1.2 GB, VTK 0.5 GB, OpenCASCADE 0.2 GB.
 PySide6 ships all of Qt — a web browser engine, QML, 3D, multimedia, Designer

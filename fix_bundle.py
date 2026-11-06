@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""NEW (v2.12.1): repair libraries py2app damaged in a standalone app.
+"""NEW (v2.5.1): repair libraries py2app damaged in a standalone app.
 
 Why: Homebrew builds its libraries (xz, openssl, sqlite, ...) for your macOS
 version, which stores them in a newer format ("chained fixups"). When py2app

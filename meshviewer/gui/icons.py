@@ -87,7 +87,7 @@ def _draw_appearance(p):
 
 
 def _draw_parallel(p):
-    """NEW (v2.22): parallel projection — a box whose edges stay parallel
+    """NEW (v2.7.3): parallel projection — a box whose edges stay parallel
     (front and back faces the same size)."""
     p.drawRect(QRectF(2.5, 6.0, 9.0, 9.0))
     _line(p, (6.5, 2.5), (15.5, 2.5), (15.5, 11.5))
@@ -96,13 +96,13 @@ def _draw_parallel(p):
 
 
 def _draw_export(p):
-    """NEW (v2.23): export — tray with an arrow going out (like macOS Share)."""
+    """NEW (v2.8): export — tray with an arrow going out (like macOS Share)."""
     _line(p, (6.0, 7.5), (4.0, 7.5), (4.0, 16.0), (14.0, 16.0), (14.0, 7.5), (12.0, 7.5))
     _line(p, (9.0, 11.0), (9.0, 2.0))
     _line(p, (6.2, 4.8), (9.0, 2.0), (11.8, 4.8))
 
 
-# ---- NEW (v2.28): what-is-shown toggles in the toolbar -----------------------------
+# ---- NEW (v2.8.5): what-is-shown toggles in the toolbar -----------------------------
 def _draw_mesh_edges(p):
     """A small triangle mesh: square, 2 × 2 cells, one diagonal each."""
     p.drawRect(QRectF(2.5, 2.5, 13, 13))
@@ -125,7 +125,7 @@ def _draw_feature_edges(p):
 
 
 def _draw_faces(p):
-    """A cube with shaded faces (v2.29: Faces on / off, was "Edges only")."""
+    """A cube with shaded faces (v2.8.6: Faces on / off, was "Edges only")."""
     c = QColor(p.pen().color())
     for alpha, pts in ((0.55, ((9, 2), (15.2, 5.5), (9, 9), (2.8, 5.5))),
                        (0.30, ((2.8, 5.5), (9, 9), (9, 16), (2.8, 12.5))),
@@ -215,7 +215,7 @@ class _Engine(QIconEngine):
         group = QPalette.Disabled if mode == QIcon.Disabled else QPalette.Active
         color = pal.color(group, self.role)
         if state == QIcon.On and mode != QIcon.Disabled:
-            color = QColor("white")      # v2.28: checked toggles sit on the accent colour
+            color = QColor("white")      # v2.8.5: checked toggles sit on the accent colour
         p.save()
         p.setRenderHint(QPainter.Antialiasing)
         p.translate(rect.x(), rect.y())

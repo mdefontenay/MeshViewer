@@ -2,14 +2,14 @@
 
 An edit state is (R, t): new point = R @ original point + t.
   R  3×3 — 90° turns and mirrors only swap coordinates and flip signs (entries
-     exactly 0 / ±1); v2.27: any angle (cos / sin entries)
+     exactly 0 / ±1); v2.8.4: any angle (cos / sin entries)
   t  translation (floats)
 The geometry is always recomputed from the ORIGINAL points with the total
 (R, t), so edits never pile up rounding errors, Undo / Reset are exact, and the
 surfaces and the volume cells get bit-identical node coordinates (needed to
 match them up again on export).
 
-v2.23: rotations and mirrors. v2.24: translation, pivot (origin or model
+v2.8: rotations and mirrors. v2.8.1: translation, pivot (origin or model
 centre), undo history.
 """
 from __future__ import annotations
@@ -23,10 +23,10 @@ _R90 = {"x": [[1, 0, 0], [0, 0, -1], [0, 1, 0]],
         "z": [[0, -1, 0], [1, 0, 0], [0, 0, 1]]}
 
 # Node order that keeps a mirrored cell from turning inside out.
-_MIRROR_ORDER = {pv.CellType.TETRA: [0, 2, 1, 3],
-                 pv.CellType.PYRAMID: [0, 3, 2, 1, 4],
-                 pv.CellType.WEDGE: [0, 2, 1, 3, 5, 4],
-                 pv.CellType.HEXAHEDRON: [0, 3, 2, 1, 4, 7, 6, 5]}
+MIRROR_ORDER = {pv.CellType.TETRA: [0, 2, 1, 3],
+                pv.CellType.PYRAMID: [0, 3, 2, 1, 4],
+                pv.CellType.WEDGE: [0, 2, 1, 3, 5, 4],
+                pv.CellType.HEXAHEDRON: [0, 3, 2, 1, 4, 7, 6, 5]}
 
 
 def identity():
@@ -124,6 +124,6 @@ def grid_from(original: pv.UnstructuredGrid, r, t=(0.0, 0.0, 0.0)) -> pv.Unstruc
         return pv.UnstructuredGrid(original.cells, original.celltypes, pts)
     cells = {}
     for ctype, conn in original.cells_dict.items():
-        order = _MIRROR_ORDER.get(ctype)
+        order = MIRROR_ORDER.get(ctype)
         cells[ctype] = conn[:, order] if order is not None else conn
     return pv.UnstructuredGrid(cells, pts)

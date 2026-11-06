@@ -186,7 +186,7 @@ def read_ugrid(path, debug=True):
     return bcs
 
 
-# ---- NEW (v2.19): volume cells, read only when the cut mesh is shown ------------------
+# ---- NEW (v2.7): volume cells, read only when the cut mesh is shown ------------------
 def read_volume(path, debug=True):
     """Tetrahedra, pyramids, prisms and hexahedra as one pv.UnstructuredGrid
     (None if the file has surfaces only). They follow the boundary tags:

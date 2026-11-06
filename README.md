@@ -32,8 +32,18 @@ others could benefit from it.
   and right-clicking one gives **Search in McMaster**.
 - **Section plane**: set its origin and normal, slide it, flip it, or drag it in
   3D. The cut faces are filled in.
+- **CFD**: y+ estimate on a boundary from the flow (air at an altitude, water at a
+  depth, or your own values) and the mesh's first cell layer; first cell height
+  for a target y+; flow direction arrows.
+- **CFD mode** (CAD): an inflation layer calculator — first cell for a target y+,
+  layer heights for N layers and a growth rate, boundary-layer thickness, with a
+  plot and the layer stack on a page under the 3D view.
+- **Cell quality** (meshes): skewness, aspect ratio, scaled Jacobian and volume of
+  every cell, as a histogram; show the bad cells, colour the cut by quality, find
+  inverted cells.
 - **Measure**:
   - point-to-point distance, with ΔX / ΔY / ΔZ drawn in 3D
+  - point coordinates (and distance to the section plane), angle between faces
   - area, and volume when the selection is closed
   - **exact** values for STEP/IGES/BREP, straight from the CAD
   - results in mm, cm, m, in or ft; the axis labels follow the same unit
@@ -142,14 +152,27 @@ Keep the MeshViewer folder where it is: this app runs the code from it.
   - Search in McMaster (when a McMaster part number is anywhere in the name)
   - Right-clicking inside a multi-selection acts on the whole selection.
 - **Sidebar**:
+  - **Info** (first): extent per axis, faces, points, edge lengths, volume cells.
   - **Mesh quality** (STEP/IGES/BREP): five levels; the part is re-meshed in the
     background.
   - **Section**: the plane controls. Switching it on opens them, off folds them. For CGNS /
     UGRID meshes, *Fill cut faces* shows the volume cells the plane cuts.
   - **Measure**: measuring is on while this section is open.
     - *Distance*: click two points.
-    - *Area & Volume*: click parts, or switch to *CAD faces* to pick single faces.
-      Clicking empty space clears the faces.
+    - *Point*: click a point — measured from the origin (0, 0, 0) like a distance,
+      with its coordinates and its distance to the section plane.
+    - *Angle*: click two faces (or a face and the cut) — the angle between them.
+    - *Area*: click parts, or switch to *CAD faces* to pick single faces; volume
+      too when they close up. Clicking empty space clears the faces.
+  - **Cell quality** (meshes): pick a measure, set the "bad" threshold on the
+    histogram (click / drag), then Zoom, Show bad cells or Colour by quality.
+  - **CFD**: fluid (air at an altitude, fresh / sea water at a depth, or custom),
+    Mach and flow direction; y+ on a boundary (measured from the first cell layer
+    of volume meshes) and the first cell height for a target y+; flow vectors.
+  - **CFD mode** (CAD files): switch it on, fill in the flow (y+, Mach, length,
+    altitude) and the layers (first cell, N, growth rate, desired cell). The bar
+    under the 3D view then switches between the model and the *Inflation layers*
+    page (numbers, plot, layer stack, checks).
   - **Parts**: list, filter, Show All / Hide All.
 - **Show** (toolbar, also View ▸ Show): mesh edges, feature edges, faces (off =
   edges only) · axes, grid, bounding box, origin marker — each on / off.
@@ -166,7 +189,10 @@ Keep the MeshViewer folder where it is: this app runs the code from it.
   file. Works on meshes (CGNS, UGRID) and triangle CAD (STL, OBJ, PLY, glTF, VRML),
   not on STEP / IGES / BREP. Edits and renamed parts stay in memory until you
   export them.
-- **Export…** (⇧⌘E): STL (binary or one named solid per part), OBJ, PLY, VTU
+- **File ▸ Open Recent**; every file reopens the way you left it (camera, display
+  toggles, unit, colours, names, hidden parts, section).
+- **Export…** (⇧⌘E): STL (binary or one named solid per part), OBJ and PLY (with
+  the part colours), VTU
   (ParaView) and, for meshes, UGRID + .mapbc with the volume cells. Includes your
   edits; hidden parts can be left out. STEP / IGES / BREP export their current
   triangle mesh (STL, OBJ, PLY).
@@ -181,9 +207,12 @@ meshviewer/
   __init__.py           version number
   formats.py            file extension -> reader
   model.py              what readers return: {part name: surface} + kind / format / units
-  transform.py          Edit mode: exact 90° rotations and mirrors
+  transform.py          Edit: rotations, mirrors, moves
   export.py             Export: STL, OBJ, PLY, VTU, UGRID writers
-  mesh/  cgns.py ugrid.py           mesh readers
+  quality.py            cell quality measures (skewness, aspect ratio, Jacobian, volume)
+  cfd.py                y+ estimate, standard atmosphere, water, first cell layer, inflation layers
+  polys.py              small surface helpers (faces by size, edge lengths)
+  mesh/  cgns.py ugrid.py volume.py mesh readers, volume cells
   cad/   occt.py                    OpenCASCADE core: read, name, tessellate, exact area/volume
          step.py iges.py brep.py    exact-geometry CAD readers
          stl.py tessellated.py      triangulated CAD formats
@@ -196,6 +225,12 @@ meshviewer/
     measure.py, measure_panel.py    measurements and their panel
     appearance_dialog.py, screenshot_dialog.py, about_dialog.py
     edit_panel.py, export_dialog.py   Edit section, Export sheet
+    quality_panel.py, quality_view.py Cell quality section and its 3D overlays
+    info_panel.py       Info section
+    cfd_panel.py, cfd_view.py         CFD section and its flow arrows
+    inflation_panel.py, inflation_view.py  CFD mode (CAD): inflation layer inputs and page
+    memory.py           files reopen the way you left them
+    jobs.py             background work
     background.py       picture behind the 3D view
     widgets.py, icons.py, style.py  switches, menus, icons, light/dark styling
 setup.py                py2app settings: icon, file types

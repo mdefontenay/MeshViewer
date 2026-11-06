@@ -62,6 +62,6 @@ def load(path: Path, debug: bool = True, quality: int | None = None) -> Model:
                      source=src, units="mm" if label in ("STEP", "IGES") else "")
 
     model = Model(kind=kind, fmt=label, parts=getattr(mod, func)(path, debug=debug))
-    if hasattr(mod, "read_volume"):                 # NEW (v2.19): CGNS / UGRID volume cells
+    if hasattr(mod, "read_volume"):                 # NEW (v2.7): CGNS / UGRID volume cells
         model.volume = functools.partial(mod.read_volume, path, debug=debug)
     return model

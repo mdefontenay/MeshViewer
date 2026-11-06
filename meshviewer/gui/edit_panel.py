@@ -1,4 +1,4 @@
-"""Edit section of the sidebar (v2.23; v2.24 move / undo / original; v2.27 laid
+"""Edit section of the sidebar (v2.8; v2.8.1 move / undo / original; v2.8.4 laid
 out like Onshape's Transform: choose the kind, fill it in, Apply).
 
     Transform  [ Rotate               ▾ ]     Rotate · Mirror · Move by X, Y, Z

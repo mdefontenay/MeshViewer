@@ -2,6 +2,7 @@
 numpy
 pyvista
 pyvistaqt
+matplotlib      # CFD formulas (also needed by PyVista)
 PySide6
 h5py            # CGNS
 cadquery-ocp    # STEP (OpenCASCADE)

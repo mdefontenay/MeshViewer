@@ -1,6 +1,6 @@
 """Screenshot sheet: image size + background (as shown on screen, or transparent).
 
-v2.16: the Light / Dark / Custom backgrounds were removed — "As Shown" already
+v2.5.5: the Light / Dark / Custom backgrounds were removed — "As Shown" already
 uses whatever background is set in Appearance."""
 from __future__ import annotations
 

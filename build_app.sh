@@ -12,7 +12,7 @@
 #                                instead of downloading its own copy (~1.5 GB).
 #   --no-install                 build only (no copy to /Applications); used by make_dmg.sh
 #
-# NEW (v2.20): the heavy files — Python environment (~1.5 GB), build files and
+# NEW (v2.7.1): the heavy files — Python environment (~1.5 GB), build files and
 # the finished app / .dmg — go to ~/Downloads/MeshViewer-build, NOT into this
 # folder (so a project kept in iCloud-synced Documents stays small). Another place:
 #   MESHVIEWER_WORK=/path/to/folder ./build_app.sh
@@ -35,7 +35,7 @@ die()  { printf "\n\033[31mError:\033[0m %s\n" "$1"; exit 1; }
 
 [ "$(uname)" = "Darwin" ] || die "run this on your Mac."
 
-# ---- 0. Where the heavy files go (NEW v2.20) --------------------------------------
+# ---- 0. Where the heavy files go (NEW v2.7.1) --------------------------------------
 WORK="${MESHVIEWER_WORK:-$HOME/Downloads/MeshViewer-build}"
 VENV="$WORK/venv"
 mkdir -p "$WORK"
@@ -108,11 +108,11 @@ APP="$WORK/dist/Mesh Viewer.app"
 [ -d "$APP" ] || die "build finished but $APP is missing (log: /tmp/meshviewer_build.log)"
 
 if [ "$MODE" = "standalone" ]; then
-    # FIX (v2.12.1): py2app corrupts Homebrew libraries (liblzma, openssl, ...)
+    # FIX (v2.5.1): py2app corrupts Homebrew libraries (liblzma, openssl, ...)
     # when copying them; put back clean copies. See fix_bundle.py.
     step "Repairing bundled libraries"
     "$VENV/bin/python" fix_bundle.py "$APP" || echo "(some libraries could not be repaired — the self-test will tell)"
-    # NEW (v2.13): drop unused Qt parts (web engine, QML, 3D, tools…) and the Intel
+    # NEW (v2.5.2): drop unused Qt parts (web engine, QML, 3D, tools…) and the Intel
     # half of every universal binary: ~2.2 GB -> ~1 GB. See slim_bundle.py.
     step "Slimming the app"
     "$VENV/bin/python" slim_bundle.py "$APP"

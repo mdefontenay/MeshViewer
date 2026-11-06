@@ -4,7 +4,7 @@ Takes a Model (from any reader) and a PyVista plotter, and exposes simple
 methods the side panel calls: show/hide parts, edges, grid, camera views,
 selection, mesh quality, cross-section…
 
-Speed (v2.4): all parts are drawn by ONE composite actor (one block per part,
+Speed (v2.1.3): all parts are drawn by ONE composite actor (one block per part,
 per-block colour and visibility) and all feature edges by another, instead of
 one or two actors per part. With hundreds of parts this is several times
 faster to rotate. Very heavy models also hide their edge lines while the view
@@ -26,6 +26,8 @@ from ..model import Model
 from .background import ImageBackground, is_dark_image, load_image
 from .. import transform as xf
 from .measure import AXIS_COLORS, Measure
+from .cfd_view import FlowView, YplusView
+from .quality_view import GHOST_OPACITY, QualityView
 from .section import Section
 
 PART_COLORS = [   # no black / very dark colours: they hide the shading
@@ -42,7 +44,7 @@ SELECT_COLOR = "#0a84ff"    # fallback; the system accent colour is used when kn
 CLICK_TOLERANCE_PX = 4      # a press+release closer than this is a click, not a drag
 AXIS_FONT_DEFAULT = 16       # grid label points (Appearance slider: 10 = original size … 28)
 EDGE_WIDTHS = {"thin": 1.0, "medium": 1.5, "thick": 2.0}   # feature edge lines, pixels
-AXES_MODES = ("off", "axes", "grid", "both")               # Display ▸ Axes (v2.21)
+AXES_MODES = ("off", "axes", "grid", "both")               # Display ▸ Axes (v2.7.2)
 
 # Viewport colours (background gradient bottom -> top, grid, feature edges)
 THEMES = {
@@ -129,17 +131,17 @@ class Scene:
         self._dark = dark
         self._ui_dark = dark
         self.bg_mode = ("default", None)          # set by Appearance
-        self._origin_actors = []                  # NEW (v2.18): marker at (0, 0, 0)
-        self._orig_points = None                  # v2.24: file points, kept at the 1st edit
+        self._origin_actors = []                  # NEW (v2.6): marker at (0, 0, 0)
+        self._orig_points = None                  # v2.8.1: file points, kept at the 1st edit
         self._flipped = {}                        # part -> faces flipped (mirrored)
         self._edit_history = []                   # [((R, t) before, label)]
         self._original_actor = None               # grey edges of the file as opened
-        self._alias = {}                          # v2.26: file's part name -> new name
-        self._last_view = None                    # NEW (v2.18): (view, flipped?, camera)
+        self._alias = {}                          # v2.8.3: file's part name -> new name
+        self._last_view = None                    # NEW (v2.6): (view, flipped?, camera)
         self._bg_image = None                     # ImageBackground when a picture is shown
         self.axis_font = AXIS_FONT_DEFAULT        # set by Appearance
-        self.edge_width = EDGE_WIDTHS["thin"]     # NEW (v2.14): feature edge lines (Appearance)
-        self.hide_edges_moving = True             # NEW (v2.14): smooth rotation (Appearance)
+        self.edge_width = EDGE_WIDTHS["thin"]     # NEW (v2.5.3): feature edge lines (Appearance)
+        self.hide_edges_moving = True             # NEW (v2.5.3): smooth rotation (Appearance)
         self.grid_lines = True                    # grid lines on the walls behind the model
         self.axis_lines = True                    # axis frame, ticks, numbers and titles
         self._surf = self._surf_map = None      # composite actor/mapper: all parts
@@ -149,10 +151,16 @@ class Scene:
         self._grid_actor = None
         self._bbox_actor = None
         self._moving = False
+        self._ghost = False                       # v2.9: see-through while bad cells show
 
         vtkMapper.SetResolveCoincidentTopologyToPolygonOffset()  # edges drawn over faces
         self._build_surfaces()
         self.section = Section(self)
+        self.quality = QualityView(self)          # v2.9: Cell quality overlays
+        self.flow = FlowView(self)                # v2.10: CFD ▸ Show flow vectors
+        self.yplus_view = YplusView(self)         # v2.11.3: CFD ▸ Colour by y+
+        self.cfd_settings = None                  # v2.10: CFD section (remembered per file)
+        self.inflation_settings = None            # v2.11: CFD mode (CAD), remembered too
         self.measure = Measure(self)
         self.set_theme(dark, render=False)
         self.set_parallel(self.state["parallel"])
@@ -177,7 +185,8 @@ class Scene:
             edge_color="#202020", reset_camera=False, pickable=True)
         self._surf_map.SetStatic(True)            # geometry never changes in place
         self._surf.GetProperty().SetLighting(self.state["shading"])
-        self._apply_lines()                       # v2.27: edges-only look survives rebuilds
+        self._surf.GetProperty().SetOpacity(GHOST_OPACITY if self._ghost else 1.0)
+        self._apply_lines()                       # v2.8.4: edges-only look survives rebuilds
         for n in self.names:
             self._apply_block(n)
 
@@ -190,7 +199,7 @@ class Scene:
             self._edges_map.block_attr[self._block(name)].visible = self.visible[name]
 
     def set_color(self, names, color, render=True):
-        """NEW (v2.29): new colour for parts (right-click ▸ Colour…)."""
+        """NEW (v2.8.6): new colour for parts (right-click ▸ Colour…)."""
         hex_color = pv.Color(color).hex_rgb
         for n in names:
             if n in self.colors:
@@ -320,7 +329,7 @@ class Scene:
             names = list(self.selected_parts)     # act on the whole selection
         else:
             names = [name] if name else []
-        self.on_context(names, [name] if name else [])   # NEW (v2.11): + clicked part
+        self.on_context(names, [name] if name else [])   # NEW (v2.4.3): + clicked part
 
     def _on_press(self, *_):
         self._press = self.p.iren.get_event_position()
@@ -339,11 +348,14 @@ class Scene:
         """What a click at display (x, y) does, depending on the measure mode."""
         name, cell, pos = self.pick_full(x, y)
         m = self.measure
-        if m.mode == "distance":
+        if m.mode in ("distance", "point"):
             m.add_point(pos, name, cell)
             return
+        if m.mode == "angle":                        # v2.9
+            m.add_face(pos, name, cell)
+            return
         if m.mode == "area" and m.pick_faces and name is None and self.selected_faces:
-            self.clear_face_selection()              # NEW (v2.15): click outside -> deselect
+            self.clear_face_selection()              # NEW (v2.5.4): click outside -> deselect
             m._changed()
             return
         if m.mode == "area" and m.pick_faces and name and cell is not None \
@@ -375,7 +387,7 @@ class Scene:
         for a in self.section.cap_actors():
             self._picker.AddPickList(a)
         self._picker.PickFromListOn()
-        # Edges only (v2.27): the faces aren't drawn, but clicking them still selects.
+        # Edges only (v2.8.4): the faces aren't drawn, but clicking them still selects.
         hidden = not self._surf.GetVisibility() or \
             self._surf.GetProperty().GetRepresentation() != 2
         if hidden:
@@ -449,7 +461,7 @@ class Scene:
         exactly like the view, only sharper. (VTK's built-in tiled zoom drew the
         axis labels far too big / the grid labels far too small.)"""
         k = max(1, int(scale))
-        # Whether grid/axes are drawn light-on-dark. (v2.16: light / dark / custom
+        # Whether grid/axes are drawn light-on-dark. (v2.5.5: light / dark / custom
         # colour backgrounds removed — "current" follows Appearance.)
         transparent = background == "transparent"
         dark_vis = False if transparent else self._dark   # transparent: for white pages
@@ -510,7 +522,7 @@ class Scene:
         if style is not None:
             style.AddObserver("StartInteractionEvent", lambda *_: self._set_moving(True))
             style.AddObserver("EndInteractionEvent", lambda *_: self._set_moving(False))
-        # NEW (v2.15): the scroll wheel / trackpad zooms in single steps (each one a
+        # NEW (v2.5.4): the scroll wheel / trackpad zooms in single steps (each one a
         # complete start-zoom-end), so edges would flash back between steps. Treat a
         # burst of zoom steps as one movement that ends 0.3 s after the last step.
         self._zooming = False
@@ -535,16 +547,16 @@ class Scene:
         self._set_moving(False)
 
     def _set_moving(self, moving):
-        # any model size, switchable in Appearance (v2.14: was > 1.5 M triangles only)
+        # any model size, switchable in Appearance (v2.5.3: was > 1.5 M triangles only)
         if moving == self._moving or (moving and not self.hide_edges_moving):
             return
         if not moving and self._zooming:
             return                                   # still zooming: keep edges off
         self._moving = moving
         # Lines are the costliest thing to draw on macOS: drop them while moving
-        # (v2.27: except feature edges in "Edges only", the only thing left to see).
+        # (v2.8.4: except feature edges in "Edges only", the only thing left to see).
         self._apply_lines()
-        self.section.set_moving(moving)            # v2.19: cut mesh edges too
+        self.section.set_moving(moving)            # v2.7: cut mesh edges too
         if not moving:
             self.p.render()
 
@@ -581,7 +593,7 @@ class Scene:
         self.p.camera_position = cam
         self.p.render()
 
-    # ---- NEW (v2.26): rename a part (any file type; Export writes the new names) ----
+    # ---- NEW (v2.8.3): rename a part (any file type; Export writes the new names) ----
     @property
     def renamed(self):
         return any(k != v for k, v in self._alias.items())
@@ -612,7 +624,7 @@ class Scene:
         self.measure._changed()
         return True
 
-    # ---- Edit section: rotate / mirror (v2.23), move + undo + original (v2.24) -------
+    # ---- Edit section: rotate / mirror (v2.8), move + undo + original (v2.8.1) -------
     def apply_edit(self, r, t=(0.0, 0.0, 0.0), label=""):
         """Rotate / mirror (R, 3×3) then move (t) every part and the volume
         cells. Returns False for exact CAD (STEP, IGES, BREP), which can't be edited."""
@@ -636,7 +648,7 @@ class Scene:
 
     @property
     def edit_labels(self):
-        """v2.27: every change so far, oldest first (the Edit section lists them)."""
+        """v2.8.4: every change so far, oldest first (the Edit section lists them)."""
         return [label for _, label in self._edit_history]
 
     def _set_edit_state(self, r, t):
@@ -649,6 +661,7 @@ class Scene:
         self.model.transform, self.model.offset = np.asarray(r, dtype=float), np.asarray(t, float)
         self.section.follow_edit(xf.delta(old, (r, t)))   # plane + volume cells follow
         self.measure.forget_points()                # picked points were in the old place
+        self.quality.after_edit()                   # v2.9: bad cells move along
         self.replace_parts(self.model.parts, self.model.quality)   # keeps the camera
         self.refresh_grid(render=False)             # new bounds
         if self._bbox_actor is not None:
@@ -695,7 +708,7 @@ class Scene:
             self.p.render()
 
     def set_shading(self, on, render=True):
-        """NEW (v2.25): lights on (shaded, 3D look) or off (flat part colours, no
+        """NEW (v2.8.2): lights on (shaded, 3D look) or off (flat part colours, no
         light or shadow) for the parts and the filled cut faces."""
         self.state["shading"] = bool(on)
         self._surf.GetProperty().SetLighting(bool(on))
@@ -705,7 +718,7 @@ class Scene:
 
     def _apply_lines(self):
         """Faces, mesh edges and feature edges from the toolbar toggles + the moving
-        state. Faces hidden (v2.27): mesh edges become a wireframe (still hidden while
+        state. Faces hidden (v2.8.4): mesh edges become a wireframe (still hidden while
         moving); feature edges stay on while moving."""
         if self._surf is None:
             return
@@ -721,9 +734,22 @@ class Scene:
             prop.SetEdgeVisibility(mesh and not moving)
         if self._edges is not None:
             self._edges.SetVisibility(self.state["feature_edges"] and (eo or not moving))
+        quality = getattr(self, "quality", None)
+        if quality is not None and quality.hides_surface:   # coloured copy shown instead
+            self._surf.SetVisibility(False)
+        yv = getattr(self, "yplus_view", None)              # v2.11.4: y+ colours follow too
+        if yv is not None:
+            yv.apply_lines()
+
+    def set_ghost(self, on, render=True):
+        """NEW (v2.9): faces see-through, so the bad cells inside show."""
+        self._ghost = bool(on)
+        self._surf.GetProperty().SetOpacity(GHOST_OPACITY if on else 1.0)
+        if render:
+            self.p.render()
 
     def set_faces(self, on, render=True):
-        """Show or hide the faces, keeping the edges (v2.27 "Edges only", v2.29 Faces)."""
+        """Show or hide the faces, keeping the edges (v2.8.4 "Edges only", v2.8.6 Faces)."""
         self.state["faces"] = bool(on)
         self._apply_lines()
         if render:
@@ -732,7 +758,7 @@ class Scene:
     def set_mesh_edges(self, on, render=True):
         self.state["mesh_edges"] = bool(on)
         self._apply_lines()
-        self.section.sync_cut_edges()              # v2.21: the cut mesh follows this switch
+        self.section.sync_cut_edges()              # v2.7.2: the cut mesh follows this switch
         if render:
             self.p.render()
 
@@ -758,7 +784,7 @@ class Scene:
             self._edges_map.block_attr[self._block(n)].visible = self.visible[n]
         self.section.clip(self._edges)
 
-    # ---- NEW (v2.18): origin marker ---------------------------------------------------
+    # ---- NEW (v2.6): origin marker ---------------------------------------------------
     def set_origin(self, on, render=True):
         """A dot at (0, 0, 0) with short X / Y / Z arrows (red / green / blue),
         drawn on top of the model so it shows even inside a part."""
@@ -799,7 +825,7 @@ class Scene:
 
     # ---- camera --------------------------------------------------------
     def view(self, which):
-        """NEW (v2.18): pressing X, Y or Z again without moving the camera in
+        """NEW (v2.6): pressing X, Y or Z again without moving the camera in
         between looks from the opposite side (X -> -X -> X …). Iso never flips."""
         last = self._last_view
         flip = (which != "iso" and last is not None and last[0] == which
@@ -841,7 +867,7 @@ class Scene:
                 self.set_theme(self._ui_dark)         # rebuilds the grid + axes
 
     def set_edge_options(self, width=None, hide_while_moving=None, render=True):
-        """NEW (v2.14): feature edge thickness ("thin" / "medium" / "thick" or px)
+        """NEW (v2.5.3): feature edge thickness ("thin" / "medium" / "thick" or px)
         and whether lines are hidden while the view moves."""
         if hide_while_moving is not None:
             self.hide_edges_moving = bool(hide_while_moving)
@@ -853,7 +879,7 @@ class Scene:
                 self.p.render()
 
     def set_axes_mode(self, mode, rebuild=True, render=True):
-        """NEW (v2.21), one control instead of three (Display ▸ Grid + Appearance
+        """NEW (v2.7.2), one control instead of three (Display ▸ Grid + Appearance
         ▸ Grid lines / Axis lines):
             "off"   nothing
             "axes"  axis frame, ticks, numbers and titles
@@ -884,7 +910,7 @@ class Scene:
     def _add_grid(self, plotter, color, k=1):
         """Grid + axes on `plotter` (the view, or an off-screen screenshot at k×).
         Fixed to the model's bounds, so the section handle can't stretch it.
-        NEW (v2.17): numbers in the unit chosen in the toolbar and titles like
+        NEW (v2.5.6): numbers in the unit chosen in the toolbar and titles like
         "X Axis (mm)"; with Axis lines off, numbers and titles go too."""
         b = np.asarray(self.model_bounds(), dtype=float)
         s, unit = self.measure.unit_scale()
@@ -955,8 +981,8 @@ class Scene:
             self._bbox_actor.GetProperty().SetColor(pv.Color(t["grid"]).float_rgb)
         if self.state.get("origin"):
             self._build_origin()                   # dot colour follows the background
-        self.section.restyle()                     # v2.19: cut mesh + outline colours
-        if self._original_actor is not None:       # v2.24: grey "original" edges
+        self.section.restyle()                     # v2.7: cut mesh + outline colours
+        if self._original_actor is not None:       # v2.8.1: grey "original" edges
             self._original_actor.GetProperty().SetColor(pv.Color(t["grid"]).float_rgb)
         if render:
             self.p.render()
@@ -989,4 +1015,5 @@ class Scene:
 
     def clippable_actors(self):
         """Everything the section plane should cut."""
-        return [self._surf, self._edges, *self._face_actors, *self._highlights.values()]
+        return [self._surf, self._edges, *self._face_actors, *self._highlights.values(),
+                *self.quality.actors(), *self.yplus_view.actors()]

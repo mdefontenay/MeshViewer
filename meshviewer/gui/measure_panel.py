@@ -1,4 +1,5 @@
-"""Side-panel block for measurements. Measuring is on while this section is open."""
+"""Side-panel block for measurements. Measuring is on while this section is open.
+v2.9: Distance · Point · Angle · Area (and volume)."""
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
@@ -37,8 +38,17 @@ class MeasurePanel(QWidget):
         lay.setContentsMargins(2, 0, 4, 0)
         lay.setSpacing(8)
 
-        self.mode_actions = _exclusive(self, [("distance", "Distance"),
-                                              ("area", "Area && Volume")], self._mode)
+        # v2.9: + Point and Angle; "Area & Volume" is just "Area" (both are shown)
+        self.mode_actions = _exclusive(self, [("distance", "Distance"), ("point", "Point"),
+                                              ("angle", "Angle"), ("area", "Area")],
+                                       self._mode)
+        tips = ("Click two points: distance and ΔX, ΔY, ΔZ",
+                "Click a point: its distance from the origin (0, 0, 0), its X / Y / Z,\n"
+                "and its distance to the section plane",
+                "Click two faces: the angle between them",
+                "Click parts (or CAD faces): area, and volume when they close up")
+        for a, tip in zip(self.mode_actions, tips):
+            a.setToolTip(tip)
         self.mode_actions[0].setChecked(True)
         lay.addWidget(Capsule(self.mode_actions, name="Segmented"))
 
@@ -105,7 +115,7 @@ class MeasurePanel(QWidget):
     # ---- handlers ----------------------------------------------------------------
     def _mode_widgets(self, mode):
         self.pick_row.setVisible(mode == "area" and getattr(self, "_has_faces", False))
-        self.snap_row.setVisible(mode == "distance")
+        self.snap_row.setVisible(mode in ("distance", "point"))
 
     def _mode(self, mode):
         self._mode_widgets(mode)
@@ -140,6 +150,24 @@ class MeasurePanel(QWidget):
         big.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self._add(big)
 
+    def _xyz_grid(self, rows, u):
+        grid_w = QWidget()
+        g = QGridLayout(grid_w)
+        g.setContentsMargins(0, 4, 0, 0)
+        g.setHorizontalSpacing(8)
+        g.setVerticalSpacing(3)
+        for row, ((name, v), color) in enumerate(zip(rows, AXIS_COLORS)):
+            dot = QLabel("●")
+            dot.setStyleSheet(f"color: {color}; font-size: 10px;")
+            val = _label("ValueLabel", fmt(v, u))
+            val.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            val.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            g.addWidget(dot, row, 0)
+            g.addWidget(_label("AxisLabel", name), row, 1)
+            g.addWidget(val, row, 2)
+        g.setColumnStretch(2, 1)
+        self._add(grid_w)
+
     def _units_note(self, r):
         u, fu = r.get("units", ""), r.get("file_units", "")
         if not fu and not u:
@@ -163,23 +191,27 @@ class MeasurePanel(QWidget):
                 self._headline("Distance", "—", tag=f"{len(pts)} / 2 points", muted=True)
                 return
             self._headline("Distance", fmt(r["distance"], u))
-            grid_w = QWidget()
-            g = QGridLayout(grid_w)
-            g.setContentsMargins(0, 6, 0, 0)
-            g.setHorizontalSpacing(8)
-            g.setVerticalSpacing(3)
-            for row, (name, key, color) in enumerate(zip(("ΔX", "ΔY", "ΔZ"),
-                                                         ("dx", "dy", "dz"), AXIS_COLORS)):
-                dot = QLabel("●")
-                dot.setStyleSheet(f"color: {color}; font-size: 10px;")
-                val = _label("ValueLabel", fmt(r[key], u))
-                val.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                val.setTextInteractionFlags(Qt.TextSelectableByMouse)
-                g.addWidget(dot, row, 0)
-                g.addWidget(_label("AxisLabel", name), row, 1)
-                g.addWidget(val, row, 2)
-            g.setColumnStretch(2, 1)
-            self._add(grid_w)
+            self._xyz_grid([("ΔX", r["dx"]), ("ΔY", r["dy"]), ("ΔZ", r["dz"])], u)
+        elif r.get("mode") == "point":                          # v2.9
+            if "xyz" not in r:
+                self._headline("Point", "—", tag="click the model", muted=True)
+                return
+            self._headline("From origin", fmt(r["distance"], u))
+            self._xyz_grid([("X", r["xyz"][0]), ("Y", r["xyz"][1]), ("Z", r["xyz"][2])], u)
+            if "to_plane" in r:
+                spacer = QWidget()
+                spacer.setFixedHeight(6)
+                self._add(spacer)
+                side = "on the cut-away side" if r["to_plane"] > 0 else "on the shown side"
+                self._headline("To section plane", fmt(r["to_plane"], u), tag=side)
+        elif r.get("mode") == "angle":                          # v2.9
+            if "planes" not in r:
+                self._headline("Angle", "—", tag=f"{r['n']} / 2 faces", muted=True)
+                return
+            self._headline("Angle", f"{r['planes']:.2f}°", tag="between the faces")
+            note = _label("InfoLine", f"Between their normals: {r['normals']:.2f}°")
+            note.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            self._add(note)
         elif r.get("mode") == "area":
             if not r.get("count"):
                 self._headline("Area", "—", tag="nothing selected", muted=True)

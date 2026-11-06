@@ -17,7 +17,7 @@ except ImportError as exc:  # h5py is only needed for CGNS files
 
 
 # CGNS element-type code -> nodes per element (fixed-size types only).
-# FIX (v2.19): QUAD_8 (8), QUAD_9 (9 — was 8), HEXA_20 (20 — was 14), HEXA_27
+# FIX (v2.7): QUAD_8 (8), QUAD_9 (9 — was 8), HEXA_20 (20 — was 14), HEXA_27
 # (27 — was 25) and the quadratic pyramids / prisms were missing or wrong.
 FIXED_NPE = {2: 1, 3: 2, 4: 3, 5: 3, 6: 6, 7: 4, 8: 8, 9: 9, 10: 4, 11: 10,
              12: 5, 13: 14, 14: 6, 15: 15, 16: 18, 17: 8, 18: 20, 19: 27, 21: 13}
@@ -223,7 +223,7 @@ def read_cgns(path, debug=True):
     return bcs
 
 
-# ---- NEW (v2.19): volume cells, read only when the cut mesh is shown ------------------
+# ---- NEW (v2.7): volume cells, read only when the cut mesh is shown ------------------
 def _volume_types():
     from .volume import HEXA, PYRAMID, TETRA, WEDGE
     # CGNS code -> (VTK cell type, corner nodes). Quadratic cells keep their corners.

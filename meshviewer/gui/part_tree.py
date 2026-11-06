@@ -30,7 +30,7 @@ _SUFFIXES = (re.compile(r"\s*\(\d+\)$"),       # "Part (3)"   — duplicate name
              re.compile(r"\.\d+$"),            # "Part.2"     — solids of one part
              re.compile(r"[\s_\-]+\d+$"))      # "Part_02", "Part 2"
 # McMaster-Carr catalogue numbers: digits, one letter, digits — "91251A540", "5536K11".
-# At the start of the name (as before), or — v2.26 — anywhere in it, as a separate
+# At the start of the name (as before), or — v2.8.3 — anywhere in it, as a separate
 # word: "Socket Screw 91251A540", "Bracket_8975K12_2". In the middle, the letter
 # can't be an x (sizes like "100x200") and at least 2 digits must follow it
 # (alloys like "6061T6").
@@ -69,7 +69,7 @@ class _RowDelegate(QStyledItemDelegate):
     extra = 0
 
     def createEditor(self, parent, option, index):
-        """v2.27: an opaque rename field (style.py #RenameField), so the old name
+        """v2.8.4: an opaque rename field (style.py #RenameField), so the old name
         doesn't show through in dark mode."""
         ed = QLineEdit(parent)
         ed.setObjectName("RenameField")
@@ -87,7 +87,7 @@ class PartTree(QTreeWidget):
     zoom_requested = Signal(list)
     isolate_requested = Signal(list)
     context_requested = Signal(list, list, object)   # names, clicked row's names, position
-    rename_requested = Signal(str, str)              # v2.26: old name, new name
+    rename_requested = Signal(str, str)              # v2.8.3: old name, new name
 
     ROW_RADIUS = 6.0
 
@@ -181,7 +181,7 @@ class PartTree(QTreeWidget):
         return list(item.data(0, MEMBERS) or [item.data(0, NAME)])
 
     def set_color(self, name, hex_color):
-        """v2.29: new colour dot for a part."""
+        """v2.8.6: new colour dot for a part."""
         if name in self._parts:
             self._parts[name].setIcon(0, color_dot(hex_color))
 
@@ -215,7 +215,7 @@ class PartTree(QTreeWidget):
             self._update_group(p)
             p = p.parent()
 
-    # ---- NEW (v2.26): rename in place (right-click ▸ Rename…, or Return) ---------------
+    # ---- NEW (v2.8.3): rename in place (right-click ▸ Rename…, or Return) ---------------
     def start_rename(self, name):
         it = self._parts.get(name)
         if it is None or it.isHidden():
@@ -241,7 +241,7 @@ class PartTree(QTreeWidget):
     # ---- checkboxes ----------------------------------------------------------------
     def _item_changed(self, it, _col):
         name = it.data(0, NAME)
-        if name is not None and it.text(0) != name:  # v2.26: typed a new name
+        if name is not None and it.text(0) != name:  # v2.8.3: typed a new name
             new = it.text(0).strip()
             self.blockSignals(True)
             it.setText(0, name)                      # the scene decides; the list refills
@@ -322,7 +322,7 @@ class PartTree(QTreeWidget):
         # Right-click inside a multi-selection acts on the selection (like Finder);
         # elsewhere only on the row clicked. The selection itself never changes.
         names = sel if it.isSelected() and len(sel) > 1 else clicked
-        self._context_row = self.indexFromItem(it)    # NEW (v2.11): outline while the menu is open
+        self._context_row = self.indexFromItem(it)    # NEW (v2.4.3): outline while the menu is open
         self.viewport().update()
         try:
             self.context_requested.emit(names, clicked, self.viewport().mapToGlobal(pos))
@@ -365,7 +365,7 @@ class PartTree(QTreeWidget):
             and e.modifiers() & Qt.MetaModifier)
 
     def mousePressEvent(self, e):
-        if self._is_context_click(e):                # NEW (v2.11): right-click doesn't select
+        if self._is_context_click(e):                # NEW (v2.4.3): right-click doesn't select
             e.accept()
             return
         item = self._arrow_hit(e)
@@ -389,7 +389,7 @@ class PartTree(QTreeWidget):
         if self._is_context_click(e):
             e.accept()
             return
-        # FIX (v2.10): on macOS Qt toggles a group on *release* of an arrow click,
+        # FIX (v2.4.2): on macOS Qt toggles a group on *release* of an arrow click,
         # which closed the group we had just opened on press. Swallow that release.
         if self._arrow_click:
             self._arrow_click = False

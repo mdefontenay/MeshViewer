@@ -1,5 +1,5 @@
 #!/bin/bash
-# NEW (v2.12): builds "Mesh Viewer <version>.dmg" — open it, drag the app onto
+# NEW (v2.5): builds "Mesh Viewer <version>.dmg" — open it, drag the app onto
 # Applications, done. The app inside is self-contained (its own Python, Qt, VTK,
 # OpenCASCADE), so it no longer depends on this folder.
 #
@@ -7,9 +7,9 @@
 #   ./make_dmg.sh --reuse    package the app already built (re-repairs and
 #                            re-signs its libraries, no rebuild)
 #
-# NEW (v2.20): the app and the .dmg are made in ~/Downloads/MeshViewer-build/dist
+# NEW (v2.7.1): the app and the .dmg are made in ~/Downloads/MeshViewer-build/dist
 # (or $MESHVIEWER_WORK/dist), not in this folder.
-# v2.25: the disk image window (background, icon places) is written by dmgbuild
+# v2.8.2: the disk image window (background, icon places) is written by dmgbuild
 # (installed in the build venv the first time), no longer arranged by Finder.
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -47,7 +47,7 @@ step "Checking the app (self-test)"
 "$APP/Contents/MacOS/$NAME" --selftest || die "self-test failed: a package is missing from the app (see above)."
 
 # ---- 3. Disk image -------------------------------------------------------------------
-# v2.25: made with dmgbuild, which writes the window layout (background picture,
+# v2.8.2: made with dmgbuild, which writes the window layout (background picture,
 # icon positions) straight into the image. The old way asked Finder to arrange
 # the window by AppleScript; when macOS refused Terminal the "control Finder"
 # permission, or Finder hadn't saved its settings before the disk was ejected,

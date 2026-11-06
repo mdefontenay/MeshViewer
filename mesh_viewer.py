@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 
 def selftest() -> int:
-    """NEW (v2.12): `Mesh Viewer --selftest` — checks a bundled app has everything
+    """NEW (v2.5): `Mesh Viewer --selftest` — checks a bundled app has everything
     (used by make_dmg.sh before packaging). Prints one line per check."""
     import importlib
     failed = 0

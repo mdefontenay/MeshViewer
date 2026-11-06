@@ -62,7 +62,8 @@ class SectionPanel(QWidget):
             lbl.setAlignment(Qt.AlignCenter)
             grid.addWidget(lbl, 0, c)
         self.origin = [_spin(-1e9, 1e9, 1.0, 3) for _ in range(3)]
-        self.normal = [_spin(-1.0, 1.0, 0.1, 3) for _ in range(3)]
+        # v2.10: any length (not rescaled to 1): only the direction matters
+        self.normal = [_spin(-1e9, 1e9, 0.1, 3) for _ in range(3)]
         for row, (label, boxes, tip) in enumerate((
                 ("Origin", self.origin, "A point on the plane"),
                 ("Normal", self.normal, "Direction the plane faces — that half is hidden"))):
@@ -144,7 +145,7 @@ class SectionPanel(QWidget):
         s = self.section
         if s is None:
             return
-        for box, v in zip(self.origin + self.normal, [*s.origin, *s.normal]):
+        for box, v in zip(self.origin + self.normal, [*s.origin, *s.normal_raw]):
             box.blockSignals(True)
             box.setValue(float(v))
             box.blockSignals(False)
@@ -164,8 +165,8 @@ class SectionPanel(QWidget):
                 self._caps_later()
 
     def _sync_fill_label(self):
-        """Mesh files with volume cells fill the cut with the cut cells (v2.19);
-        their edges follow the Mesh edges toggle (v2.21). Same label either way."""
+        """Mesh files with volume cells fill the cut with the cut cells (v2.7);
+        their edges follow the Mesh edges toggle (v2.7.2). Same label either way."""
         if self.section and self.section.has_volume:
             tip = ("Fill the cut with the volume cells the plane goes through.\n"
                    "Their edges show when Mesh edges (toolbar) is on.\n"
@@ -185,7 +186,7 @@ class SectionPanel(QWidget):
         o = [b.value() for b in self.origin]
         n = [b.value() for b in self.normal]
         self.section.set_plane(origin=o, normal=n, caps=False)
-        self.sync()                         # shows the normalised normal
+        self.sync()
         self._caps_later()
 
     def _slid(self, v):

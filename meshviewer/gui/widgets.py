@@ -5,14 +5,15 @@ import re
 
 from PySide6.QtCore import (
     Property, QEasingCurve, QPointF, QPropertyAnimation, QRectF, QRegularExpression, QSettings,
-    QSize, Qt, Signal,
+    QSize, Qt, QUrl, Signal,
 )
 from PySide6.QtGui import (
-    QColor, QIcon, QPainter, QPainterPath, QPalette, QPen, QPixmap, QRegularExpressionValidator,
+    QColor, QDesktopServices, QIcon, QLinearGradient, QPainter, QPainterPath, QPalette, QPen,
+    QPixmap, QRegularExpressionValidator,
 )
 from PySide6.QtWidgets import (
-    QAbstractButton, QColorDialog, QDoubleSpinBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu,
-    QPushButton, QSizePolicy, QSlider, QToolButton, QVBoxLayout, QWidget,
+    QAbstractButton, QColorDialog, QDoubleSpinBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
+    QLineEdit, QMenu, QPushButton, QScrollArea, QSizePolicy, QSlider, QToolButton, QVBoxLayout, QWidget,
 )
 
 from .style import accent
@@ -169,7 +170,7 @@ class CollapsibleSection(QWidget):
     toggled = Signal(bool)      # True = expanded
 
     def __init__(self, title, content: QWidget, key: str, trailing: QWidget | None = None,
-                 parent=None, remember=True, start_open=True):
+                 parent=None, remember=True, start_open=True, sub=False):
         super().__init__(parent)
         self.content = content
         self._key = f"sidebar/collapsed/{key}"
@@ -185,10 +186,14 @@ class CollapsibleSection(QWidget):
         h.setSpacing(6)
         self.chevron = _Chevron()
         h.addWidget(self.chevron)
-        h.addWidget(section_header(title))
+        title_label = section_header(title)
+        if sub:                                 # v2.11.1: a smaller group inside a section
+            title_label.setObjectName("SubHeader")
+            h.setContentsMargins(0, 4, 0, 0)
+        h.addWidget(title_label)
         h.addStretch(1)
         if trailing is not None:
-            # FIX (v2.17): keep a widget's own cursor (the Section switch is a hand)
+            # FIX (v2.5.6): keep a widget's own cursor (the Section switch is a hand)
             if not trailing.testAttribute(Qt.WA_SetCursor):
                 trailing.setCursor(Qt.ArrowCursor)
             h.addWidget(trailing)
@@ -198,7 +203,8 @@ class CollapsibleSection(QWidget):
 
         # remember=False: always start in the start_open state (not remembered).
         self._remember = remember
-        collapsed = QSettings("local", "Mesh Viewer").value(self._key, False, type=bool) \
+        collapsed = QSettings("local", "Mesh Viewer").value(self._key, not start_open,
+                                                            type=bool) \
             if remember else not start_open
         self.expanded = not collapsed
         content.setVisible(self.expanded)
@@ -330,7 +336,7 @@ class ColorField(QWidget):
 
 
 # ---------------------------------------------------------------------------
-# v2.25: pop-up choice button — opens the same menu as a right-click (replaces
+# v2.8.2: pop-up choice button — opens the same menu as a right-click (replaces
 # QComboBox, whose macOS pop-up couldn't be styled without spacing glitches)
 # ---------------------------------------------------------------------------
 class MenuSelect(QPushButton):
@@ -343,18 +349,32 @@ class MenuSelect(QPushButton):
         self.setObjectName("MenuSelect")
         self.setCursor(Qt.PointingHandCursor)
         self._items = []                      # [(text, data)]
+        self._icons = []                      # v2.11.4: optional icon per item
         self._index = -1
         self.clicked.connect(self._open)
 
     # ---- QComboBox-like API ----
-    def addItem(self, text, data=None):
+    def addItem(self, text, data=None, icon=None):
         self._items.append((text, data))
+        self._icons.append(icon)
         if self._index < 0:
             self.setCurrentIndex(0)
         self._fit_width()
 
     def count(self):
         return len(self._items)
+
+    def clear(self):
+        self._items, self._icons, self._index = [], [], -1
+        self.setText("")
+        self.setIcon(QIcon())
+
+    def setItemIcon(self, i, icon):
+        """v2.11.4: e.g. a part's colour dot."""
+        if 0 <= i < len(self._icons):
+            self._icons[i] = icon
+            if i == self._index:
+                self.setIcon(icon or QIcon())
 
     def currentIndex(self):
         return self._index
@@ -374,6 +394,7 @@ class MenuSelect(QPushButton):
         changed = i != self._index
         self._index = i
         self.setText(self._items[i][0])
+        self.setIcon(self._icons[i] or QIcon())
         if changed:
             self.currentIndexChanged.emit(i)
 
@@ -382,6 +403,8 @@ class MenuSelect(QPushButton):
         menu = Menu(self)
         for i, (text, _) in enumerate(self._items):
             a = menu.addAction(text)
+            if self._icons[i] is not None:
+                a.setIcon(self._icons[i])
             a.setCheckable(True)
             a.setChecked(i == self._index)
             a.triggered.connect(lambda _=False, k=i: self.setCurrentIndex(k))
@@ -391,7 +414,8 @@ class MenuSelect(QPushButton):
     def _fit_width(self):
         fm = self.fontMetrics()
         widest = max(fm.horizontalAdvance(t) for t, _ in self._items)
-        self.setMinimumWidth(widest + 44)     # text + padding + chevron
+        icon = 18 if any(i is not None for i in self._icons) else 0
+        self.setMinimumWidth(widest + 44 + icon)     # text + padding + chevron
 
     def paintEvent(self, e):
         super().paintEvent(e)
@@ -406,3 +430,350 @@ class MenuSelect(QPushButton):
         path.lineTo(QPointF(cx, cy + 2))
         path.lineTo(QPointF(cx + 3.5, cy - 1.5))
         p.drawPath(path)
+
+
+# ---------------------------------------------------------------------------
+# NEW (v2.10): a number box that takes any notation ("1.8e-5", "0,3"), and a
+# small round "?" button that opens a web page.
+# ---------------------------------------------------------------------------
+
+def format_number(v):
+    if v is None:
+        return ""
+    a = abs(v)
+    if a and (a >= 1e6 or a < 1e-3):
+        return f"{v:.4g}"
+    return f"{v:.6g}"
+
+
+class NumberField(QLineEdit):
+    """Text box for one number. Empty = None (e.g. "auto"). valueChanged is
+    sent when the user finishes typing (Return or leaving the box)."""
+    valueChanged = Signal(object)
+
+    def __init__(self, value=None, parent=None):
+        super().__init__(parent)
+        self.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.setMinimumWidth(56)
+        self._value = None
+        self.setValue(value)
+        self.editingFinished.connect(self._finished)
+
+    def value(self):
+        return self._value
+
+    def setValue(self, v):
+        self._value = None if v is None else float(v)
+        self.setText(format_number(self._value))
+        self.setProperty("invalid", False)
+        self.style().unpolish(self)
+        self.style().polish(self)
+
+    def _finished(self):
+        text = self.text().strip().replace(",", ".").replace(" ", "")
+        try:
+            v = float(text) if text else None
+        except ValueError:
+            self.setProperty("invalid", True)          # red border until fixed
+            self.style().unpolish(self)
+            self.style().polish(self)
+            return
+        changed = v != self._value
+        NumberField.setValue(self, v)
+        if changed:
+            self.valueChanged.emit(self.value())
+
+
+class UnitField(NumberField):
+    """NEW (v2.11.4): a NumberField with a unit menu (`self.menu`, put it beside the
+    box). value() / setValue() / valueChanged are always in the first unit (SI);
+    the box shows the number in the unit picked."""
+    unitChanged = Signal(str)
+
+    def __init__(self, units, value=None, parent=None):
+        self.units = dict(units)               # name -> factor to the first unit
+        self.factor = 1.0
+        super().__init__(None, parent)
+        self.menu = MenuSelect()
+        for k in self.units:
+            self.menu.addItem(k, k)
+        self.menu.setToolTip("Unit")
+        self.menu.currentIndexChanged.connect(self._unit_picked)
+        self.setValue(value)
+
+    def value(self):
+        v = self._value
+        return None if v is None else v * self.factor
+
+    def setValue(self, v):
+        NumberField.setValue(self, None if v is None else v / self.factor)
+
+    def unit(self):
+        return self.menu.currentData()
+
+    def set_unit(self, key, emit=False):
+        i = self.menu.findData(key)
+        if i < 0:
+            return
+        self.menu.blockSignals(True)
+        self.menu.setCurrentIndex(i)
+        self.menu.blockSignals(False)
+        self._unit_picked(i, emit)
+
+    def _unit_picked(self, i, emit=True):
+        si = self.value()
+        self.factor = self.units[self.menu.currentData()]
+        self.setValue(si)                      # same quantity, new unit
+        if emit:
+            self.unitChanged.emit(self.menu.currentData())
+
+
+class ValuesButton(QPushButton):
+    """NEW (v2.11.1): small "Values" link; click -> a pop-up list of computed numbers.
+
+        set_rows([("Reynolds Re", "1.2e7", ""), ("Temperature T", "288", "K"), ...])
+    """
+
+    def __init__(self, title, text="Values", tip="All the computed values", parent=None):
+        super().__init__(text, parent)
+        self.setObjectName("LinkButton")
+        self.setFlat(True)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip(tip)
+        self._title = title
+        self._rows = []
+        self.popup = None
+        self.clicked.connect(self.open)
+
+    def set_rows(self, rows):
+        self._rows = list(rows)
+        self.setEnabled(bool(self._rows))
+        if self.popup is not None and self.popup.isVisible():
+            self.open()                         # refresh what is shown
+
+    def open(self):
+        if self.popup is not None:
+            self.popup.close()
+        pop = QFrame(self.window(), Qt.Popup | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint)
+        pop.setObjectName("ValuesPopup")
+        pop.setAttribute(Qt.WA_TranslucentBackground)
+        pop.setAttribute(Qt.WA_DeleteOnClose)
+        outer = QVBoxLayout(pop)
+        outer.setContentsMargins(0, 0, 0, 0)
+        body = QFrame()
+        body.setObjectName("ValuesBody")
+        outer.addWidget(body)
+        lay = QVBoxLayout(body)
+        lay.setContentsMargins(14, 10, 14, 12)
+        lay.setSpacing(6)
+        t = QLabel(self._title)
+        t.setObjectName("SubHeader")
+        lay.addWidget(t)
+        g = QGridLayout()
+        g.setHorizontalSpacing(10)
+        g.setVerticalSpacing(4)
+        for r, (name, value, unit) in enumerate(self._rows):
+            if value is None:                   # a sub-title
+                lab = QLabel(name)
+                lab.setObjectName("Caption")
+                g.addWidget(lab, r, 0, 1, 3)
+                continue
+            g.addWidget(QLabel(name), r, 0)
+            v = QLabel(value)
+            v.setObjectName("ValueText")
+            v.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            v.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            g.addWidget(v, r, 1)
+            u = QLabel(unit)
+            u.setObjectName("AxisLabel")
+            g.addWidget(u, r, 2)
+        lay.addLayout(g)
+        pop.adjustSize()
+        # under the button, kept on the screen
+        pos = self.mapToGlobal(self.rect().bottomRight())
+        x = pos.x() - pop.width()
+        screen = self.screen().availableGeometry()
+        x = max(screen.left() + 4, min(x, screen.right() - pop.width() - 4))
+        y = pos.y() + 4
+        if y + pop.height() > screen.bottom():
+            y = self.mapToGlobal(self.rect().topLeft()).y() - pop.height() - 4
+        pop.move(x, y)
+        pop.show()
+        self.popup = pop
+        pop.destroyed.connect(lambda *_: setattr(self, "popup", None))
+
+
+# ---------------------------------------------------------------------------
+# NEW (v2.11.3): "Formulas" — a window in the middle of the app with the equations
+# ---------------------------------------------------------------------------
+
+def render_tex(tex, color="#000000", size=17):
+    """LaTeX-like formula -> QPixmap (matplotlib's mathtext: no TeX install needed),
+    or None when matplotlib is not there."""
+    try:
+        import io
+
+        import matplotlib
+        from matplotlib import mathtext
+        from matplotlib.font_manager import FontProperties
+    except ImportError:
+        return None
+    try:
+        with matplotlib.rc_context({"mathtext.fontset": "cm",      # Computer Modern
+                                    "savefig.transparent": True}):
+            buf = io.BytesIO()
+            tex = tex.replace(r"\frac", r"\dfrac")              # full-size fractions
+            mathtext.math_to_image(f"${tex}$", buf, prop=FontProperties(size=size), dpi=144,
+                                   format="png", color=color)
+    except Exception:                                           # noqa: BLE001
+        return None
+    pm = QPixmap()
+    pm.loadFromData(buf.getvalue(), "PNG")
+    pm.setDevicePixelRatio(2)
+    return pm
+
+
+def _plain(tex):
+    """Readable fallback for a formula without matplotlib."""
+    t = tex
+    for a, b in ((r"\frac", ""), (r"\sqrt", "√"), (r"\left", ""), (r"\right", ""),
+                 (r"\rho", "ρ"), (r"\mu", "μ"), (r"\nu", "ν"), (r"\tau", "τ"),
+                 (r"\gamma", "γ"), (r"\delta", "δ"), (r"\cdot", "·"), (r"\,", " "),
+                 (r"\max", "max"), (r"\min", "min"), (r"\log", "log"), (r"\times", "×"),
+                 (r"\mathrm", ""), ("{", "("), ("}", ")"), ("\\", "")):
+        t = re.sub(a, b, t)
+    return t
+
+
+class FormulasDialog(QFrame):
+    """A card in the middle of the window: title, then for each formula a short
+    explanation and the formula. Click outside or press Esc to close."""
+
+    def __init__(self, title, items, parent):
+        super().__init__(parent.window(), Qt.Popup | Qt.FramelessWindowHint |
+                         Qt.NoDropShadowWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_DeleteOnClose)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        body = QFrame()
+        body.setObjectName("ValuesBody")
+        outer.addWidget(body)
+        bl = QVBoxLayout(body)
+        bl.setContentsMargins(2, 2, 2, 2)
+        scroll = QScrollArea()                     # scrolls when the window is small
+        scroll.setObjectName("FormulasScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        bl.addWidget(scroll)
+        inner = QWidget()
+        inner.setObjectName("FormulasInner")
+        scroll.setWidget(inner)
+        lay = QVBoxLayout(inner)
+        lay.setContentsMargins(20, 14, 20, 16)
+        lay.setSpacing(4)
+        inner.setMinimumWidth(500)
+        t = QLabel(title)
+        t.setObjectName("PageTitle")
+        lay.addWidget(t)
+        color = self.palette().color(QPalette.WindowText).name()
+        for item in items:
+            if isinstance(item, str):                    # a sub-title
+                lab = QLabel(item)
+                lab.setObjectName("Caption")
+                lab.setContentsMargins(0, 10, 0, 0)
+                lay.addWidget(lab)
+                continue
+            text, tex = item
+            lab = QLabel(text)
+            lab.setObjectName("InfoLine")
+            lab.setWordWrap(True)
+            lab.setContentsMargins(0, 6, 0, 0)
+            lay.addWidget(lab)
+            if tex:
+                f = QLabel()
+                pm = render_tex(tex, color)
+                if pm is None:
+                    f.setText(_plain(tex))
+                else:
+                    f.setPixmap(pm)
+                f.setContentsMargins(12, 0, 0, 0)
+                lay.addWidget(f)
+        win = parent.window().geometry()
+        width = max(inner.sizeHint().width(), 500) + 24        # + room for the scroll bar
+        inner.setFixedWidth(width - 24)
+        h = min(inner.heightForWidth(width - 24) if inner.hasHeightForWidth()
+                else inner.sizeHint().height(), win.height() - 60) + 8
+        self.resize(width, h)
+        scroll.setFixedHeight(h - 4)
+        self.move(win.center().x() - self.width() // 2,
+                  max(win.top() + 40, win.center().y() - self.height() // 2))
+
+    def keyPressEvent(self, e):
+        if e.key() == Qt.Key_Escape:
+            self.close()
+        else:
+            super().keyPressEvent(e)
+
+
+class FormulasButton(QPushButton):
+    """Small "Formulas" link; `items` is a list (or a function returning one) of
+    sub-title strings and (explanation, LaTeX formula) pairs."""
+
+    def __init__(self, title, items, text="Formulas", parent=None):
+        super().__init__(text, parent)
+        self.setObjectName("LinkButton")
+        self.setFlat(True)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip("The formulas used here")
+        self._title = title
+        self._items = items
+        self.dialog = None
+        self.clicked.connect(self.open)
+
+    def open(self):
+        items = self._items() if callable(self._items) else self._items
+        self.dialog = FormulasDialog(self._title, items, self)
+        self.dialog.show()
+
+
+class GradientBar(QWidget):
+    """NEW (v2.11.3): thin colour scale with labels under it (the y+ colours)."""
+
+    def __init__(self, stops, labels, parent=None):
+        super().__init__(parent)
+        self._stops = stops               # [(0..1, "#hex")]
+        self._labels = labels             # [(0..1, "text")]
+        self.setFixedHeight(26)
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        r = QRectF(1, 1, self.width() - 2, 8)
+        g = QLinearGradient(r.topLeft(), r.topRight())
+        for pos, c in self._stops:
+            g.setColorAt(pos, QColor(c))
+        p.setPen(Qt.NoPen)
+        p.setBrush(g)
+        p.drawRoundedRect(r, 4, 4)
+        f = p.font()
+        f.setPixelSize(10)
+        p.setFont(f)
+        p.setPen(self.palette().color(QPalette.PlaceholderText))
+        fm = p.fontMetrics()
+        for pos, text in self._labels:
+            w = fm.horizontalAdvance(text)
+            x = min(max(r.left() + pos * r.width() - w / 2, 0), self.width() - w)
+            p.drawText(QPointF(x, 24), text)
+        p.end()
+
+
+def help_button(url, tip):
+    b = QPushButton("?")
+    b.setObjectName("HelpButton")
+    b.setCursor(Qt.PointingHandCursor)
+    b.setToolTip(f"{tip}\n{url}")
+    b.setFixedSize(16, 16)
+    b.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(url)))
+    return b

@@ -23,7 +23,7 @@ ICON = Path(__file__).resolve().parents[2] / "resources" / "mesh_icon.icns"
 
 
 def _axis_font(v) -> int:
-    """Points; also reads the old Small / Medium / Large setting (v2.11–2.13)."""
+    """Points; also reads the old Small / Medium / Large setting (v2.4.3–2.13)."""
     v = {"small": 16, "medium": 20, "large": 24}.get(str(v), v)
     try:
         return max(10, min(28, int(v)))
@@ -56,12 +56,12 @@ class MeshViewerApp(QApplication):
             "bg_image": st.value("appearance/bg_image", ""),
             "density": st.value("appearance/density", "compact"),     # parts list rows
             "axis_font": _axis_font(st.value("appearance/axis_font", AXIS_FONT_DEFAULT)),
-            # NEW (v2.14): edge lines
+            # NEW (v2.5.3): edge lines
             "edge_width": st.value("appearance/edge_width", "thin"),
             "hide_edges_moving": st.value("appearance/hide_edges_moving", True, type=bool),
-            # v2.27: light and shadow on the model (was a Display switch in 2.25)
+            # v2.8.4: light and shadow on the model (was a Display switch in 2.25)
             "shading": st.value("appearance/shading", True, type=bool),
-            # v2.21: Display ▸ Axes (off / axes / grid / both) replaces the Grid switch
+            # v2.7.2: Display ▸ Axes (off / axes / grid / both) replaces the Grid switch
             # and Appearance's Grid lines / Axis lines switches
             "axes": st.value("appearance/axes", _old_axes_setting(st)),
         }
@@ -80,9 +80,50 @@ class MeshViewerApp(QApplication):
             a = m.addAction("Open…")
             a.setShortcut(QKeySequence.Open)
             a.triggered.connect(self.open_dialog)
-            m.addAction(self.about_action(m))                  # NEW (v2.15)
+            self.add_recent_menu(m)                            # v2.9
+            m.addAction(self.about_action(m))                  # NEW (v2.5.4)
+        self.aboutToQuit.connect(self._remember_all)
 
-    # ---- NEW (v2.15): About Mesh Viewer ---------------------------------------------
+    # ---- NEW (v2.9): File ▸ Open Recent ---------------------------------------------
+    RECENT_MAX = 12
+
+    def recent_files(self):
+        st = QSettings("local", "Mesh Viewer")
+        files = st.value("recent", []) or []
+        files = [files] if isinstance(files, str) else list(files)
+        return [f for f in files if Path(f).exists()]
+
+    def add_recent(self, path):
+        p = str(Path(path).resolve())
+        files = [p] + [f for f in self.recent_files() if f != p]
+        QSettings("local", "Mesh Viewer").setValue("recent", files[: self.RECENT_MAX])
+
+    def add_recent_menu(self, menu):
+        sub = menu.addMenu("Open Recent")
+        sub.aboutToShow.connect(lambda: self._fill_recent(sub))
+        self._fill_recent(sub)                             # so it isn't empty before
+        return sub
+
+    def _fill_recent(self, sub):
+        sub.clear()
+        files = self.recent_files()
+        names = [Path(f).name for f in files]
+        for f, name in zip(files, names):
+            text = name if names.count(name) == 1 else f"{name} — {Path(f).parent.name}"
+            a = sub.addAction(text)
+            a.setToolTip(f)
+            a.triggered.connect(lambda _=False, f=f: self.open_path(Path(f)))
+        if files:
+            sub.addSeparator()
+        clear = sub.addAction("Clear Menu")
+        clear.setEnabled(bool(files))
+        clear.triggered.connect(lambda: QSettings("local", "Mesh Viewer").setValue("recent", []))
+
+    def _remember_all(self):
+        for w in list(self.windows):
+            w.remember_view()
+
+    # ---- NEW (v2.5.4): About Mesh Viewer ---------------------------------------------
     def about_action(self, parent):
         """'About Mesh Viewer' — macOS moves it to the app menu (left of File)."""
         a = QAction("About Mesh Viewer", parent)
