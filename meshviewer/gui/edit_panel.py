@@ -1,14 +1,16 @@
-"""Edit section of the sidebar (v2.23; v2.24 move / undo / original; v2.26 laid
-out as a small table: one row per axis, a column per kind of change).
+"""Edit section of the sidebar (v2.23; v2.24 move / undo / original; v2.27 laid
+out like Onshape's Transform: choose the kind, fill it in, Apply).
 
-    Pivot   [    Origin    |    Centre    ]      what Rotate and Mirror turn about
-             Rotate                  Mirror
-    X       [ −90° | +90° | 180° ]  [x → −x]
-    Y       [ −90° | +90° | 180° ]  [y → −y]
-    Z       [ −90° | +90° | 180° ]  [z → −z]
-    Move    [X 0] [Y 0] [Z 0]       [ Move ]
+    Transform  [ Rotate               ▾ ]     Rotate · Mirror · Move by X, Y, Z
+    Axis       [  X  |  Y  |  Z  ]            (Rotate, Mirror)
+    Angle      [                90° ]         (Rotate: any angle)
+    Pivot      [ Origin | Centre ]            (Rotate, Mirror)
+    X / Y / Z  [            0 mm ]            (Move)
+    [                 Apply                ]
+    Changes (2)                 [ Undo | Reset ]
+      1  Rotate 90° about Z
+      2  Move 10, 0, 0 mm
     Show original edges                (switch)
-    Last: …                      [ Undo | Reset ]
 
 Exact CAD (STEP, IGES, BREP) only shows a grey note instead.
 """
@@ -18,21 +20,34 @@ import numpy as np
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QAction, QActionGroup
 from PySide6.QtWidgets import (
-    QAbstractSpinBox, QGridLayout, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget,
+    QAbstractSpinBox, QGridLayout, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout,
+    QWidget,
 )
 
 from .. import transform as xf
-from .widgets import Capsule, NoWheelSpinBox, Switch
+from .widgets import Capsule, MenuSelect, NoWheelSpinBox, Switch
 
-SIDE_WIDTH = 60          # the Mirror / Move column
+KINDS = (("rotate", "Rotate"), ("mirror", "Mirror"), ("move", "Move by X, Y, Z"))
+HISTORY_SHOWN = 8          # older changes fold into "… n earlier"
 
 
-class _Distance(NoWheelSpinBox):
-    """Move distance shown without trailing zeros ("X 0", "X 2.5"), so it fits."""
+class _Number(NoWheelSpinBox):
+    """Value shown without trailing zeros ("90°", "2.5 mm")."""
 
     def textFromValue(self, v):
         t = f"{v:.{self.decimals()}f}".rstrip("0").rstrip(".")
         return "0" if t in ("", "-0") else t
+
+
+def _number(lo, hi, decimals, suffix=""):
+    b = _Number()
+    b.setRange(lo, hi)
+    b.setDecimals(decimals)
+    b.setSuffix(suffix)
+    b.setButtonSymbols(QAbstractSpinBox.NoButtons)
+    b.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+    b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+    return b
 
 
 def _info(text=""):
@@ -42,35 +57,26 @@ def _info(text=""):
     return lab
 
 
-def _wide(actions, width=None):
-    """A capsule that fills its cell, every button the same width."""
-    c = Capsule(actions, name="Segmented")
+def _segmented(parent, items, tips):
+    group = QActionGroup(parent)
+    group.setExclusive(True)
+    acts = {}
+    for key, text in items:
+        a = QAction(text, parent)
+        a.setCheckable(True)
+        a.setToolTip(tips.get(key, ""))
+        group.addAction(a)
+        acts[key] = a
+    c = Capsule(list(acts.values()), name="Segmented")
     c.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-    if width:
-        c.setFixedWidth(width)
     for b in c.buttons:
         b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-    return c
-
-
-def _header(text):
-    lab = QLabel(text)
-    lab.setObjectName("AxisLabel")
-    lab.setAlignment(Qt.AlignCenter)
-    return lab
-
-
-def _action(parent, text, tip, slot=None, checkable=False):
-    a = QAction(text, parent)
-    a.setToolTip(tip)
-    a.setCheckable(checkable)
-    if slot is not None:
-        a.triggered.connect(slot)
-    return a
+    next(iter(acts.values())).setChecked(True)
+    return acts, c
 
 
 class EditPanel(QWidget):
-    edit_requested = Signal(object, object, str)   # R (3×3 int), t (3 floats), label
+    edit_requested = Signal(object, object, str)   # R (3×3), t (3 floats), label
     undo_requested = Signal()
     reset_requested = Signal()
     original_toggled = Signal(bool)
@@ -85,77 +91,94 @@ class EditPanel(QWidget):
         self.unsupported = _info()                 # exact CAD: just a note
         lay.addWidget(self.unsupported)
 
+        # ---- the transform being set up -------------------------------------------
         self.tools = QWidget()
-        self.tools.setObjectName("EditTools")       # tighter button padding (style.py)
         g = QGridLayout(self.tools)
         g.setContentsMargins(2, 0, 2, 0)
-        g.setHorizontalSpacing(6)
-        g.setVerticalSpacing(5)
+        g.setHorizontalSpacing(8)
+        g.setVerticalSpacing(6)
         g.setColumnStretch(1, 1)
         lay.addWidget(self.tools)
+        self._rows = {}                            # key -> (label, widget), shown per kind
 
-        # Pivot (shared by Rotate and Mirror)
-        pg = QActionGroup(self)
-        pg.setExclusive(True)
-        self.pivot = {
-            "origin": _action(self, "Origin", "Rotate and mirror about (0, 0, 0)", checkable=True),
-            "centre": _action(self, "Centre", "Rotate and mirror about the model's centre",
-                              checkable=True)}
-        for a in self.pivot.values():
-            pg.addAction(a)
-        self.pivot["origin"].setChecked(True)
-        lab = QLabel("Pivot")
-        lab.setToolTip("What Rotate and Mirror turn about")
-        g.addWidget(lab, 0, 0)
-        g.addWidget(_wide(list(self.pivot.values())), 0, 1, 1, 2)
-        g.setRowMinimumHeight(1, 4)                # a little air under Pivot
+        def row(key, label, widget, tip=""):
+            r = g.rowCount()
+            lab = QLabel(label)
+            lab.setToolTip(tip)
+            if tip and not widget.toolTip():
+                widget.setToolTip(tip)
+            g.addWidget(lab, r, 0)
+            g.addWidget(widget, r, 1)
+            self._rows[key] = (lab, widget)
 
-        # Table: a row per axis — Rotate (3 buttons) | Mirror
-        g.addWidget(_header("Rotate"), 2, 1)
-        g.addWidget(_header("Mirror"), 2, 2)
-        self.turns, self.mirrors = {}, {}
-        for row, k in enumerate("xyz", start=3):
-            K = k.upper()
-            lab = QLabel(K)
-            lab.setToolTip(f"Rotate about {K}, or mirror along {K}")
-            g.addWidget(lab, row, 0)
-            acts = []
-            for deg, text in ((-90, "−90°"), (90, "+90°"), (180, "180°")):
-                a = _action(self, text, f"Rotate {text} about {K} (right-hand rule)",
-                            lambda _=False, kk=k, d=deg: self._rotate(kk, d))
-                acts.append(a)
-                self.turns[(k, deg)] = a
-            g.addWidget(_wide(acts), row, 1)
-            self.mirrors[k] = _action(self, f"{k} → −{k}", f"Mirror along {K}: {k} becomes −{k}",
-                                      lambda _=False, kk=k: self._mirror(kk))
-            g.addWidget(_wide([self.mirrors[k]], SIDE_WIDTH), row, 2)
+        self.kind = MenuSelect()
+        for key, text in KINDS:
+            self.kind.addItem(text, key)
+        self.kind.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.kind.currentIndexChanged.connect(self._kind_changed)
+        row("kind", "Transform", self.kind)
 
-        # Move: three distances in the Rotate column, the button in the Mirror column
-        g.setRowMinimumHeight(6, 4)
-        boxes = QWidget()
-        bl = QHBoxLayout(boxes)
-        bl.setContentsMargins(0, 0, 0, 0)
-        bl.setSpacing(3)
+        self.axis, w = _segmented(self, (("x", "X"), ("y", "Y"), ("z", "Z")), {})
+        for a in self.axis.values():
+            a.toggled.connect(lambda _on: self._update_hint())
+        row("axis", "Axis", w)
+
+        self.angle = _number(-360, 360, 3, "°")
+        self.angle.setValue(90)
+        self.angle.setToolTip("Any angle; positive turns follow the right-hand rule "
+                              "(thumb along +axis)")
+        row("angle", "Angle", self.angle)
+
+        self.pivot, w = _segmented(self, (("origin", "Origin"), ("centre", "Centre")),
+                                   {"origin": "Turn / mirror about (0, 0, 0)",
+                                    "centre": "Turn / mirror about the model's centre"})
+        row("pivot", "Pivot", w)
+
         self.move = []
         for k in "xyz":
-            b = _Distance()
-            b.setRange(-1e9, 1e9)
-            b.setDecimals(3)
-            b.setPrefix(f"{k.upper()} ")
-            b.setButtonSymbols(QAbstractSpinBox.NoButtons)
-            b.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-            b.setMinimumWidth(40)
-            b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-            b.setToolTip(f"Distance along {k.upper()}")
+            b = _number(-1e9, 1e9, 6)
             self.move.append(b)
-            bl.addWidget(b)
-        self.move_label = QLabel("Move")
-        g.addWidget(self.move_label, 7, 0)
-        g.addWidget(boxes, 7, 1)
-        self.move_go = _action(self, "Move", "Move the model by these distances", self._translate)
-        g.addWidget(_wide([self.move_go], SIDE_WIDTH), 7, 2)
+            row(f"move_{k}", k.upper(), b, f"Distance along {k.upper()}")
 
-        # Compare with the file + history (same section: no divider, v2.26)
+        self.hint = _info()                        # what Mirror does, in words
+        g.addWidget(self.hint, g.rowCount(), 1)
+
+        self.apply = QPushButton("Apply")
+        self.apply.setObjectName("ApplyButton")
+        self.apply.setCursor(Qt.PointingHandCursor)
+        self.apply.setToolTip("Apply this transform (Return in a box does the same)")
+        self.apply.clicked.connect(self._apply)
+        lay.addWidget(self.apply)
+        for b in (self.angle, *self.move):
+            b.lineEdit().returnPressed.connect(self._apply)
+
+        # ---- what has been done ---------------------------------------------------
+        hrow = QHBoxLayout()
+        hrow.setContentsMargins(2, 4, 2, 0)
+        self.history_title = QLabel("Changes")
+        self.history_title.setObjectName("AxisLabel")
+        hrow.addWidget(self.history_title, 1)
+        self.undo = QAction("Undo", self)
+        self.undo.setToolTip("Undo the last change")
+        self.undo.triggered.connect(self.undo_requested.emit)
+        self.reset = QAction("Reset", self)
+        self.reset.setToolTip("Back to the file as opened")
+        self.reset.triggered.connect(self.reset_requested.emit)
+        self.undo_capsule = Capsule([self.undo, self.reset], name="Segmented")   # like Clear
+        hrow.addWidget(self.undo_capsule)
+        self.history_head = QWidget()
+        self.history_head.setLayout(hrow)
+        lay.addWidget(self.history_head)
+
+        self.history = QWidget()
+        self.history_lay = QVBoxLayout(self.history)
+        self.history_lay.setContentsMargins(4, 0, 2, 0)
+        self.history_lay.setSpacing(2)
+        lay.addWidget(self.history)
+        self.status = _info("No changes yet")      # also the empty list
+        self.history_lay.addWidget(self.status)
+        self._history_rows = []
+
         self.original = Switch()
         self.original.setToolTip("Grey feature edges of the file as it was opened, to compare")
         self.original.toggled.connect(self.original_toggled.emit)
@@ -165,17 +188,11 @@ class EditPanel(QWidget):
         orow.addWidget(self.original_label)
         orow.addStretch(1)
         orow.addWidget(self.original)
-        lay.addLayout(orow)
+        self.original_row = QWidget()
+        self.original_row.setLayout(orow)
+        lay.addWidget(self.original_row)
 
-        self.status = _info("No changes")
-        self.undo = _action(self, "Undo", "Undo the last change", self.undo_requested.emit)
-        self.reset = _action(self, "Reset", "Back to the file as opened", self.reset_requested.emit)
-        srow = QHBoxLayout()
-        srow.setContentsMargins(2, 0, 2, 0)
-        srow.addWidget(self.status, 1)
-        self.undo_capsule = Capsule([self.undo, self.reset], name="Segmented")   # like Clear
-        srow.addWidget(self.undo_capsule)
-        lay.addLayout(srow)
+        self._kind_changed()
         self.refresh()
 
     # ---- binding / state ------------------------------------------------------------
@@ -183,35 +200,88 @@ class EditPanel(QWidget):
         self.scene = scene
         m = scene.model
         ok = m.editable
-        for w in (self.tools, self.original, self.original_label, self.status,
-                  self.undo_capsule):
+        for w in (self.tools, self.apply, self.history_head, self.history, self.original_row):
             w.setVisible(ok)
         self.unsupported.setVisible(not ok)
         self.unsupported.setText(
             "" if ok else f"Editing isn't available for {m.fmt} files: they hold exact CAD "
                           f"geometry. Export as STL, open that file, and edit it.")
         step = 10 ** np.floor(np.log10(max(scene.section.diag, 1e-9) / 20))
-        for b in self.move:
+        unit = f" {m.units}" if m.units else ""
+        for k, b in zip("XYZ", self.move):
             b.setSingleStep(float(step))
+            b.setSuffix(unit)
             b.setValue(0.0)
-        unit = m.units or "file units"
-        self.move_label.setToolTip(f"Distances in {unit}")
-        for b in self.move:
-            b.setToolTip(f"Distance along {b.prefix().strip()} ({unit})")
+            b.setToolTip(f"Distance along {k} ({m.units or 'file units'})")
         Switch.set_silently(self.original, scene.state.get("original", False))
         self.refresh()
 
-    def refresh(self):
-        """Last change text + which buttons work."""
-        sc = self.scene
-        edited = bool(sc and sc.model.edited)
-        self.undo.setEnabled(bool(sc and sc.last_edit))
-        self.reset.setEnabled(edited)
-        self.status.setText(f"Last: {sc.last_edit}" if edited and sc.last_edit
-                            else ("Edited" if edited else "No changes"))
+    @property
+    def current_kind(self):
+        return self.kind.currentData()
 
-    # ---- actions ----------------------------------------------------------------------
-    def _emit(self, r, label):
+    def _kind_changed(self, *_):
+        k = self.current_kind
+        show = {"kind": True, "axis": k in ("rotate", "mirror"), "angle": k == "rotate",
+                "pivot": k in ("rotate", "mirror"),
+                **{f"move_{a}": k == "move" for a in "xyz"}}
+        for key, (lab, w) in self._rows.items():
+            lab.setVisible(show[key])
+            w.setVisible(show[key])
+        self._update_hint()
+
+    def _axis_key(self):
+        return next(k for k, a in self.axis.items() if a.isChecked())
+
+    def _update_hint(self):
+        a = self._axis_key()
+        plane = {"x": "YZ", "y": "XZ", "z": "XY"}[a]
+        self.hint.setText(f"{a} becomes −{a} (mirror across the {plane} plane)")
+        self.hint.setVisible(self.current_kind == "mirror")
+
+    def refresh(self):
+        """Changes list + which buttons work."""
+        sc = self.scene
+        labels = sc.edit_labels if sc is not None else []
+        edited = bool(sc and sc.model.edited)
+        self.undo.setEnabled(bool(labels))
+        self.reset.setEnabled(edited)
+        self.history_title.setText(f"Changes ({len(labels)})" if labels else "Changes")
+        for w in self._history_rows:
+            self.history_lay.removeWidget(w)
+            w.hide()
+            w.deleteLater()
+        self._history_rows = []
+        self.status.setVisible(not labels)
+        shown = labels[-HISTORY_SHOWN:]
+        first = len(labels) - len(shown)
+        if first:
+            self._add_history_row(f"… {first} earlier")
+        for i, text in enumerate(shown, start=first + 1):
+            self._add_history_row(f"{i}   {text}")
+
+    def _add_history_row(self, text):
+        lab = QLabel(text)
+        lab.setObjectName("HistoryLine")
+        lab.setWordWrap(True)
+        self.history_lay.addWidget(lab)
+        self._history_rows.append(lab)
+
+    # ---- Apply ------------------------------------------------------------------------
+    def _apply(self):
+        k = self.current_kind
+        if k == "move":
+            self._translate()
+            return
+        axis = self._axis_key()
+        if k == "rotate":
+            deg = float(self.angle.value())
+            if deg % 360 == 0:
+                return
+            r, label = xf.rotation(axis, deg), f"Rotate {self.angle.textFromValue(deg)}° " \
+                                                f"about {axis.upper()}"
+        else:
+            r, label = xf.mirror(axis), f"Mirror {axis} → −{axis}"
         t = np.zeros(3)
         if self.pivot["centre"].isChecked() and self.scene is not None:
             b = np.asarray(self.scene.model_bounds(), dtype=float).reshape(3, 2)
@@ -219,19 +289,12 @@ class EditPanel(QWidget):
             label += " (centre)"
         self.edit_requested.emit(r, t, label)
 
-    def _rotate(self, k, deg):
-        text = "180°" if abs(deg) == 180 else f"{'+' if deg > 0 else '−'}90°"
-        self._emit(xf.rotation(k, deg), f"rotate {text} about {k.upper()}")
-
-    def _mirror(self, k):
-        self._emit(xf.mirror(k), f"mirror {k} → −{k}")
-
     def _translate(self):
         t = np.array([b.value() for b in self.move], dtype=float)
         if not np.any(t):
             return
         unit = f" {self.scene.model.units}" if self.scene and self.scene.model.units else ""
         self.edit_requested.emit(xf.identity(), t,
-                                 "move " + ", ".join(f"{v:g}" for v in t) + unit)
+                                 "Move " + ", ".join(f"{v:g}" for v in t) + unit)
         for b in self.move:
             b.setValue(0.0)

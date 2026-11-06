@@ -59,6 +59,8 @@ class MeshViewerApp(QApplication):
             # NEW (v2.14): edge lines
             "edge_width": st.value("appearance/edge_width", "thin"),
             "hide_edges_moving": st.value("appearance/hide_edges_moving", True, type=bool),
+            # v2.27: light and shadow on the model (was a Display switch in 2.25)
+            "shading": st.value("appearance/shading", True, type=bool),
             # v2.21: Display ▸ Axes (off / axes / grid / both) replaces the Grid switch
             # and Appearance's Grid lines / Axis lines switches
             "axes": st.value("appearance/axes", _old_axes_setting(st)),

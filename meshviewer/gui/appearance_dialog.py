@@ -1,10 +1,11 @@
 """Appearance sheet = HOW things look, the same in every window (v2.25 groups):
     Window      theme, parts list spacing
     Background  default gradient, a colour, or an image
+    Model       shading (v2.27: light and shadow, or flat colours)
     Axes        label size
     Edges       line thickness, hide while the view moves
-WHAT is shown (axes, grid, edges, shading…) is switched on / off in the
-sidebar's Display section, per window. Changes apply live and are remembered."""
+WHAT is shown (axes, grid, edges, faces…) is switched on / off in the
+toolbar, per window. Changes apply live and are remembered."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -76,7 +77,7 @@ class AppearanceDialog(QDialog):
         title.setStyleSheet("font-size: 15px; font-weight: 600;")
         lay.addWidget(title)
         note = QLabel("How things look, saved for every window. What is shown "
-                      "(axes, edges, shading…) is switched in the side panel ▸ Display.")
+                      "(axes, edges, faces…) is switched in the toolbar.")
         note.setObjectName("InfoLine")
         note.setWordWrap(True)
         note.setFixedWidth(360)
@@ -87,7 +88,7 @@ class AppearanceDialog(QDialog):
         form.setHorizontalSpacing(12)
         form.setVerticalSpacing(10)
 
-        # v2.25: groups named after what they style (Display has the on / off switches).
+        # v2.25: groups named after what they style (the toolbar has the on / off toggles).
         # ---- Window ------------------------------------------------------------------
         form.addRow(_group_title("Window"))
         self.theme, w = _segmented(self, (("system", "System"), ("light", "Light"),
@@ -139,11 +140,18 @@ class AppearanceDialog(QDialog):
         fl.addWidget(self.axis_font)
         fl.addWidget(self.axis_font_value)
         fl.addStretch(1)
+        # ---- Model (v2.27) -------------------------------------------------------------
+        form.addRow(_separator())
+        form.addRow(_group_title("Model"))
+        self.shading = Switch(bool(a["shading"]))
+        self.shading.toggled.connect(lambda on: self.app.set_appearance(shading=on))
+        form.addRow("Shading", _switch_row(self.shading, "light and shadow — off: flat colours"))
+
         form.addRow(_separator())
         form.addRow(_group_title("Axes"))
         form.addRow("Label size", font_row)
         font_row.setToolTip("Size of the axis numbers and titles.\n"
-                            "Show / hide the axes: side panel ▸ Display ▸ Axes")
+                            "Show / hide the axes: toolbar")
 
         # ---- Edges ------------------------------------------------------------------------
         form.addRow(_separator())
@@ -153,10 +161,12 @@ class AppearanceDialog(QDialog):
                                         lambda k: self.app.set_appearance(edge_width=k))
         w.setToolTip("Thickness of the feature edge lines (1 / 1.5 / 2 px).\n"
                      "Thin is the fastest to draw.\n"
-                     "Show / hide edges: side panel ▸ Display")
+                     "Show / hide edges: toolbar")
         form.addRow("Line thickness", w)
         self.hide_edges = Switch(bool(a["hide_edges_moving"]))
         self.hide_edges.toggled.connect(lambda on: self.app.set_appearance(hide_edges_moving=on))
+        self.hide_edges.setToolTip("Lines are hidden while the view turns or zooms.\n"
+                                   "With the faces hidden, feature edges stay.")
         form.addRow("While moving", _switch_row(self.hide_edges, "hide them — smoother"))
         lay.addLayout(form)
 

@@ -18,7 +18,7 @@ import sys
 from PySide6.QtCore import QItemSelectionModel, QPointF, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPalette, QPen
 from PySide6.QtWidgets import (
-    QAbstractItemView, QStyledItemDelegate, QTreeWidget, QTreeWidgetItem,
+    QAbstractItemView, QLineEdit, QStyledItemDelegate, QTreeWidget, QTreeWidgetItem,
 )
 
 from .style import accent
@@ -67,6 +67,14 @@ DENSITY = {"compact": 0, "comfortable": 6}       # extra pixels per row
 
 class _RowDelegate(QStyledItemDelegate):
     extra = 0
+
+    def createEditor(self, parent, option, index):
+        """v2.27: an opaque rename field (style.py #RenameField), so the old name
+        doesn't show through in dark mode."""
+        ed = QLineEdit(parent)
+        ed.setObjectName("RenameField")
+        ed.setFrame(False)
+        return ed
 
     def sizeHint(self, option, index):
         s = super().sizeHint(option, index)
@@ -172,8 +180,10 @@ class PartTree(QTreeWidget):
     def _names(item):
         return list(item.data(0, MEMBERS) or [item.data(0, NAME)])
 
-    def part_items(self):
-        return list(self._parts.values())
+    def set_color(self, name, hex_color):
+        """v2.29: new colour dot for a part."""
+        if name in self._parts:
+            self._parts[name].setIcon(0, color_dot(hex_color))
 
     def groups(self):
         """Every group row, deepest first (so parents are updated after children)."""

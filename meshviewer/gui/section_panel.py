@@ -165,10 +165,10 @@ class SectionPanel(QWidget):
 
     def _sync_fill_label(self):
         """Mesh files with volume cells fill the cut with the cut cells (v2.19);
-        their edges follow Display ▸ Mesh edges (v2.21). Same label either way."""
+        their edges follow the Mesh edges toggle (v2.21). Same label either way."""
         if self.section and self.section.has_volume:
             tip = ("Fill the cut with the volume cells the plane goes through.\n"
-                   "Their edges show when Display ▸ Mesh edges is on.\n"
+                   "Their edges show when Mesh edges (toolbar) is on.\n"
                    "The cells are read from the file the first time.")
         else:
             tip = "Solid colour on the cut"

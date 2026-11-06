@@ -137,14 +137,11 @@ Keep the MeshViewer folder where it is: this app runs the code from it.
 - **Select**: click a part, or ⌘/⇧-click to add parts. Click empty space or press
   Esc to clear.
 - **Right-click** a part (in 3D or in the list):
-  - Hide, Isolate, Zoom To, Show All
+  - Hide, Isolate, Zoom To, Colour…, Show All
   - Rename… (also: select a part and press Return) — Export uses the new names
   - Search in McMaster (when a McMaster part number is anywhere in the name)
   - Right-clicking inside a multi-selection acts on the whole selection.
 - **Sidebar**:
-  - **Display** (what this window shows): axes (off / axes / grid / both),
-    bounding box, mesh edges, feature edges, origin marker, shading (off = flat
-    colours, no light or shadow).
   - **Mesh quality** (STEP/IGES/BREP): five levels; the part is re-meshed in the
     background.
   - **Section**: the plane controls. Switching it on opens them, off folds them. For CGNS /
@@ -154,14 +151,17 @@ Keep the MeshViewer folder where it is: this app runs the code from it.
     - *Area & Volume*: click parts, or switch to *CAD faces* to pick single faces.
       Clicking empty space clears the faces.
   - **Parts**: list, filter, Show All / Hide All.
+- **Show** (toolbar, also View ▸ Show): mesh edges, feature edges, faces (off =
+  edges only) · axes, grid, bounding box, origin marker — each on / off.
 - **Units** (toolbar): ⊘ · mm · cm · m · in · ft. Used for measurements and axis
   labels. STEP/IGES files are in mm and get converted.
 - **Appearance** (⌘, or the sliders button) — how things look, the same in every
-  window: theme, parts list spacing, 3D background, axis label size, edge line
-  thickness, and hide edges while moving.
+  window: theme, parts list spacing, 3D background, shading, axis label size, edge
+  line thickness, and hide edges while moving.
 - **Screenshot** (⇧⌘S): 1×–4× resolution, background *As Shown* or *Transparent*.
-- **Edit** (sidebar section): rotate ±90° / 180° about X, Y or Z, mirror, or move
-  by a distance — turning about the origin or the model's centre. *Show original edges* shows
+- **Edit** (sidebar section, like Onshape's Transform): choose Rotate (any angle
+  about X, Y or Z), Mirror or Move by X, Y, Z, fill it in and press Apply — turning
+  about the origin or the model's centre. The changes are listed below. *Show original edges* shows
   the file's edges in grey to compare; *Undo* steps back, *Reset* returns to the
   file. Works on meshes (CGNS, UGRID) and triangle CAD (STL, OBJ, PLY, glTF, VRML),
   not on STEP / IGES / BREP. Edits and renamed parts stay in memory until you
@@ -170,7 +170,8 @@ Keep the MeshViewer folder where it is: this app runs the code from it.
   (ParaView) and, for meshes, UGRID + .mapbc with the volume cells. Includes your
   edits; hidden parts can be left out. STEP / IGES / BREP export their current
   triangle mesh (STL, OBJ, PLY).
-- **About Mesh Viewer** is in the app menu.
+- **About Mesh Viewer** is in the app menu, with *Check for Updates…* (opens the
+  latest GitHub release).
 
 ## Project layout
 

@@ -188,9 +188,18 @@ class Section:
         self.p.render()
 
     def sync_shading(self):
-        """Filled cut faces follow Display ▸ Shading (v2.25)."""
+        """Filled cut faces follow Appearance ▸ Shading (v2.25)."""
         if self._caps is not None:
             self._caps.GetProperty().SetLighting(self.scene.state.get("shading", True))
+
+    def recolor(self):
+        """Filled cut faces take the parts' current colours (v2.29)."""
+        if self._caps is None:
+            return
+        rgb = np.array([_darker(self.scene.colors[n]) for n in self.scene.names]) * 255
+        mesh = pv.wrap(self._caps.GetMapper().GetInput())
+        mesh.cell_data["rgb"] = rgb[self._cap_part].astype(np.uint8)
+        mesh.Modified()
 
     def cap_owner(self, actor, cell_id):
         """Part name for a picked cell of the caps actor (else None)."""
@@ -202,11 +211,6 @@ class Section:
         return [a for a in (self._caps, self._vol_cut) if a is not None]
 
     # ---- NEW (v2.19): cut cells of a volume mesh -------------------------------------
-    @property
-    def volume_cells(self):
-        """Number of 3D cells once loaded (0 = none / not loaded yet)."""
-        return self._volume.n_cells if self._volume else 0
-
     def volume_grid(self):
         """The volume cells (read the first time, with the Edit-mode rotations /
         mirrors applied), or None for files without them. Also used by Export."""
@@ -262,7 +266,7 @@ class Section:
         return True
 
     def sync_cut_edges(self):
-        """Cut-cell edges follow Display ▸ Mesh edges, and hide while the view
+        """Cut-cell edges follow the Mesh edges toggle, and hide while the view
         moves (when that Appearance setting is on) — exactly like the model's."""
         if self._vol_cut is not None:
             sc = self.scene

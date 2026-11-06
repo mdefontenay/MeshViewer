@@ -12,14 +12,14 @@ LIGHT = dict(
     text="#1d1d1f", secondary="#6e6e73", sidebar="#ebebee", divider="rgba(0,0,0,0.10)",
     capsule="rgba(0,0,0,0.045)", capsule_border="rgba(0,0,0,0.08)",
     hover="rgba(0,0,0,0.07)", pressed="rgba(0,0,0,0.13)",
-    field="#ffffff", field_border="rgba(0,0,0,0.15)",
+    field="#ffffff", field_border="rgba(0,0,0,0.15)", field_solid="#ffffff",
     menu="rgba(246,246,246,0.98)", menu_border="rgba(0,0,0,0.12)",
 )
 DARK = dict(
     text="#f5f5f7", secondary="#98989d", sidebar="#262628", divider="rgba(255,255,255,0.09)",
     capsule="rgba(255,255,255,0.07)", capsule_border="rgba(255,255,255,0.10)",
     hover="rgba(255,255,255,0.10)", pressed="rgba(255,255,255,0.17)",
-    field="rgba(255,255,255,0.06)", field_border="rgba(255,255,255,0.14)",
+    field="rgba(255,255,255,0.06)", field_border="rgba(255,255,255,0.14)", field_solid="#1e1e20",
     menu="rgba(40,40,42,0.98)", menu_border="rgba(255,255,255,0.14)",
 )
 
@@ -80,8 +80,6 @@ QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
                         border-radius: 12px; font-size: 12px; font-weight: 500; }}
 #Segmented QToolButton {{ min-height: 20px; padding: 1px 9px;
                           border-radius: 5px; font-size: 12px; }}
-#EditTools #Segmented QToolButton {{ padding: 1px 2px; }}  /* v2.26: narrow table cells */
-#EditTools QDoubleSpinBox {{ padding-left: 3px; padding-right: 3px; font-size: 12px; }}
 #Capsule QToolButton:hover, #Segmented QToolButton:hover {{ background: {hover}; }}
 #Capsule QToolButton:pressed, #Segmented QToolButton:pressed {{ background: {pressed}; }}
 #Capsule QToolButton:checked, #Segmented QToolButton:checked {{ background: {accent}; color: white; }}
@@ -96,6 +94,16 @@ QToolBar {{ spacing: 8px; padding: 3px 8px; border: none; }}
     padding: 3px 28px 3px 10px; text-align: left; color: {text}; min-height: 18px;
 }}
 #MenuSelect:hover {{ border-color: {accent}; }}
+/* v2.27: Edit ▸ Apply, the list of changes, renaming a part in the list (an
+   opaque field: a see-through one showed the old name under the new one) */
+#ApplyButton {{ background: {accent}; color: white; border: none; border-radius: 6px;
+    padding: 4px 10px; min-height: 18px; font-weight: 600; }}
+#ApplyButton:hover {{ background: {accent}; border: 1px solid rgba(255,255,255,0.35); }}
+#ApplyButton:pressed {{ background: {pressed}; }}
+#HistoryLine {{ color: {text}; font-size: 12px; }}
+#RenameField {{ background: {field_solid}; color: {text}; border: 1px solid {accent};
+    border-radius: 4px; padding: 0px 3px; selection-background-color: {accent};
+    selection-color: white; }}
 #ContextMenu {{
     background: {menu}; border: 1px solid {menu_border}; border-radius: 10px;
     padding: 6px 5px;

@@ -4,6 +4,32 @@ Every version of Mesh Viewer, newest first. Each table lists the files that
 changed and what changed in them. (The version number lives in
 `meshviewer/__init__.py`.)
 
+## 2.29 — part colours, Faces toggle, cleanup
+
+| File | |
+|---|---|
+| `gui/sidebar.py`, `gui/scene.py`, `gui/section.py`, `gui/part_tree.py` | right-click a part (or a selection) ▸ **Colour…**: the 3D view, the filled cut faces and the list dot follow |
+| `gui/window.py`, `gui/scene.py`, `gui/icons.py` | "Edges only" is now **Faces** (on = faces shown, off = edges only), with a shaded-cube icon |
+| cleanup | unused code removed (`n_triangles`, `last_edit`, `volume_cells`, `part_items`, pencil icon); tooltips and comments no longer point to the old Display section |
+
+## 2.28 — Display moves to the toolbar, Check for Updates
+
+| File | |
+|---|---|
+| `gui/window.py`, `gui/icons.py` | two new toolbar pills right of the views (left of the units), each button on / off on its own: **Mesh edges · Feature edges · Edges only**, and **Axes · Grid · Bounding box · Origin** (Axes + Grid are still remembered for every window). Also in View ▸ Show. Checked toolbar icons are now white on the accent colour |
+| `gui/sidebar.py` | the **Display** section is removed (it's all in the toolbar now) |
+| `gui/about_dialog.py` | **Check for Updates…** opens the latest release on GitHub |
+
+## 2.27 — Edit like Onshape, Edges only, shading in Appearance
+
+| File | |
+|---|---|
+| `gui/edit_panel.py` | **redone like Onshape's Transform**: pick Rotate / Mirror / Move by X, Y, Z in a drop-down, fill in its boxes (axis, **any angle**, pivot; or the three distances), press **Apply** (or Return). Below: the list of changes made so far, with Undo \| Reset, then Show original edges |
+| `transform.py`, `model.py`, `gui/scene.py` | rotations by any angle (multiples of 90° stay exact); `edit_labels` lists the changes |
+| `gui/sidebar.py`, `gui/scene.py` | Display ▸ **Edges only** (under Feature edges): hides the faces, keeps the edges; feature edges stay visible while the view moves even with "hide edges while moving", mesh edges don't; clicking a hidden face still selects its part. Shading switch removed from Display |
+| `gui/appearance_dialog.py`, `gui/app.py`, `gui/window.py` | **Shading** is now in Appearance ▸ Model (remembered, every window) |
+| `gui/part_tree.py`, `gui/style.py` | **Fix:** renaming a part in dark mode showed the old name through the new one (the rename field is now opaque) |
+
 ## 2.26 — rename parts, McMaster numbers anywhere in a name, Edit as a table
 
 | File | |

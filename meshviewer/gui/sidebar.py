@@ -1,5 +1,5 @@
-"""Side panel: Display · Mesh quality (STEP) · Section · Edit · Measure ·
-Boundaries/Parts.
+"""Side panel: Mesh quality (STEP) · Section · Edit · Measure · Boundaries/Parts.
+(v2.28: Display moved to toolbar toggles.)
 
 Talks only to a Scene. Selection works both ways: click a part in the 3D
 view -> it is selected in the list; select it in the list -> highlighted in 3D.
@@ -7,10 +7,10 @@ view -> it is selected in the list; select it in the list -> highlighted in 3D.
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, QUrl, Signal
-from PySide6.QtGui import QAction, QActionGroup, QDesktopServices, QPalette
+from PySide6.QtGui import QColor, QDesktopServices, QPalette
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMessageBox, QPushButton, QSizePolicy,
-    QVBoxLayout, QWidget,
+    QColorDialog, QFrame, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMessageBox, QPushButton,
+    QSizePolicy, QVBoxLayout, QWidget,
 )
 
 from .scene import Scene
@@ -19,7 +19,7 @@ from .edit_panel import EditPanel
 from .measure_panel import MeasurePanel
 from .section_panel import SectionPanel
 from .part_tree import PartTree, mcmaster_number
-from .widgets import Capsule, CollapsibleSection, Menu, NoWheelSlider, Switch
+from .widgets import CollapsibleSection, Menu, NoWheelSlider
 
 
 def open_mcmaster(part_number):
@@ -35,20 +35,9 @@ def _divider():
 
 class Sidebar(QWidget):
     quality_requested = Signal(int)     # window re-tessellates in the background
-    axes_changed = Signal(str)          # v2.21: Display ▸ Axes, saved app-wide by the window
-    appearance_requested = Signal()     # v2.25: "Style… Appearance" link under Display
     renamed = Signal()                  # v2.26: a part was renamed (window: unsaved dot)
 
-    # Display = one "Axes" choice + switches. (v2.22: parallel projection moved to
-    # the toolbar; evenly spaced rows, no group gaps.)
-    AXES = (("off", "Off"), ("axes", "Axes"), ("grid", "Grid"), ("both", "Both"))
-    DISPLAY = [
-        ("Bounding box",  "bbox",          "set_bbox"),         # v2.23: under Axes
-        ("Mesh edges",    "mesh_edges",    "set_mesh_edges"),
-        ("Feature edges", "feature_edges", "set_feature_edges"),
-        ("Origin",        "origin",        "set_origin"),
-        ("Shading",       "shading",       "set_shading"),      # v2.25: off = flat colours
-    ]
+    # (v2.28: the Display section is gone — its switches are toolbar toggles now)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -62,66 +51,6 @@ class Sidebar(QWidget):
         lay.setContentsMargins(14, 10, 12, 10)
         lay.setSpacing(8)
         self._lay = lay
-
-        # ---- Display -----------------------------------------------------
-        display = QWidget()
-        dl = QVBoxLayout(display)
-        dl.setContentsMargins(0, 0, 0, 0)
-        dl.setSpacing(5)
-        # Axes: frame + numbers, grid lines, both, or nothing (was 3 separate switches)
-        group = QActionGroup(self)
-        group.setExclusive(True)
-        self.axes_actions = {}
-        for key, text in self.AXES:
-            act = QAction(text, self)
-            act.setCheckable(True)
-            act.setData(key)
-            group.addAction(act)
-            self.axes_actions[key] = act
-        self.axes_actions["axes"].setToolTip("Axis frame with numbers and titles")
-        self.axes_actions["grid"].setToolTip("Grid lines behind the model, no numbers")
-        self.axes_actions["both"].setToolTip("Axis frame, numbers and grid lines")
-        group.triggered.connect(lambda act: self.axes_changed.emit(act.data()))
-        row = QHBoxLayout()
-        row.setContentsMargins(2, 1, 2, 1)
-        row.addWidget(QLabel("Axes"))
-        row.addStretch(1)
-        row.addWidget(Capsule(list(self.axes_actions.values()), name="Segmented"))
-        dl.addLayout(row)
-
-        self.switches = {}
-        for label, key, method in self.DISPLAY:
-            row = QHBoxLayout()
-            row.setContentsMargins(2, 1, 2, 1)
-            lbl = QLabel(label)
-            if key == "origin":
-                lbl.setToolTip("Marker at (0, 0, 0) with X / Y / Z arrows")
-            elif key == "shading":
-                lbl.setToolTip("Light and shadow on the model. Off: flat part colours")
-            row.addWidget(lbl)
-            row.addStretch(1)
-            sw = Switch()
-            sw.toggled.connect(lambda on, m=method: self.scene and getattr(self.scene, m)(on))
-            row.addWidget(sw)
-            dl.addLayout(row)
-            self.switches[key] = sw
-        # v2.25: Display = WHAT is shown (on / off); Appearance = HOW it looks
-        # (colours, sizes, thickness), the same in every window. Say so here.
-        row = QHBoxLayout()
-        row.setContentsMargins(2, 3, 2, 0)
-        hint = QLabel("Colours, sizes, line thickness:")
-        hint.setObjectName("InfoLine")
-        row.addWidget(hint)
-        link = QPushButton("Appearance…")
-        link.setObjectName("LinkButton")
-        link.setFlat(True)
-        link.setCursor(Qt.PointingHandCursor)
-        link.setToolTip("How things look, the same in every window (⌘,)")
-        link.clicked.connect(self.appearance_requested.emit)
-        row.addWidget(link)
-        row.addStretch(1)
-        dl.addLayout(row)
-        lay.addWidget(CollapsibleSection("Display", display, "display"))
 
         # ---- Mesh quality (STEP only) -------------------------------------
         quality = QWidget()
@@ -153,13 +82,12 @@ class Sidebar(QWidget):
         qb = QVBoxLayout(self.quality_box)
         qb.setContentsMargins(0, 0, 0, 0)
         qb.setSpacing(8)
-        qb.addWidget(_divider())
         qb.addWidget(self.quality_section)
+        qb.addWidget(_divider())
         lay.addWidget(self.quality_box)
         self.quality_box.setVisible(False)
 
         # ---- Section ---------------------------------------------------------
-        lay.addWidget(_divider())
         self.section_panel = SectionPanel()
         self.section_section = CollapsibleSection("Section", self.section_panel, "section",
                                                   trailing=self.section_panel.enable,
@@ -256,17 +184,10 @@ class Sidebar(QWidget):
         self._lay.setStretchFactor(self.parts_section, 1 if expanded else 0)
         self._lay.setStretchFactor(self._tail, 0 if expanded else 1)
 
-    def set_axes_mode(self, mode):
-        """Show the saved Axes choice (no signal)."""
-        act = self.axes_actions.get(mode) or self.axes_actions["both"]
-        act.setChecked(True)
-
     # ---- binding to a scene -------------------------------------------
     def bind(self, scene: Scene):
         self.scene = scene
         scene.on_pick = self.show_selection
-        for key, sw in self.switches.items():
-            Switch.set_silently(sw, scene.state[key])
         self.section_panel.bind(scene.section)
         self.edit_panel.bind(scene)
         self.measure_panel.bind(scene)
@@ -400,6 +321,7 @@ class Sidebar(QWidget):
             menu.addAction("Zoom To", lambda: self.scene.zoom_to(names))
             if len(names) == 1 and clicked == names:           # v2.26
                 menu.addAction("Rename…", lambda: self.rename(names[0]))
+            menu.addAction("Colour…", lambda: self.choose_color(names))           # v2.29
             # McMaster-Carr parts -> open their catalogue page
             # NEW (v2.11): only the part / group that was right-clicked, not the selection
             numbers = sorted({mcmaster_number(n) for n in clicked} - {None})
@@ -419,6 +341,20 @@ class Sidebar(QWidget):
         menu.addAction("Fit View", self.scene.fit)
         menu.exec(global_pos)
         self.scene.end_stuck_drag()            # no zoom mode left behind
+
+    # ---- NEW (v2.29): part colour ------------------------------------------------------
+    def choose_color(self, names):
+        if not self.scene or not names:
+            return
+        title = names[0] if len(names) == 1 else f"{len(names)} parts"
+        c = QColorDialog.getColor(QColor(self.scene.colors[names[0]]), self.window(),
+                                  f"Colour of {title}")
+        self.scene.end_stuck_drag()
+        if not c.isValid():
+            return
+        self.scene.set_color(names, c.name())
+        for n in names:
+            self.list.set_color(n, self.scene.colors[n])
 
     # ---- NEW (v2.26): rename a part ---------------------------------------------------
     def rename(self, name):

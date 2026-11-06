@@ -125,7 +125,7 @@ class Scene:
         # Defaults: meshes show element edges, CAD shows sharp (feature) edges.
         self.state = dict(grid=True, parallel=True, mesh_edges=not model.is_cad,
                           feature_edges=model.is_cad, bbox=False, origin=False,
-                          original=False, shading=True)
+                          original=False, shading=True, faces=True)
         self._dark = dark
         self._ui_dark = dark
         self.bg_mode = ("default", None)          # set by Appearance
@@ -162,10 +162,6 @@ class Scene:
         self.view("iso")
 
     # ---- parts (one composite actor) -------------------------------------
-    @property
-    def n_triangles(self):
-        return sum(p.n_cells for p in self.model.parts.values())
-
     def _block(self, name):
         return self.names.index(name) + 1          # block 0 is the root
 
@@ -181,6 +177,7 @@ class Scene:
             edge_color="#202020", reset_camera=False, pickable=True)
         self._surf_map.SetStatic(True)            # geometry never changes in place
         self._surf.GetProperty().SetLighting(self.state["shading"])
+        self._apply_lines()                       # v2.27: edges-only look survives rebuilds
         for n in self.names:
             self._apply_block(n)
 
@@ -191,6 +188,17 @@ class Scene:
             else pv.Color(self.colors[name]).float_rgb
         if self._edges_map is not None:
             self._edges_map.block_attr[self._block(name)].visible = self.visible[name]
+
+    def set_color(self, names, color, render=True):
+        """NEW (v2.29): new colour for parts (right-click ▸ Colour…)."""
+        hex_color = pv.Color(color).hex_rgb
+        for n in names:
+            if n in self.colors:
+                self.colors[n] = hex_color
+                self._apply_block(n)
+        self.section.recolor()                       # filled cut faces
+        if render:
+            self.p.render()
 
     def set_visible(self, name, on, render=True):
         self.visible[name] = bool(on)
@@ -367,7 +375,17 @@ class Scene:
         for a in self.section.cap_actors():
             self._picker.AddPickList(a)
         self._picker.PickFromListOn()
-        return self._hit(self._picker, self._picker.Pick(x, y, 0, self.p.renderer))
+        # Edges only (v2.27): the faces aren't drawn, but clicking them still selects.
+        hidden = not self._surf.GetVisibility() or \
+            self._surf.GetProperty().GetRepresentation() != 2
+        if hidden:
+            self._surf.VisibilityOn()
+            self._surf.GetProperty().SetRepresentationToSurface()
+        try:
+            return self._hit(self._picker, self._picker.Pick(x, y, 0, self.p.renderer))
+        finally:
+            if hidden:
+                self._apply_lines()
 
     def _hit(self, picker, ok):
         if not ok:
@@ -523,10 +541,9 @@ class Scene:
         if not moving and self._zooming:
             return                                   # still zooming: keep edges off
         self._moving = moving
-        # Lines are the costliest thing to draw on macOS: drop them while moving.
-        if self._edges is not None:
-            self._edges.SetVisibility(self.state["feature_edges"] and not moving)
-        self._surf.GetProperty().SetEdgeVisibility(self.state["mesh_edges"] and not moving)
+        # Lines are the costliest thing to draw on macOS: drop them while moving
+        # (v2.27: except feature edges in "Edges only", the only thing left to see).
+        self._apply_lines()
         self.section.set_moving(moving)            # v2.19: cut mesh edges too
         if not moving:
             self.p.render()
@@ -597,7 +614,7 @@ class Scene:
 
     # ---- Edit section: rotate / mirror (v2.23), move + undo + original (v2.24) -------
     def apply_edit(self, r, t=(0.0, 0.0, 0.0), label=""):
-        """Rotate / mirror (R, 3×3 integers) then move (t) every part and the volume
+        """Rotate / mirror (R, 3×3) then move (t) every part and the volume
         cells. Returns False for exact CAD (STEP, IGES, BREP), which can't be edited."""
         if not self.model.editable:
             return False
@@ -618,8 +635,9 @@ class Scene:
             self._set_edit_state(xf.identity(), np.zeros(3))
 
     @property
-    def last_edit(self):
-        return self._edit_history[-1][1] if self._edit_history else ""
+    def edit_labels(self):
+        """v2.27: every change so far, oldest first (the Edit section lists them)."""
+        return [label for _, label in self._edit_history]
 
     def _set_edit_state(self, r, t):
         if self._orig_points is None:               # first edit: keep the file's points
@@ -628,7 +646,7 @@ class Scene:
         for n, poly in self.model.parts.items():
             self._flipped[n] = xf.set_surface(poly, self._orig_points[n], r, t,
                                               self._flipped.get(n, False))
-        self.model.transform, self.model.offset = np.asarray(r, dtype=int), np.asarray(t, float)
+        self.model.transform, self.model.offset = np.asarray(r, dtype=float), np.asarray(t, float)
         self.section.follow_edit(xf.delta(old, (r, t)))   # plane + volume cells follow
         self.measure.forget_points()                # picked points were in the old place
         self.replace_parts(self.model.parts, self.model.quality)   # keeps the camera
@@ -685,9 +703,35 @@ class Scene:
         if render:
             self.p.render()
 
+    def _apply_lines(self):
+        """Faces, mesh edges and feature edges from the toolbar toggles + the moving
+        state. Faces hidden (v2.27): mesh edges become a wireframe (still hidden while
+        moving); feature edges stay on while moving."""
+        if self._surf is None:
+            return
+        eo, mesh, moving = not self.state["faces"], self.state["mesh_edges"], self._moving
+        prop = self._surf.GetProperty()
+        if eo:
+            prop.SetRepresentationToWireframe()
+            prop.SetEdgeVisibility(False)
+            self._surf.SetVisibility(mesh and not moving)
+        else:
+            prop.SetRepresentationToSurface()
+            self._surf.SetVisibility(True)
+            prop.SetEdgeVisibility(mesh and not moving)
+        if self._edges is not None:
+            self._edges.SetVisibility(self.state["feature_edges"] and (eo or not moving))
+
+    def set_faces(self, on, render=True):
+        """Show or hide the faces, keeping the edges (v2.27 "Edges only", v2.29 Faces)."""
+        self.state["faces"] = bool(on)
+        self._apply_lines()
+        if render:
+            self.p.render()
+
     def set_mesh_edges(self, on, render=True):
         self.state["mesh_edges"] = bool(on)
-        self._surf.GetProperty().SetEdgeVisibility(bool(on))
+        self._apply_lines()
         self.section.sync_cut_edges()              # v2.21: the cut mesh follows this switch
         if render:
             self.p.render()
@@ -696,8 +740,7 @@ class Scene:
         self.state["feature_edges"] = bool(on)
         if on and self._edges is None:
             self._build_edges()
-        if self._edges is not None:
-            self._edges.SetVisibility(bool(on))
+        self._apply_lines()
         if render:
             self.p.render()
 

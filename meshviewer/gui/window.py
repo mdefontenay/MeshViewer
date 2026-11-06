@@ -90,10 +90,7 @@ class ViewerWindow(QMainWindow):
 
         self.sidebar = Sidebar()
         self.sidebar.quality_requested.connect(self._retessellate)
-        self.sidebar.axes_changed.connect(lambda mode: self.ctl.set_appearance(axes=mode))
-        self.sidebar.appearance_requested.connect(self.show_appearance)
         self.sidebar.renamed.connect(self._edited_changed)        # v2.26
-        self.sidebar.set_axes_mode(self.ctl.appearance["axes"])
         ep = self.sidebar.edit_panel                                       # Edit section
         ep.edit_requested.connect(self._apply_edit)
         ep.undo_requested.connect(lambda: self._edit_step(lambda s: s.undo_edit()))
@@ -120,6 +117,7 @@ class ViewerWindow(QMainWindow):
         self._build_toolbar()
         self._build_menus()
         self._set_loaded(False)
+        self._sync_show()
 
         QApplication.styleHints().colorSchemeChanged.connect(self._theme_changed)
 
@@ -164,6 +162,22 @@ class ViewerWindow(QMainWindow):
         self.a_parallel = self._act("Parallel Projection",
                                     lambda on: self.scene and self.scene.set_parallel(on),
                                     "Ctrl+5", checkable=True)
+        # NEW (v2.28): what is shown, as toolbar toggles (was the sidebar's Display
+        # section). Edges: one pill; axes, grid, bounding box, origin: another.
+        self.a_show = {}
+        for key, text, tip in (
+                ("mesh_edges", "Mesh Edges", "Mesh edges: the element / triangle lines"),
+                ("feature_edges", "Feature Edges", "Feature edges: sharp edges and outlines"),
+                ("faces", "Faces", "Faces: show or hide them. Hidden: only the edges\n"
+                                   "(feature edges stay while the view moves)"),
+                ("axes", "Axes", "Axes: frame with numbers and titles"),
+                ("grid", "Grid", "Grid lines behind the model"),
+                ("bbox", "Bounding Box", "Bounding box"),
+                ("origin", "Origin", "Origin: marker at (0, 0, 0) with X / Y / Z arrows")):
+            a = self._act(text, lambda on, k=key: self._show_toggled(k, on), checkable=True)
+            a.setIcon(icon(key))
+            a.setToolTip(tip)
+            self.a_show[key] = a
         # Export (v2.23). (Edit lives in the sidebar since v2.24 — no button.)
         self.a_export = self._act("Export…", self.export_model, "Ctrl+Shift+E")
         self.a_views = [
@@ -199,6 +213,9 @@ class ViewerWindow(QMainWindow):
         # Groups of related buttons, each in one capsule (macOS 27 toolbar style).
         tb.addWidget(Capsule([self.a_sidebar]))
         tb.addWidget(Capsule([self.a_fit, *self.a_views, self.a_parallel]))
+        s = self.a_show                                # v2.28: what is shown
+        tb.addWidget(Capsule([s["mesh_edges"], s["feature_edges"], s["faces"]]))
+        tb.addWidget(Capsule([s["axes"], s["grid"], s["bbox"], s["origin"]]))
         tb.addWidget(Capsule(self.a_units))            # measurement units
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
@@ -222,6 +239,12 @@ class ViewerWindow(QMainWindow):
         v.addAction(self.a_section)
         v.addAction(self.a_measure)
         v.addSeparator()
+        show = v.addMenu("Show")                      # v2.28: the toolbar toggles
+        for k, a in self.a_show.items():
+            if k == "axes":
+                show.addSeparator()
+            show.addAction(a)
+        v.addSeparator()
         v.addAction(self.a_parallel)
         v.addAction(self.a_appearance)
         v.addAction(self.a_deselect)
@@ -232,7 +255,7 @@ class ViewerWindow(QMainWindow):
 
     def _set_loaded(self, loaded):
         for a in [self.a_shot, self.a_fit, self.a_section, self.a_measure, *self.a_views,
-                  *self.a_units]:
+                  *self.a_units, *self.a_show.values()]:
             a.setEnabled(loaded)
         self.stack.setCurrentWidget(self.plotter if loaded else self.empty)
 
@@ -269,6 +292,7 @@ class ViewerWindow(QMainWindow):
         self.a_parallel.blockSignals(True)                  # show the scene's projection
         self.a_parallel.setChecked(self.scene.state["parallel"])
         self.a_parallel.blockSignals(False)
+        self._sync_show()
         # Menu opened just after VTK finishes handling the click (not inside it).
         self.scene.on_context = lambda names, clicked: QTimer.singleShot(
             0, lambda p=QCursor.pos(): self.sidebar.part_menu(names, clicked, p))
@@ -331,13 +355,47 @@ class ViewerWindow(QMainWindow):
 
     def apply_appearance(self):
         self.sidebar.list.set_density(self.ctl.appearance["density"])
-        self.sidebar.set_axes_mode(self.ctl.appearance["axes"])         # v2.21
+        self._sync_show()                                                # v2.28
         if self.scene:
             a = self.ctl.appearance
             self.scene.set_axis_font(a["axis_font"], rebuild=False)
             self.scene.set_edge_options(a["edge_width"], a["hide_edges_moving"], render=False)
+            self.scene.set_shading(a["shading"], render=False)          # v2.27
             self.scene.set_axes_mode(a["axes"], rebuild=False, render=False)  # v2.21
             self.scene.set_background(*self.ctl.background())        # rebuilds grid + axes
+
+    # ---- NEW (v2.28): toolbar toggles for what is shown -----------------------------
+    SCENE_TOGGLES = {"mesh_edges": "set_mesh_edges", "feature_edges": "set_feature_edges",
+                     "faces": "set_faces", "bbox": "set_bbox", "origin": "set_origin"}
+
+    def _show_toggled(self, key, on):
+        if key in ("axes", "grid"):
+            # Axes and Grid together are the saved app-wide axes mode (as in v2.21)
+            ax, gr = self.a_show["axes"].isChecked(), self.a_show["grid"].isChecked()
+            mode = {(True, True): "both", (True, False): "axes",
+                    (False, True): "grid", (False, False): "off"}[(ax, gr)]
+            self.ctl.set_appearance(axes=mode)
+            return
+        if not self.scene:
+            return
+        getattr(self.scene, self.SCENE_TOGGLES[key])(on)
+        # Faces hidden with no edges switched on would show nothing: feature edges on.
+        st = self.scene.state
+        if key == "faces" and not on and not st["feature_edges"] and not st["mesh_edges"]:
+            self.a_show["feature_edges"].setChecked(True)
+            self.scene.set_feature_edges(True)
+
+    def _sync_show(self):
+        """Toolbar toggles = the scene's state + the saved axes mode (no signals)."""
+        mode = self.ctl.appearance["axes"]
+        want = {"axes": mode in ("axes", "both"), "grid": mode in ("grid", "both")}
+        if self.scene:
+            want.update({k: bool(self.scene.state.get(k)) for k in self.SCENE_TOGGLES})
+        for k, on in want.items():
+            a = self.a_show[k]
+            a.blockSignals(True)
+            a.setChecked(on)
+            a.blockSignals(False)
 
     def _sync_units(self):
         """Select the file's unit (mm for STEP/IGES), or 'no units' for files without."""

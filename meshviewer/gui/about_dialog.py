@@ -1,5 +1,6 @@
 """NEW (v2.15): "About Mesh Viewer" — small window with the icon, version,
-credits and the versions of the main libraries."""
+credits and the versions of the main libraries. v2.28: Check for Updates
+(opens the latest release on GitHub)."""
 from __future__ import annotations
 
 import os
@@ -9,14 +10,15 @@ from importlib import metadata
 from pathlib import Path
 
 from PySide6 import __version__ as PYSIDE_VERSION
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QIcon, QKeySequence, QShortcut
-from PySide6.QtWidgets import QApplication, QDialog, QLabel, QVBoxLayout
+from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import QDesktopServices, QIcon, QKeySequence, QShortcut
+from PySide6.QtWidgets import QApplication, QDialog, QLabel, QPushButton, QVBoxLayout
 
 from .. import __version__
 
 AUTHOR = "Matthieu de Fontenay"
 BUILT_WITH = "Claude Opus 5.5"
+RELEASES = "https://github.com/mdefontenay/MeshViewer/releases/latest"   # v2.28
 
 
 def _app_icon() -> QIcon:
@@ -81,6 +83,14 @@ class AboutDialog(QDialog):
 
         line("Mesh Viewer", "font-size: 17px; font-weight: 700;")
         line(f"Version {__version__}", obj="InfoLine")
+        # NEW (v2.28): the latest release on GitHub, to compare with the version above
+        lay.addSpacing(6)
+        check = QPushButton("Check for Updates…")
+        check.setCursor(Qt.PointingHandCursor)
+        check.setToolTip("Open the latest release on GitHub")
+        check.setAutoDefault(False)
+        check.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(RELEASES)))
+        lay.addWidget(check, 0, Qt.AlignCenter)
         lay.addSpacing(10)
         line(f"Made by {AUTHOR}", "font-size: 13px;")
         line(f"using {BUILT_WITH}", "font-size: 13px;")

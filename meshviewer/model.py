@@ -30,7 +30,7 @@ class Model:
     # Edit section: rotations / mirrors (3×3 integers) and move (v2.24) applied so
     # far — new point = transform @ original + offset. Parts are moved in memory;
     # Export saves the result.
-    transform: np.ndarray = field(default_factory=lambda: np.eye(3, dtype=int))
+    transform: np.ndarray = field(default_factory=lambda: np.eye(3))
     offset: np.ndarray = field(default_factory=lambda: np.zeros(3))
 
     @property
@@ -42,7 +42,7 @@ class Model:
 
     @property
     def edited(self) -> bool:
-        return not np.array_equal(self.transform, np.eye(3, dtype=int)) or bool(np.any(self.offset))
+        return not np.array_equal(self.transform, np.eye(3)) or bool(np.any(self.offset))
 
     @property
     def is_cad(self) -> bool:
