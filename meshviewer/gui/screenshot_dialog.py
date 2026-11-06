@@ -7,11 +7,11 @@ from __future__ import annotations
 from PySide6.QtCore import QSettings, Qt
 from PySide6.QtGui import QAction, QActionGroup
 from PySide6.QtWidgets import (
-    QComboBox, QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout, QLabel, QLayout,
+    QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout, QLabel, QLayout,
     QVBoxLayout, QWidget,
 )
 
-from .widgets import Capsule
+from .widgets import Capsule, MenuSelect
 
 BACKGROUNDS = (("current", "As Shown"), ("transparent", "Transparent"))
 
@@ -36,7 +36,7 @@ class ScreenshotDialog(QDialog):
         form.setHorizontalSpacing(12)
         form.setVerticalSpacing(10)
 
-        self.size = QComboBox()
+        self.size = MenuSelect()
         for k in (1, 2, 3, 4):
             self.size.addItem(f"{k}×   —   {width * k} × {height * k} px", k)
         self.size.setCurrentIndex(max(0, min(3, st.value("shot/scale", 2, type=int) - 1)))

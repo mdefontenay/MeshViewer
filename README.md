@@ -43,8 +43,8 @@ others could benefit from it.
   with sections that fold, one window per file. A second file opens instantly,
   without starting the app again.
 - **Appearance** settings: theme, 3D background (gradient, colour or a picture),
-  axis label size, grid and axis lines, edge thickness, and hiding edges while
-  rotating for smoother handling of large models.
+  axis label size, edge thickness, and hiding edges while rotating for smoother
+  handling of large models.
 
 | Kind | Formats |
 |------|---------|
@@ -87,7 +87,10 @@ cd MeshViewer
 - `./build_app.sh --standalone` builds a self-contained app (~1 GB) that can be
   copied to another Mac.
 - `./make_dmg.sh` builds the self-contained app, checks it (`--selftest`) and
-  packs `dist/Mesh Viewer <version>.dmg`.
+  packs `~/Downloads/MeshViewer-build/dist/Mesh Viewer <version>.dmg` (its window
+  layout is written by `dmgbuild`, installed in the build environment the first time).
+- Heavy files (Python environment, app, .dmg) go to `~/Downloads/MeshViewer-build`,
+  not the project folder; choose another place with `MESHVIEWER_WORK=/path`.
 - Run without building: `.venv/bin/python mesh_viewer.py file.step`
 
 ## Already have Python? Run it without the 1 GB app
@@ -129,20 +132,23 @@ Keep the MeshViewer folder where it is: this app runs the code from it.
 
 - **Open** files by double-clicking them, dropping them on a window or the Dock
   icon, or with ⌘O. Each file gets its own window.
-- **Views**: Fit ⌘0 · Iso ⌘1 · X ⌘2 · Y ⌘3 · Z ⌘4. Press X, Y or Z again to look
-  from the opposite side.
+- **Views**: Fit ⌘0 · Iso ⌘1 · X ⌘2 · Y ⌘3 · Z ⌘4 · parallel projection on/off ⌘5.
+  Press X, Y or Z again to look from the opposite side.
 - **Select**: click a part, or ⌘/⇧-click to add parts. Click empty space or press
   Esc to clear.
 - **Right-click** a part (in 3D or in the list):
   - Hide, Isolate, Zoom To, Show All
-  - Search in McMaster (for McMaster part numbers)
+  - Rename… (also: select a part and press Return) — Export uses the new names
+  - Search in McMaster (when a McMaster part number is anywhere in the name)
   - Right-clicking inside a multi-selection acts on the whole selection.
 - **Sidebar**:
-  - **Display**: grid, parallel projection, mesh edges, feature edges, bounding
-    box, origin marker.
+  - **Display** (what this window shows): axes (off / axes / grid / both),
+    bounding box, mesh edges, feature edges, origin marker, shading (off = flat
+    colours, no light or shadow).
   - **Mesh quality** (STEP/IGES/BREP): five levels; the part is re-meshed in the
     background.
-  - **Section**: the plane controls. Switching it on opens them.
+  - **Section**: the plane controls. Switching it on opens them, off folds them. For CGNS /
+    UGRID meshes, *Fill cut faces* shows the volume cells the plane cuts.
   - **Measure**: measuring is on while this section is open.
     - *Distance*: click two points.
     - *Area & Volume*: click parts, or switch to *CAD faces* to pick single faces.
@@ -150,10 +156,20 @@ Keep the MeshViewer folder where it is: this app runs the code from it.
   - **Parts**: list, filter, Show All / Hide All.
 - **Units** (toolbar): ⊘ · mm · cm · m · in · ft. Used for measurements and axis
   labels. STEP/IGES files are in mm and get converted.
-- **Appearance** (⌘, or the sliders button): theme, parts list spacing, 3D
-  background, axis label size, grid lines, axis lines, edge thickness, and hide
-  edges while moving.
+- **Appearance** (⌘, or the sliders button) — how things look, the same in every
+  window: theme, parts list spacing, 3D background, axis label size, edge line
+  thickness, and hide edges while moving.
 - **Screenshot** (⇧⌘S): 1×–4× resolution, background *As Shown* or *Transparent*.
+- **Edit** (sidebar section): rotate ±90° / 180° about X, Y or Z, mirror, or move
+  by a distance — turning about the origin or the model's centre. *Show original edges* shows
+  the file's edges in grey to compare; *Undo* steps back, *Reset* returns to the
+  file. Works on meshes (CGNS, UGRID) and triangle CAD (STL, OBJ, PLY, glTF, VRML),
+  not on STEP / IGES / BREP. Edits and renamed parts stay in memory until you
+  export them.
+- **Export…** (⇧⌘E): STL (binary or one named solid per part), OBJ, PLY, VTU
+  (ParaView) and, for meshes, UGRID + .mapbc with the volume cells. Includes your
+  edits; hidden parts can be left out. STEP / IGES / BREP export their current
+  triangle mesh (STL, OBJ, PLY).
 - **About Mesh Viewer** is in the app menu.
 
 ## Project layout
@@ -164,6 +180,8 @@ meshviewer/
   __init__.py           version number
   formats.py            file extension -> reader
   model.py              what readers return: {part name: surface} + kind / format / units
+  transform.py          Edit mode: exact 90° rotations and mirrors
+  export.py             Export: STL, OBJ, PLY, VTU, UGRID writers
   mesh/  cgns.py ugrid.py           mesh readers
   cad/   occt.py                    OpenCASCADE core: read, name, tessellate, exact area/volume
          step.py iges.py brep.py    exact-geometry CAD readers
@@ -176,6 +194,7 @@ meshviewer/
     section.py, section_panel.py    section plane and its controls
     measure.py, measure_panel.py    measurements and their panel
     appearance_dialog.py, screenshot_dialog.py, about_dialog.py
+    edit_panel.py, export_dialog.py   Edit section, Export sheet
     background.py       picture behind the 3D view
     widgets.py, icons.py, style.py  switches, menus, icons, light/dark styling
 setup.py                py2app settings: icon, file types

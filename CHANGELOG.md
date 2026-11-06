@@ -4,6 +4,84 @@ Every version of Mesh Viewer, newest first. Each table lists the files that
 changed and what changed in them. (The version number lives in
 `meshviewer/__init__.py`.)
 
+## 2.26 — rename parts, McMaster numbers anywhere in a name, Edit as a table
+
+| File | |
+|---|---|
+| `gui/part_tree.py`, `gui/sidebar.py` | **Rename** a part (any file type): right-click ▸ Rename…, or select it and press Return; the name is edited in the list. Names already in use are refused. McMaster numbers are now found **anywhere** in a name ("Screw 91251A540", "Bracket_8975K12_2"), not only at the start (sizes like "100x200" and alloys like "6061T6" are ignored) |
+| `gui/scene.py` | `rename_part()` — colours, visibility, selection, edits follow; STEP / IGES parts keep their new name when re-meshed |
+| `gui/window.py`, `gui/export_dialog.py` | Export writes the new names (STL solids, OBJ groups, VTU part names, UGRID .mapbc); renames count as unsaved changes (dot, question on close, "_edited" file name) |
+| `gui/edit_panel.py`, `gui/style.py` | Edit section laid out as a small table: Pivot · rows X / Y / Z with Rotate [−90° \| +90° \| 180°] and Mirror [x → −x] · Move boxes + Move button in the same columns. Move boxes show "X 0" instead of "X 0.000". No line above "Show original edges" |
+
+## 2.25 — tidier Edit section, shading switch, .dmg background fixed
+
+| File | |
+|---|---|
+| `gui/edit_panel.py` | **re-laid out**: one row per action, every button the same shape and width — Pivot [Origin \| Centre] · Rotate X / Y / Z [−90° \| +90° \| 180°] (one click turns) · Mirror [X \| Y \| Z] · Move X / Y / Z boxes + a full-width Move button · "Show original edges" · "Last: …" with Undo \| Reset |
+| `gui/widgets.py`, `gui/style.py`, `gui/export_dialog.py`, `gui/screenshot_dialog.py` | drop-down lists are now a button that opens a normal menu (`MenuSelect`): no more huge padding or drawing glitches above / below the list (replaces `roomy_combo`) |
+| `gui/sidebar.py` | Display ▸ **Shading** switch (off = flat part colours, no light or shadow); a line under Display links to Appearance; switching the Section **off** now folds it |
+| `gui/scene.py`, `gui/section.py` | `set_shading()` — parts and filled cut faces; kept when the mesh is rebuilt |
+| `gui/appearance_dialog.py`, `gui/window.py` | Appearance says what it is for ("how things look, saved for every window"; Display = what is shown) and is grouped by what it styles: Window · Background · Axes (label size) · Edges (line thickness, while moving) |
+| `make_dmg.sh` | the disk image window (background picture, icon places) is written by **dmgbuild** (installed in the build venv the first time) instead of asking Finder by AppleScript, which failed silently without the "control Finder" permission — the background now shows |
+
+## 2.24 — friendlier Edit section, Move, compare with the original
+
+| File | |
+|---|---|
+| `gui/edit_panel.py` | **redesigned** — always in the sidebar (no Edit button): Rotate (axis + −90° / +90° / 180°) · Mirror X / Y / Z · **Move** by X / Y / Z · turn **about** the origin or the model's centre · **Original** switch · "Last: …" line with **Undo** (one step) and **Reset**, styled like Measure ▸ Clear. STEP / IGES / BREP: a grey note instead of the tools |
+| `transform.py` | edits are (R, t); geometry is always recomputed from the file's points, so Undo / Reset are exact and surfaces + volume cells keep identical node coordinates |
+| `gui/scene.py`, `gui/section.py` | `apply_edit()`, `undo_edit()`, `reset_edits()`; the camera no longer resets after an edit; `set_show_original()` draws the file's feature edges in grey to compare. **Fix:** moving the volume cells no longer changed the file's copy (shallow-copy bug) |
+| `gui/window.py` | Edit button / ⌘E removed; Export stays |
+| `gui/widgets.py`, `gui/style.py`, `gui/export_dialog.py`, `gui/screenshot_dialog.py` | `roomy_combo()`: drop-down lists with menu-like spacing and rounded rows, wide enough for their text (Export format, screenshot resolution) |
+| `export.py` | shorter format names |
+
+## 2.23 — Edit (rotate / mirror) and Export
+
+| File | |
+|---|---|
+| `transform.py` | **new** — exact 90° rotations and mirrors as 3×3 integer matrices; moves surfaces (faces flipped after a mirror so normals stay outward) and volume cells (node order fixed after a mirror) |
+| `export.py` | **new** — writers: STL (binary, merged), STL (text, one named solid per part), OBJ (one group per part), PLY, VTU (volume + boundaries, opens in ParaView), UGRID `.lb8.ugrid` + `.mapbc` (volume + named boundaries) |
+| `gui/edit_panel.py` | **new** — sidebar Edit section: Axis X / Y / Z · Rotate −90° / +90° / 180° · Mirror · Undo All Edits |
+| `gui/export_dialog.py` | **new** — Export sheet: only the formats that fit the open file, "visible parts only", what will be written |
+| `model.py` | `transform` (edits so far) and `editable` (not for exact CAD) |
+| `gui/scene.py`, `gui/section.py`, `gui/measure.py` | `apply_edit()` / `reset_edits()`: parts, volume cells, section plane, grid and bounding box follow; picked distance points are dropped |
+| `gui/window.py`, `gui/icons.py` | **Edit** (⌘E) opens the Edit section — STEP / IGES / BREP show "File type not supported for edits"; **Export…** (⇧⌘E, toolbar and File menu) shows the file in Finder when done; edited windows get the "unsaved" dot and ask before closing |
+| `gui/sidebar.py` | Bounding box moved right under Axes |
+
+## 2.22 — toolbar tidy-up
+
+| File | |
+|---|---|
+| `gui/window.py`, `gui/icons.py` | **Parallel projection** is now a toggle button in the view group of the toolbar (Fit · Iso · X · Y · Z · ▢, also View menu, ⌘5), no longer a sidebar switch; new **Edit** button (pencil, ⌘E) as a placeholder for the editing tools of the next version |
+| `gui/sidebar.py` | Display rows evenly spaced (the extra gaps between groups are gone); "Origin (0, 0, 0)" is just "Origin" (the coordinates are in its tooltip) |
+| `.gitignore` | ignores the `Claude outputs/` folder |
+
+## 2.21 — cleaner Display section, steadier section handles
+
+| File | |
+|---|---|
+| `gui/sidebar.py`, `gui/window.py`, `gui/app.py` | Display ▸ **Axes: Off · Axes · Grid · Both** replaces the Grid switch and Appearance's Grid lines / Axis lines switches (old settings carry over); switches grouped: projection · edges · bounding box & origin |
+| `gui/appearance_dialog.py` | three groups: Window · 3D view (background, axis label size) · Edges |
+| `gui/section.py`, `gui/section_panel.py` | cut volume mesh: edges black like the model's mesh edges and shown only when Display ▸ Mesh edges is on; the switch is "Fill cut faces" again. Plane handles (sphere, arrow tips) keep the same small size on screen at any zoom; shorter arrow |
+| `gui/scene.py` | `set_axes_mode()`; Mesh edges switch also drives the cut mesh; unused `set_grid()` removed |
+
+## 2.20
+
+| File | |
+|---|---|
+| `build_app.sh`, `make_dmg.sh` | heavy files (Python environment, build, app, .dmg) go to `~/Downloads/MeshViewer-build` (or `$MESHVIEWER_WORK`), not the project folder; `.venv` is just a link |
+| `.gitignore` | ignores the `.venv` link |
+
+## 2.19
+
+| File | |
+|---|---|
+| `mesh/volume.py` | **new** — builds one VTK grid from the volume cells |
+| `mesh/ugrid.py`, `mesh/cgns.py` | `read_volume()`: tetra / pyramid / prism / hexa cells, read only when needed (CGNS: per-type and MIXED sections; quadratic cells use their corners; polyhedra skipped). **Fix:** CGNS node counts for QUAD_9, HEXA_20, HEXA_27 and quadratic pyramids / prisms |
+| `model.py`, `formats.py` | models of mesh files can load their volume cells |
+| `gui/section.py`, `gui/section_panel.py` | CGNS / UGRID: the section fills the cut with the volume cells it goes through, with their edges; surface-only files keep the solid fill |
+| `gui/scene.py` | cut-mesh colours for light / dark; its edges hide while moving |
+
 ## 2.18
 
 | File | |

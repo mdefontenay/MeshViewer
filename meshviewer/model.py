@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
+import numpy as np
 import pyvista as pv
 
 
@@ -26,6 +27,22 @@ class Model:
     # NEW (v2.19), meshes only: reads the 3D cells on demand (-> pv.UnstructuredGrid
     # or None) for the section's "Show cut mesh". None = format without volume cells.
     volume: Optional[Callable[[], object]] = None
+    # Edit section: rotations / mirrors (3×3 integers) and move (v2.24) applied so
+    # far — new point = transform @ original + offset. Parts are moved in memory;
+    # Export saves the result.
+    transform: np.ndarray = field(default_factory=lambda: np.eye(3, dtype=int))
+    offset: np.ndarray = field(default_factory=lambda: np.zeros(3))
+
+    @property
+    def editable(self) -> bool:
+        """Edit works on triangle / polygon data: meshes and STL, OBJ, PLY,
+        glTF, VRML. Exact CAD (STEP, IGES, BREP) keeps its geometry in
+        OpenCASCADE, so it can't be rotated / mirrored here."""
+        return self.source is None
+
+    @property
+    def edited(self) -> bool:
+        return not np.array_equal(self.transform, np.eye(3, dtype=int)) or bool(np.any(self.offset))
 
     @property
     def is_cad(self) -> bool:

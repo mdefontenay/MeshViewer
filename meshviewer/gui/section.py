@@ -19,6 +19,8 @@ from vtkmodules.vtkFiltersCore import (
 )
 from vtkmodules.vtkFiltersGeneral import vtkContourTriangulator
 
+from .. import transform as xf
+
 
 def _darker(hex_color, f=0.78):
     r, g, b = pv.Color(hex_color).float_rgb
@@ -34,6 +36,7 @@ class Section:
         # NEW (v2.19): meshes with volume cells show the cut cells instead of a fill
         self.has_volume = scene.model.volume is not None
         self._volume = None                # pv.UnstructuredGrid once loaded, False if none
+        self._volume_orig = None           # as read from the file (Edit recomputes from it)
         self._vol_cutter = None            # kept: re-cutting reuses its search tree
         self._vol_cut = None               # actor: cut cells with their edges
         self.show_handle = True
@@ -44,6 +47,8 @@ class Section:
         self._cap_part = None              # cap cell -> index into scene.names
         self._outline = None               # one actor with all cut lines
         self._widget = None
+        self._handles = []                 # widget sphere / cones, sized per frame (v2.21)
+        self._size_obs = None
         self._plate = None                 # our own translucent plane (always drawn)
         self._plate_edge = None
         self.reset_bounds()
@@ -174,12 +179,18 @@ class Section:
             mesh.cell_data["rgb"] = rgb[self._cap_part].astype(np.uint8)
             self._caps = self.p.add_mesh(mesh, scalars="rgb", rgb=True, show_scalar_bar=False,
                                          reset_camera=False, pickable=True)
+            self.sync_shading()
         if n_lines:
             outlines.Update()
             self._outline = self.p.add_mesh(pv.wrap(outlines.GetOutput()),
                                             color=self.scene.edge_color, line_width=2,
                                             lighting=False, pickable=False, reset_camera=False)
         self.p.render()
+
+    def sync_shading(self):
+        """Filled cut faces follow Display ▸ Shading (v2.25)."""
+        if self._caps is not None:
+            self._caps.GetProperty().SetLighting(self.scene.state.get("shading", True))
 
     def cap_owner(self, actor, cell_id):
         """Part name for a picked cell of the caps actor (else None)."""
@@ -196,19 +207,43 @@ class Section:
         """Number of 3D cells once loaded (0 = none / not loaded yet)."""
         return self._volume.n_cells if self._volume else 0
 
-    def _cut_volume(self, plane):
-        """Show where the plane cuts the volume cells (fill + cell edges).
-        Returns False when the file has no volume cells (-> ordinary fill)."""
+    def volume_grid(self):
+        """The volume cells (read the first time, with the Edit-mode rotations /
+        mirrors applied), or None for files without them. Also used by Export."""
         if not self.has_volume:
-            return False
+            return None
         if self._volume is None:                       # first time: read the cells
             try:
-                self._volume = self.scene.model.volume() or False
+                self._volume_orig = self.scene.model.volume() or False
+                self._volume = self._volume_orig
+                if self._volume and self.scene.model.edited:          # Edit section
+                    m = self.scene.model
+                    self._volume = xf.grid_from(self._volume_orig, m.transform, m.offset)
             except Exception as exc:                   # unreadable: plain fill instead
                 print(f"volume cells could not be read: {exc}")
                 self._volume = False
         if not self._volume:
             self.has_volume = False
+            return None
+        return self._volume
+
+    def follow_edit(self, change):
+        """The model was rotated / mirrored / moved by `change` (R, t): the plane
+        follows so the cut stays on the same physical place; the volume cells (if
+        already read) are recomputed from the file's points."""
+        r, t = change
+        self.origin = np.asarray(r) @ self.origin + np.asarray(t)
+        self.normal = np.asarray(r) @ self.normal
+        self._apply_plane()
+        if self._volume:
+            m = self.scene.model
+            self._volume = xf.grid_from(self._volume_orig, m.transform, m.offset)
+            self._vol_cutter = None                    # new grid: new search tree
+
+    def _cut_volume(self, plane):
+        """Show where the plane cuts the volume cells (fill + cell edges).
+        Returns False when the file has no volume cells (-> ordinary fill)."""
+        if self.volume_grid() is None:
             return False
         if self._vol_cutter is None:
             self._vol_cutter = vtkPlaneCutter()        # multi-threaded, builds a search tree
@@ -219,24 +254,30 @@ class Section:
         cut = pv.wrap(self._vol_cutter.GetOutput())
         if cut.n_cells:
             t = self.scene.theme_colors()
+            # v2.21: edges look like the model's mesh edges (same colour and width)
             self._vol_cut = self.p.add_mesh(
-                cut, color=t["cut_fill"], show_edges=True, edge_color=t["cut_edge"],
+                cut, color=t["cut_fill"], show_edges=True, edge_color=t["edge"],
                 line_width=1, lighting=False, pickable=False, reset_camera=False)
-            self.set_moving(self.scene._moving)
+            self.sync_cut_edges()
         return True
 
-    def set_moving(self, moving):
-        """Cell edges off while the view moves (same as the model's edges)."""
+    def sync_cut_edges(self):
+        """Cut-cell edges follow Display ▸ Mesh edges, and hide while the view
+        moves (when that Appearance setting is on) — exactly like the model's."""
         if self._vol_cut is not None:
+            sc = self.scene
             self._vol_cut.GetProperty().SetEdgeVisibility(
-                not (moving and self.scene.hide_edges_moving))
+                sc.state["mesh_edges"] and not (sc._moving and sc.hide_edges_moving))
+
+    def set_moving(self, moving):
+        self.sync_cut_edges()
 
     def restyle(self):
         """Colours after a light / dark change."""
         t = self.scene.theme_colors()
         if self._vol_cut is not None:
             self._vol_cut.GetProperty().SetColor(pv.Color(t["cut_fill"]).float_rgb)
-            self._vol_cut.GetProperty().SetEdgeColor(pv.Color(t["cut_edge"]).float_rgb)
+            self._vol_cut.GetProperty().SetEdgeColor(pv.Color(t["edge"]).float_rgb)
         if self._outline is not None:
             self._outline.GetProperty().SetColor(pv.Color(self.scene.edge_color).float_rgb)
 
@@ -344,6 +385,7 @@ class Section:
     def _sync_widget(self):
         want = self.enabled and self.show_handle
         if want and self._widget is None:
+            before = self._renderer_actors()
             pad = 0.15 * (self.hi - self.lo) + 1e-9
             bounds = np.ravel(np.column_stack([self.lo - pad, self.hi + pad]))
             self._widget = self.p.add_plane_widget(
@@ -360,6 +402,8 @@ class Section:
             self._widget.GetSelectedPlaneProperty().SetOpacity(0.06)  # visible one
             self._widget.GetEdgesProperty().SetOpacity(0.0)    # VTK draws these red
             self._widget.DrawPlaneOn()
+            self._widget.SetDiagonalRatio(0.2)         # v2.21: shorter normal arrow
+            self._find_handles(before)
         if self._widget is not None:
             if want:
                 self._widget.SetOrigin(*self.origin)
@@ -367,6 +411,57 @@ class Section:
                 self._widget.On()
             else:
                 self._widget.Off()
+
+    # ---- NEW (v2.21): handles keep the same size on screen at any zoom -----------------
+    HANDLE_PT = {"vtkSphereSource": 13.0, "vtkConeSource": 16.0}   # size in points
+
+    def _renderer_actors(self):
+        props = self.p.renderer.GetActors()
+        props.InitTraversal()
+        return [props.GetNextActor() for _ in range(props.GetNumberOfItems())]
+
+    def _find_handles(self, before):
+        """The widget's sphere (moves the plane) and cones (tilt it): the actors
+        it added whose geometry comes from a sphere or cone source."""
+        known = {id(a) for a in before}
+        self._handles = []
+        for a in self._renderer_actors():
+            if id(a) in known or a.GetMapper() is None:
+                continue
+            alg = a.GetMapper().GetInputAlgorithm()
+            kind = type(alg).__name__ if alg is not None else ""
+            if kind in self.HANDLE_PT:
+                self._handles.append((a, alg, self.HANDLE_PT[kind]))
+        if getattr(self, "_size_obs", None) is None:
+            self._size_obs = self.p.renderer.AddObserver("StartEvent", self._size_handles)
+
+    def _size_handles(self, *_):
+        """Before each frame: scale every handle so it is N points across,
+        whatever the zoom (VTK sizes them in model units)."""
+        if not self._handles or self._widget is None or not self._widget.GetEnabled():
+            return
+        ren = self.p.renderer
+        cam = ren.GetActiveCamera()
+        height_px = max(ren.GetSize()[1], 1)
+        try:
+            ratio = float(self.p.devicePixelRatioF())          # Retina: 2 pixels per point
+        except AttributeError:
+            ratio = 1.0
+        for actor, src, points in self._handles:
+            src.Update()
+            b = np.asarray(src.GetOutput().GetBounds(), dtype=float).reshape(3, 2)
+            size = float(np.max(b[:, 1] - b[:, 0]))
+            if size <= 0:
+                continue
+            centre = b.mean(axis=1)
+            if cam.GetParallelProjection():
+                world_per_px = 2.0 * cam.GetParallelScale() / height_px
+            else:
+                view = np.asarray(cam.GetDirectionOfProjection())
+                depth = float(np.dot(centre - np.asarray(cam.GetPosition()), view))
+                world_per_px = 2.0 * depth * np.tan(np.radians(cam.GetViewAngle() / 2)) / height_px
+            actor.SetOrigin(*centre)                           # scale about the handle itself
+            actor.SetScale(points * ratio * world_per_px / size)
 
     def _widget_moved(self, normal, origin):
         self.origin = np.asarray(origin, dtype=float)

@@ -164,17 +164,15 @@ class SectionPanel(QWidget):
                 self._caps_later()
 
     def _sync_fill_label(self):
-        """NEW (v2.19): mesh files with volume cells show the cut cells instead
-        of a solid fill. (A file that turns out to have surfaces only goes back
-        to "Fill cut faces" once that's known.)"""
-        lbl = self._labels[self.fill]
+        """Mesh files with volume cells fill the cut with the cut cells (v2.19);
+        their edges follow Display ▸ Mesh edges (v2.21). Same label either way."""
         if self.section and self.section.has_volume:
-            lbl.setText("Show cut mesh")
-            lbl.setToolTip("The volume cells where the plane cuts them, with their edges.\n"
-                           "The cells are read from the file the first time.")
+            tip = ("Fill the cut with the volume cells the plane goes through.\n"
+                   "Their edges show when Display ▸ Mesh edges is on.\n"
+                   "The cells are read from the file the first time.")
         else:
-            lbl.setText("Fill cut faces")
-            lbl.setToolTip("Solid colour on the cut")
+            tip = "Solid colour on the cut"
+        self._labels[self.fill].setToolTip(tip)
 
     def _fill_toggled(self, on):
         if self.section:

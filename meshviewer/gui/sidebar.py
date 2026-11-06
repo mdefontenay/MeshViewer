@@ -1,4 +1,5 @@
-"""Side panel: Display · Mesh quality (STEP) · Section · Boundaries/Parts.
+"""Side panel: Display · Mesh quality (STEP) · Section · Edit · Measure ·
+Boundaries/Parts.
 
 Talks only to a Scene. Selection works both ways: click a part in the 3D
 view -> it is selected in the list; select it in the list -> highlighted in 3D.
@@ -6,17 +7,19 @@ view -> it is selected in the list; select it in the list -> highlighted in 3D.
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, QUrl, Signal
-from PySide6.QtGui import QDesktopServices, QPalette
+from PySide6.QtGui import QAction, QActionGroup, QDesktopServices, QPalette
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSizePolicy, QVBoxLayout, QWidget,
+    QFrame, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMessageBox, QPushButton, QSizePolicy,
+    QVBoxLayout, QWidget,
 )
 
 from .scene import Scene
 from .icons import icon
+from .edit_panel import EditPanel
 from .measure_panel import MeasurePanel
 from .section_panel import SectionPanel
 from .part_tree import PartTree, mcmaster_number
-from .widgets import CollapsibleSection, Menu, NoWheelSlider, Switch
+from .widgets import Capsule, CollapsibleSection, Menu, NoWheelSlider, Switch
 
 
 def open_mcmaster(part_number):
@@ -32,14 +35,19 @@ def _divider():
 
 class Sidebar(QWidget):
     quality_requested = Signal(int)     # window re-tessellates in the background
+    axes_changed = Signal(str)          # v2.21: Display ▸ Axes, saved app-wide by the window
+    appearance_requested = Signal()     # v2.25: "Style… Appearance" link under Display
+    renamed = Signal()                  # v2.26: a part was renamed (window: unsaved dot)
 
+    # Display = one "Axes" choice + switches. (v2.22: parallel projection moved to
+    # the toolbar; evenly spaced rows, no group gaps.)
+    AXES = (("off", "Off"), ("axes", "Axes"), ("grid", "Grid"), ("both", "Both"))
     DISPLAY = [
-        ("Grid",                "grid",          "set_grid"),
-        ("Parallel projection", "parallel",      "set_parallel"),
-        ("Mesh edges",          "mesh_edges",    "set_mesh_edges"),
-        ("Feature edges",       "feature_edges", "set_feature_edges"),
-        ("Bounding box",        "bbox",          "set_bbox"),
-        ("Origin (0, 0, 0)",    "origin",        "set_origin"),       # NEW (v2.18)
+        ("Bounding box",  "bbox",          "set_bbox"),         # v2.23: under Axes
+        ("Mesh edges",    "mesh_edges",    "set_mesh_edges"),
+        ("Feature edges", "feature_edges", "set_feature_edges"),
+        ("Origin",        "origin",        "set_origin"),
+        ("Shading",       "shading",       "set_shading"),      # v2.25: off = flat colours
     ]
 
     def __init__(self, parent=None):
@@ -60,17 +68,59 @@ class Sidebar(QWidget):
         dl = QVBoxLayout(display)
         dl.setContentsMargins(0, 0, 0, 0)
         dl.setSpacing(5)
+        # Axes: frame + numbers, grid lines, both, or nothing (was 3 separate switches)
+        group = QActionGroup(self)
+        group.setExclusive(True)
+        self.axes_actions = {}
+        for key, text in self.AXES:
+            act = QAction(text, self)
+            act.setCheckable(True)
+            act.setData(key)
+            group.addAction(act)
+            self.axes_actions[key] = act
+        self.axes_actions["axes"].setToolTip("Axis frame with numbers and titles")
+        self.axes_actions["grid"].setToolTip("Grid lines behind the model, no numbers")
+        self.axes_actions["both"].setToolTip("Axis frame, numbers and grid lines")
+        group.triggered.connect(lambda act: self.axes_changed.emit(act.data()))
+        row = QHBoxLayout()
+        row.setContentsMargins(2, 1, 2, 1)
+        row.addWidget(QLabel("Axes"))
+        row.addStretch(1)
+        row.addWidget(Capsule(list(self.axes_actions.values()), name="Segmented"))
+        dl.addLayout(row)
+
         self.switches = {}
         for label, key, method in self.DISPLAY:
             row = QHBoxLayout()
             row.setContentsMargins(2, 1, 2, 1)
-            row.addWidget(QLabel(label))
+            lbl = QLabel(label)
+            if key == "origin":
+                lbl.setToolTip("Marker at (0, 0, 0) with X / Y / Z arrows")
+            elif key == "shading":
+                lbl.setToolTip("Light and shadow on the model. Off: flat part colours")
+            row.addWidget(lbl)
             row.addStretch(1)
             sw = Switch()
             sw.toggled.connect(lambda on, m=method: self.scene and getattr(self.scene, m)(on))
             row.addWidget(sw)
             dl.addLayout(row)
             self.switches[key] = sw
+        # v2.25: Display = WHAT is shown (on / off); Appearance = HOW it looks
+        # (colours, sizes, thickness), the same in every window. Say so here.
+        row = QHBoxLayout()
+        row.setContentsMargins(2, 3, 2, 0)
+        hint = QLabel("Colours, sizes, line thickness:")
+        hint.setObjectName("InfoLine")
+        row.addWidget(hint)
+        link = QPushButton("Appearance…")
+        link.setObjectName("LinkButton")
+        link.setFlat(True)
+        link.setCursor(Qt.PointingHandCursor)
+        link.setToolTip("How things look, the same in every window (⌘,)")
+        link.clicked.connect(self.appearance_requested.emit)
+        row.addWidget(link)
+        row.addStretch(1)
+        dl.addLayout(row)
         lay.addWidget(CollapsibleSection("Display", display, "display"))
 
         # ---- Mesh quality (STEP only) -------------------------------------
@@ -115,9 +165,15 @@ class Sidebar(QWidget):
                                                   trailing=self.section_panel.enable,
                                                   remember=False, start_open=False)
         lay.addWidget(self.section_section)
-        # NEW (v2.16): switching the section on also opens its controls
-        self.section_panel.enable.toggled.connect(
-            lambda on: on and self.section_section.set_expanded(True))
+        # Switching the section on opens its controls (v2.16); off closes them (v2.25)
+        self.section_panel.enable.toggled.connect(self.section_section.set_expanded)
+        lay.addWidget(_divider())
+
+        # ---- Edit: rotate / mirror / move (v2.24: always here, starts closed) ----
+        self.edit_panel = EditPanel()
+        self.edit_section = CollapsibleSection("Edit", self.edit_panel, "edit",
+                                               remember=False, start_open=False)
+        lay.addWidget(self.edit_section)
         lay.addWidget(_divider())
 
         # ---- Measure: measuring is active while this section is open --------
@@ -168,6 +224,7 @@ class Sidebar(QWidget):
         self.list.zoom_requested.connect(lambda names: self.scene and self.scene.zoom_to(names))
         self.list.isolate_requested.connect(self._isolate)
         self.list.context_requested.connect(self.part_menu)
+        self.list.rename_requested.connect(self._rename)
         pl.addWidget(self.list, 1)
 
         links = QWidget()
@@ -199,6 +256,11 @@ class Sidebar(QWidget):
         self._lay.setStretchFactor(self.parts_section, 1 if expanded else 0)
         self._lay.setStretchFactor(self._tail, 0 if expanded else 1)
 
+    def set_axes_mode(self, mode):
+        """Show the saved Axes choice (no signal)."""
+        act = self.axes_actions.get(mode) or self.axes_actions["both"]
+        act.setChecked(True)
+
     # ---- binding to a scene -------------------------------------------
     def bind(self, scene: Scene):
         self.scene = scene
@@ -206,6 +268,7 @@ class Sidebar(QWidget):
         for key, sw in self.switches.items():
             Switch.set_silently(sw, scene.state[key])
         self.section_panel.bind(scene.section)
+        self.edit_panel.bind(scene)
         self.measure_panel.bind(scene)
 
         m = scene.model
@@ -335,6 +398,8 @@ class Sidebar(QWidget):
             menu.addAction(f"Hide{what}", lambda: self._visibility_changed(names, False))
             menu.addAction(f"Isolate{what}", lambda: self._isolate(names))
             menu.addAction("Zoom To", lambda: self.scene.zoom_to(names))
+            if len(names) == 1 and clicked == names:           # v2.26
+                menu.addAction("Rename…", lambda: self.rename(names[0]))
             # McMaster-Carr parts -> open their catalogue page
             # NEW (v2.11): only the part / group that was right-clicked, not the selection
             numbers = sorted({mcmaster_number(n) for n in clicked} - {None})
@@ -354,6 +419,38 @@ class Sidebar(QWidget):
         menu.addAction("Fit View", self.scene.fit)
         menu.exec(global_pos)
         self.scene.end_stuck_drag()            # no zoom mode left behind
+
+    # ---- NEW (v2.26): rename a part ---------------------------------------------------
+    def rename(self, name):
+        """Edit the name in the list (or, with the sidebar hidden, in a small dialog)."""
+        if not self.scene:
+            return
+        if self.isVisible():
+            self.parts_section.set_expanded(True)
+            if self.list.start_rename(name):
+                return
+            self.filter.clear()                       # filtered out: show it, try again
+            if self.list.start_rename(name):
+                return
+        new, ok = QInputDialog.getText(self.window(), "Rename", "New name:", text=name)
+        if ok:
+            self._rename(name, new)
+
+    def _rename(self, old, new):
+        new = new.strip()
+        if not self.scene or not new or new == old:
+            return
+        if new in self.scene.model.parts:
+            QMessageBox.warning(self.window(), "Rename",
+                                f"There is already a {self._one_part()} named “{new}”.")
+            return
+        if self.scene.rename_part(old, new):
+            self.refresh_parts()
+            self.renamed.emit()
+
+    def _one_part(self):
+        what = self.scene.model.group_title.lower()
+        return what[:-3] + "y" if what.endswith("ies") else what.rstrip("s")
 
     def _apply_filter(self, text):
         self.list.apply_filter(text)

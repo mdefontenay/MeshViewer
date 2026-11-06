@@ -9,6 +9,8 @@
 #
 # NEW (v2.20): the app and the .dmg are made in ~/Downloads/MeshViewer-build/dist
 # (or $MESHVIEWER_WORK/dist), not in this folder.
+# v2.25: the disk image window (background, icon places) is written by dmgbuild
+# (installed in the build venv the first time), no longer arranged by Finder.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -45,59 +47,40 @@ step "Checking the app (self-test)"
 "$APP/Contents/MacOS/$NAME" --selftest || die "self-test failed: a package is missing from the app (see above)."
 
 # ---- 3. Disk image -------------------------------------------------------------------
+# v2.25: made with dmgbuild, which writes the window layout (background picture,
+# icon positions) straight into the image. The old way asked Finder to arrange
+# the window by AppleScript; when macOS refused Terminal the "control Finder"
+# permission, or Finder hadn't saved its settings before the disk was ejected,
+# the .dmg opened without the background. No Finder, no permission prompt now.
 step "Making the disk image"
-STAGE="$(mktemp -d)/$NAME"
-mkdir -p "$STAGE/.background"
-cp -R "$APP" "$STAGE/"
-ln -s /Applications "$STAGE/Applications"
-# Retina + normal background in one file (Finder picks the right one).
-BG="background.tiff"
-tiffutil -cathidpicheck resources/dmg_background.png "resources/dmg_background@2x.png" \
-    -out "$STAGE/.background/$BG" >/dev/null 2>&1 \
-    || { BG="background.png"; cp resources/dmg_background.png "$STAGE/.background/$BG"; }
-
-SIZE_MB=$(( $(du -sm "$STAGE" | cut -f1) * 12 / 10 + 50 ))
-RW="$(mktemp -u).dmg"
-hdiutil create -quiet -volname "$NAME" -srcfolder "$STAGE" -fs HFS+ -format UDRW \
-        -size "${SIZE_MB}m" "$RW"
-
-# Window layout: icons left / right, arrow background. Finder may ask once for
-# permission ("Terminal wants to control Finder"); if refused, the .dmg still works,
-# just without the arranged window.
+"$VENV/bin/python" -c "import dmgbuild" 2>/dev/null \
+    || "$VENV/bin/python" -m pip install -q dmgbuild \
+    || die "could not install dmgbuild (pip install dmgbuild in $VENV)."
 for v in "/Volumes/$NAME"*; do [ -d "$v" ] && hdiutil detach -quiet "$v" -force || true; done
-MOUNT="$(hdiutil attach -readwrite -noverify -noautoopen "$RW" | sed -n 's|.*\(/Volumes/.*\)$|\1|p' | head -1)"
-DISK_NAME="$(basename "$MOUNT")"
-osascript <<APPLESCRIPT >/dev/null 2>&1 || echo "(Finder layout skipped — the disk image still works)"
-tell application "Finder"
-    tell disk "$DISK_NAME"
-        open
-        set current view of container window to icon view
-        set toolbar visible of container window to false
-        set statusbar visible of container window to false
-        set the bounds of container window to {200, 120, 840, 520}
-        set opts to the icon view options of container window
-        set arrangement of opts to not arranged
-        set icon size of opts to 128
-        set text size of opts to 13
-        set background picture of opts to file ".background:$BG"
-        set position of item "$NAME.app" of container window to {170, 190}
-        set position of item "Applications" of container window to {470, 190}
-        update without registering applications
-        delay 1
-        close
-    end tell
-end tell
-APPLESCRIPT
-SetFile -a C "$MOUNT" 2>/dev/null || true          # custom volume icon flag (if Xcode tools exist)
-cp resources/mesh_icon.icns "$MOUNT/.VolumeIcon.icns" 2>/dev/null && SetFile -c icnC "$MOUNT/.VolumeIcon.icns" 2>/dev/null || true
-sync
-hdiutil detach -quiet "$MOUNT" || hdiutil detach -quiet -force "$MOUNT"
-
-# Compressed, read-only final image (LZFSE: macOS 10.11+).
 rm -f "$DMG"
-hdiutil convert -quiet "$RW" -format ULFO -o "$DMG"
-rm -f "$RW"
-rm -rf "$(dirname "$STAGE")"
+# dmg_background.png (640 × 400) + dmg_background@2x.png (Retina) are combined
+# automatically; the window is the same size as the picture.
+"$VENV/bin/python" - "$DMG" "$NAME" "$APP" <<'PY'
+import sys
+from dmgbuild import build_dmg
+
+dmg, name, app = sys.argv[1:4]
+build_dmg(dmg, name, settings={
+    "format": "ULFO",                       # LZFSE compressed, macOS 10.11+
+    "filesystem": "HFS+",
+    "files": [app],
+    "symlinks": {"Applications": "/Applications"},
+    "icon": "resources/mesh_icon.icns",     # icon of the mounted disk
+    "background": "resources/dmg_background.png",
+    "window_rect": ((200, 120), (640, 400)),
+    "default_view": "icon-view",
+    "show_toolbar": False, "show_status_bar": False, "show_pathbar": False,
+    "show_sidebar": False, "show_tab_view": False,
+    "icon_size": 128, "text_size": 13,
+    "icon_locations": {f"{name}.app": (170, 190), "Applications": (470, 190)},
+})
+PY
+[ -f "$DMG" ] || die "the disk image was not made (see above)."
 
 step "Done"
 cat <<MSG

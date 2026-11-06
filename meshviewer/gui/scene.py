@@ -17,12 +17,14 @@ import pyvista as pv
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QGuiApplication
 from vtkmodules.vtkCommonCore import vtkSMPTools
+from vtkmodules.vtkFiltersCore import vtkAppendPolyData
 from vtkmodules.vtkRenderingCore import (
     vtkActor, vtkCellPicker, vtkHardwarePicker, vtkMapper, vtkPolyDataMapper,
 )
 
 from ..model import Model
 from .background import ImageBackground, is_dark_image, load_image
+from .. import transform as xf
 from .measure import AXIS_COLORS, Measure
 from .section import Section
 
@@ -40,13 +42,14 @@ SELECT_COLOR = "#0a84ff"    # fallback; the system accent colour is used when kn
 CLICK_TOLERANCE_PX = 4      # a press+release closer than this is a click, not a drag
 AXIS_FONT_DEFAULT = 16       # grid label points (Appearance slider: 10 = original size … 28)
 EDGE_WIDTHS = {"thin": 1.0, "medium": 1.5, "thick": 2.0}   # feature edge lines, pixels
+AXES_MODES = ("off", "axes", "grid", "both")               # Display ▸ Axes (v2.21)
 
 # Viewport colours (background gradient bottom -> top, grid, feature edges)
 THEMES = {
     False: dict(bg="#e8ebf0", bg_top="#ffffff", grid="#7a7a80", edge="#111111",    # light
-                cut_fill="#d9dde4", cut_edge="#4b5260"),     # v2.19: cut volume mesh
+                cut_fill="#d9dde4"),                        # cut volume mesh
     True:  dict(bg="#1c1c1e", bg_top="#3a3a3e", grid="#9a9aa2", edge="#0a0a0a",    # dark
-                cut_fill="#3d4048", cut_edge="#aeb3bd"),
+                cut_fill="#6b6e76"),
 }
 
 
@@ -121,18 +124,24 @@ class Scene:
 
         # Defaults: meshes show element edges, CAD shows sharp (feature) edges.
         self.state = dict(grid=True, parallel=True, mesh_edges=not model.is_cad,
-                          feature_edges=model.is_cad, bbox=False, origin=False)
+                          feature_edges=model.is_cad, bbox=False, origin=False,
+                          original=False, shading=True)
         self._dark = dark
         self._ui_dark = dark
         self.bg_mode = ("default", None)          # set by Appearance
         self._origin_actors = []                  # NEW (v2.18): marker at (0, 0, 0)
+        self._orig_points = None                  # v2.24: file points, kept at the 1st edit
+        self._flipped = {}                        # part -> faces flipped (mirrored)
+        self._edit_history = []                   # [((R, t) before, label)]
+        self._original_actor = None               # grey edges of the file as opened
+        self._alias = {}                          # v2.26: file's part name -> new name
         self._last_view = None                    # NEW (v2.18): (view, flipped?, camera)
         self._bg_image = None                     # ImageBackground when a picture is shown
         self.axis_font = AXIS_FONT_DEFAULT        # set by Appearance
         self.edge_width = EDGE_WIDTHS["thin"]     # NEW (v2.14): feature edge lines (Appearance)
         self.hide_edges_moving = True             # NEW (v2.14): smooth rotation (Appearance)
-        self.grid_lines = True                    # NEW (v2.15): lines behind the model (Appearance)
-        self.axis_lines = True                    # NEW (v2.16): axis frame lines + ticks
+        self.grid_lines = True                    # grid lines on the walls behind the model
+        self.axis_lines = True                    # axis frame, ticks, numbers and titles
         self._surf = self._surf_map = None      # composite actor/mapper: all parts
         self._edges = self._edges_map = None    # composite actor/mapper: feature edges
         self._highlights = {}                   # part name -> outline actor
@@ -171,6 +180,7 @@ class Scene:
             blocks, color="#bbbbbb", smooth_shading=True, show_edges=self.state["mesh_edges"],
             edge_color="#202020", reset_camera=False, pickable=True)
         self._surf_map.SetStatic(True)            # geometry never changes in place
+        self._surf.GetProperty().SetLighting(self.state["shading"])
         for n in self.names:
             self._apply_block(n)
 
@@ -533,6 +543,7 @@ class Scene:
             if a is not None:
                 self.p.remove_actor(a, render=False)
         self._surf = self._surf_map = self._edges = self._edges_map = None
+        parts = {self._alias.get(k, k): v for k, v in parts.items()}   # keep renames
         self.model.parts = parts
         self.model.quality = level
         self.names = sorted(parts, key=str.lower)
@@ -553,14 +564,109 @@ class Scene:
         self.p.camera_position = cam
         self.p.render()
 
-    # ---- display options ----------------------------------------------
-    def set_grid(self, on, render=True):
-        self.state["grid"] = bool(on)
-        if self._grid_actor is not None:
-            self._grid_actor.SetVisibility(bool(on))
+    # ---- NEW (v2.26): rename a part (any file type; Export writes the new names) ----
+    @property
+    def renamed(self):
+        return any(k != v for k, v in self._alias.items())
+
+    @property
+    def has_changes(self):
+        """Edits or renames that only live in memory until exported."""
+        return self.model.edited or self.renamed
+
+    def rename_part(self, old, new):
+        """True when renamed. Same place in the composite actor, so nothing is rebuilt."""
+        new = new.strip()
+        if not new or new == old or old not in self.model.parts or new in self.model.parts:
+            return False
+
+        def rekey(d):
+            if d and old in d:
+                items = [(new if k == old else k, v) for k, v in d.items()]
+                d.clear()
+                d.update(items)
+        for d in (self.model.parts, self.colors, self.visible, self.selected_faces,
+                  self._highlights, self._flipped, self._orig_points):
+            rekey(d)
+        self.names[self.names.index(old)] = new       # same block index
+        self.selected_parts = [new if n == old else n for n in self.selected_parts]
+        orig = next((k for k, v in self._alias.items() if v == old), old)
+        self._alias[orig] = new                       # re-meshed STEP parts keep it
+        self.measure._changed()
+        return True
+
+    # ---- Edit section: rotate / mirror (v2.23), move + undo + original (v2.24) -------
+    def apply_edit(self, r, t=(0.0, 0.0, 0.0), label=""):
+        """Rotate / mirror (R, 3×3 integers) then move (t) every part and the volume
+        cells. Returns False for exact CAD (STEP, IGES, BREP), which can't be edited."""
+        if not self.model.editable:
+            return False
+        state = (self.model.transform, self.model.offset)
+        self._edit_history.append((state, label))
+        self._set_edit_state(*xf.compose((r, t), state))
+        return True
+
+    def undo_edit(self):
+        """Back one step (exact: everything is recomputed from the file's points)."""
+        if self._edit_history:
+            (r, t), _ = self._edit_history.pop()
+            self._set_edit_state(r, t)
+
+    def reset_edits(self):
+        if self.model.edited:
+            self._edit_history.clear()
+            self._set_edit_state(xf.identity(), np.zeros(3))
+
+    @property
+    def last_edit(self):
+        return self._edit_history[-1][1] if self._edit_history else ""
+
+    def _set_edit_state(self, r, t):
+        if self._orig_points is None:               # first edit: keep the file's points
+            self._orig_points = {n: np.array(p.points) for n, p in self.model.parts.items()}
+        old = (self.model.transform, self.model.offset)
+        for n, poly in self.model.parts.items():
+            self._flipped[n] = xf.set_surface(poly, self._orig_points[n], r, t,
+                                              self._flipped.get(n, False))
+        self.model.transform, self.model.offset = np.asarray(r, dtype=int), np.asarray(t, float)
+        self.section.follow_edit(xf.delta(old, (r, t)))   # plane + volume cells follow
+        self.measure.forget_points()                # picked points were in the old place
+        self.replace_parts(self.model.parts, self.model.quality)   # keeps the camera
+        self.refresh_grid(render=False)             # new bounds
+        if self._bbox_actor is not None:
+            self.p.remove_actor(self._bbox_actor, render=False)
+            self._bbox_actor = None
+            self.set_bbox(self.state["bbox"], render=False)
+        if self.state.get("origin"):
+            self._build_origin()
+        self._sync_original()
+        self.p.render()
+
+    def set_show_original(self, on, render=True):
+        """Grey feature edges of the file as it was opened, to compare with the edits."""
+        self.state["original"] = bool(on)
+        self._sync_original()
         if render:
             self.p.render()
 
+    def _sync_original(self):
+        want = self.state.get("original") and self.model.edited
+        if want and self._original_actor is None:
+            app = vtkAppendPolyData()
+            for n, poly in self.model.parts.items():
+                pts = self._orig_points[n] if self._orig_points else poly.points
+                src = pv.PolyData(np.asarray(pts), faces=poly.faces)
+                app.AddInputData(src.extract_feature_edges(
+                    feature_angle=FEATURE_ANGLE, boundary_edges=True, feature_edges=True,
+                    manifold_edges=False, non_manifold_edges=False))
+            app.Update()
+            self._original_actor = self.p.add_mesh(
+                pv.wrap(app.GetOutput()), color=THEMES[self._dark]["grid"], opacity=0.7,
+                line_width=1.5, lighting=False, pickable=False, reset_camera=False)
+        if self._original_actor is not None:
+            self._original_actor.SetVisibility(bool(want))
+
+    # ---- display options ----------------------------------------------
     def set_parallel(self, on, render=True):
         self.state["parallel"] = bool(on)
         if on:
@@ -570,9 +676,19 @@ class Scene:
         if render:
             self.p.render()
 
+    def set_shading(self, on, render=True):
+        """NEW (v2.25): lights on (shaded, 3D look) or off (flat part colours, no
+        light or shadow) for the parts and the filled cut faces."""
+        self.state["shading"] = bool(on)
+        self._surf.GetProperty().SetLighting(bool(on))
+        self.section.sync_shading()
+        if render:
+            self.p.render()
+
     def set_mesh_edges(self, on, render=True):
         self.state["mesh_edges"] = bool(on)
         self._surf.GetProperty().SetEdgeVisibility(bool(on))
+        self.section.sync_cut_edges()              # v2.21: the cut mesh follows this switch
         if render:
             self.p.render()
 
@@ -693,21 +809,24 @@ class Scene:
             if render:
                 self.p.render()
 
-    def set_grid_lines(self, on, rebuild=True):
-        """NEW (v2.15): grid lines on the walls behind the model, or only the
-        axis frame with its ticks and labels."""
-        if bool(on) != self.grid_lines:
-            self.grid_lines = bool(on)
-            if rebuild:
-                self.set_theme(self._ui_dark)
-
-    def set_axis_lines(self, on, rebuild=True):
-        """The axis frame lines, tick marks, numbers and titles (v2.16; v2.17:
-        numbers and titles hide too)."""
-        if bool(on) != self.axis_lines:
-            self.axis_lines = bool(on)
-            if rebuild:
-                self.set_theme(self._ui_dark)
+    def set_axes_mode(self, mode, rebuild=True, render=True):
+        """NEW (v2.21), one control instead of three (Display ▸ Grid + Appearance
+        ▸ Grid lines / Axis lines):
+            "off"   nothing
+            "axes"  axis frame, ticks, numbers and titles
+            "grid"  grid lines on the walls behind the model only
+            "both"  axes + grid lines (default)"""
+        mode = mode if mode in AXES_MODES else "both"
+        lines, axes = mode in ("grid", "both"), mode in ("axes", "both")
+        changed = (lines, axes) != (self.grid_lines, self.axis_lines)
+        self.grid_lines, self.axis_lines = lines, axes
+        self.state["grid"] = mode != "off"
+        if changed and rebuild:
+            self.refresh_grid(render=False)
+        elif self._grid_actor is not None:
+            self._grid_actor.SetVisibility(self.state["grid"])
+        if render:
+            self.p.render()
 
     # ---- the grid / axes box -----------------------------------------------------------
     def refresh_grid(self, render=True):
@@ -794,6 +913,8 @@ class Scene:
         if self.state.get("origin"):
             self._build_origin()                   # dot colour follows the background
         self.section.restyle()                     # v2.19: cut mesh + outline colours
+        if self._original_actor is not None:       # v2.24: grey "original" edges
+            self._original_actor.GetProperty().SetColor(pv.Color(t["grid"]).float_rgb)
         if render:
             self.p.render()
 

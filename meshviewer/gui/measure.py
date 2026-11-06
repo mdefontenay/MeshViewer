@@ -94,6 +94,13 @@ class Measure:
         self.scene.set_selection([], notify=True)   # parts and faces aren't mixed
         self._changed()
 
+    def forget_points(self):
+        """NEW (v2.23): drop picked distance points (the model moved), keep the selection."""
+        if self.points:
+            self.points = []
+            self._draw()
+            self._changed()
+
     def clear(self):
         self.points = []
         self.scene.clear_face_selection(render=False)

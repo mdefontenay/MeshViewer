@@ -86,7 +86,33 @@ def _draw_appearance(p):
         p.drawEllipse(QPointF(knob, y), r, r)
 
 
+def _draw_parallel(p):
+    """NEW (v2.22): parallel projection — a box whose edges stay parallel
+    (front and back faces the same size)."""
+    p.drawRect(QRectF(2.5, 6.0, 9.0, 9.0))
+    _line(p, (6.5, 2.5), (15.5, 2.5), (15.5, 11.5))
+    for a, b in (((2.5, 6.0), (6.5, 2.5)), ((11.5, 6.0), (15.5, 2.5)), ((11.5, 15.0), (15.5, 11.5))):
+        _line(p, a, b)
+
+
+def _draw_edit(p):
+    """NEW (v2.22): pencil."""
+    _line(p, (3.0, 15.0), (3.6, 11.8), (12.4, 3.0), (15.0, 5.6), (6.2, 14.4), (3.0, 15.0))
+    _line(p, (10.6, 4.8), (13.2, 7.4))
+    _line(p, (3.6, 11.8), (6.2, 14.4))
+
+
+def _draw_export(p):
+    """NEW (v2.23): export — tray with an arrow going out (like macOS Share)."""
+    _line(p, (6.0, 7.5), (4.0, 7.5), (4.0, 16.0), (14.0, 16.0), (14.0, 7.5), (12.0, 7.5))
+    _line(p, (9.0, 11.0), (9.0, 2.0))
+    _line(p, (6.2, 4.8), (9.0, 2.0), (11.8, 4.8))
+
+
 DRAWINGS = {
+    "export": _draw_export,
+    "parallel": _draw_parallel,
+    "edit": _draw_edit,
     "appearance": _draw_appearance,
     "nounit": _draw_nounit,
     "ruler": _draw_ruler,

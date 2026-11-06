@@ -1,9 +1,10 @@
-"""Appearance sheet, in four groups:
-    Window         theme, parts list spacing
-    3D background  default gradient, a colour, or an image
-    Axes & grid    label size, grid lines, axis lines
-    Edges          line thickness, hide while the view moves
-Changes apply live and are remembered for every window."""
+"""Appearance sheet = HOW things look, the same in every window (v2.25 groups):
+    Window      theme, parts list spacing
+    Background  default gradient, a colour, or an image
+    Axes        label size
+    Edges       line thickness, hide while the view moves
+WHAT is shown (axes, grid, edges, shading…) is switched on / off in the
+sidebar's Display section, per window. Changes apply live and are remembered."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -74,13 +75,19 @@ class AppearanceDialog(QDialog):
         title = QLabel("Appearance")
         title.setStyleSheet("font-size: 15px; font-weight: 600;")
         lay.addWidget(title)
+        note = QLabel("How things look, saved for every window. What is shown "
+                      "(axes, edges, shading…) is switched in the side panel ▸ Display.")
+        note.setObjectName("InfoLine")
+        note.setWordWrap(True)
+        note.setFixedWidth(360)
+        lay.addWidget(note)
 
         form = QFormLayout()
         form.setLabelAlignment(Qt.AlignRight)
         form.setHorizontalSpacing(12)
         form.setVerticalSpacing(10)
 
-        # v2.16: four groups, each under a title and separated by a line.
+        # v2.25: groups named after what they style (Display has the on / off switches).
         # ---- Window ------------------------------------------------------------------
         form.addRow(_group_title("Window"))
         self.theme, w = _segmented(self, (("system", "System"), ("light", "Light"),
@@ -90,10 +97,11 @@ class AppearanceDialog(QDialog):
         self.density, w = _segmented(self, (("compact", "Compact"), ("comfortable", "Comfortable")),
                                      lambda k: self.app.set_appearance(density=k))
         form.addRow("Parts list", w)
+        w.setToolTip("Row spacing of the parts list")
 
-        # ---- 3D background ---------------------------------------------------------------
+        # ---- 3D view -----------------------------------------------------------------------
         form.addRow(_separator())
-        form.addRow(_group_title("3D background"))
+        form.addRow(_group_title("Background"))
         self.bg, w = _segmented(self, (("default", "Default"), ("color", "Colour"),
                                        ("image", "Image")), self._bg_mode)
         form.addRow("Style", w)
@@ -116,10 +124,7 @@ class AppearanceDialog(QDialog):
         self.image_label = QLabel("Image")
         form.addRow(self.image_label, self.image_row)
 
-        # ---- Axes & grid ----------------------------------------------------------------
-        form.addRow(_separator())
-        form.addRow(_group_title("Axes & grid"))
-        font_row = QWidget()                       # label size slider (10 pt = original)
+        font_row = QWidget()                       # axis label size (10 pt = original)
         fl = QHBoxLayout(font_row)
         fl.setContentsMargins(0, 0, 0, 0)
         self.axis_font = NoWheelSlider(Qt.Horizontal)
@@ -134,29 +139,11 @@ class AppearanceDialog(QDialog):
         fl.addWidget(self.axis_font)
         fl.addWidget(self.axis_font_value)
         fl.addStretch(1)
+        form.addRow(_separator())
+        form.addRow(_group_title("Axes"))
         form.addRow("Label size", font_row)
-
-        # Grid lines (walls behind the model) and, NEW (v2.16), axis lines (frame +
-        # tick marks) side by side. Numbers and titles always stay;
-        # Display ▸ Grid hides everything.
-        self.grid_lines = Switch(bool(a["grid_lines"]))
-        self.grid_lines.toggled.connect(lambda on: self.app.set_appearance(grid_lines=on))
-        self.axis_lines = Switch(bool(a["axis_lines"]))
-        self.axis_lines.toggled.connect(lambda on: self.app.set_appearance(axis_lines=on))
-        show_row = QWidget()
-        sl = QHBoxLayout(show_row)
-        sl.setContentsMargins(0, 0, 0, 0)
-        sl.setSpacing(6)
-        for sw, text, tip in ((self.grid_lines, "Grid lines", "Lines on the walls behind the model"),
-                              (self.axis_lines, "Axis lines", "Axis frame and tick marks")):
-            lab = QLabel(text)
-            lab.setToolTip(tip)
-            sw.setToolTip(tip)
-            sl.addWidget(sw)
-            sl.addWidget(lab)
-            sl.addSpacing(14)
-        sl.addStretch(1)
-        form.addRow("Show", show_row)
+        font_row.setToolTip("Size of the axis numbers and titles.\n"
+                            "Show / hide the axes: side panel ▸ Display ▸ Axes")
 
         # ---- Edges ------------------------------------------------------------------------
         form.addRow(_separator())
@@ -165,8 +152,9 @@ class AppearanceDialog(QDialog):
                                                ("thick", "Thick")),
                                         lambda k: self.app.set_appearance(edge_width=k))
         w.setToolTip("Thickness of the feature edge lines (1 / 1.5 / 2 px).\n"
-                     "Thin is the fastest to draw.")
-        form.addRow("Thickness", w)
+                     "Thin is the fastest to draw.\n"
+                     "Show / hide edges: side panel ▸ Display")
+        form.addRow("Line thickness", w)
         self.hide_edges = Switch(bool(a["hide_edges_moving"]))
         self.hide_edges.toggled.connect(lambda on: self.app.set_appearance(hide_edges_moving=on))
         form.addRow("While moving", _switch_row(self.hide_edges, "hide them — smoother"))

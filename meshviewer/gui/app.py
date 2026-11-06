@@ -31,6 +31,14 @@ def _axis_font(v) -> int:
         return AXIS_FONT_DEFAULT
 
 
+def _old_axes_setting(st) -> str:
+    """Display ▸ Axes from the two switches older versions saved."""
+    grid = st.value("appearance/grid_lines", True, type=bool)
+    axes = st.value("appearance/axis_lines", True, type=bool)
+    return {(True, True): "both", (True, False): "grid", (False, True): "axes"}.get(
+        (grid, axes), "axes")
+
+
 class MeshViewerApp(QApplication):
     def __init__(self, argv):
         super().__init__(argv)
@@ -51,8 +59,9 @@ class MeshViewerApp(QApplication):
             # NEW (v2.14): edge lines
             "edge_width": st.value("appearance/edge_width", "thin"),
             "hide_edges_moving": st.value("appearance/hide_edges_moving", True, type=bool),
-            "grid_lines": st.value("appearance/grid_lines", True, type=bool),   # NEW (v2.15)
-            "axis_lines": st.value("appearance/axis_lines", True, type=bool),   # NEW (v2.16)
+            # v2.21: Display ▸ Axes (off / axes / grid / both) replaces the Grid switch
+            # and Appearance's Grid lines / Axis lines switches
+            "axes": st.value("appearance/axes", _old_axes_setting(st)),
         }
         self._apply_theme()
         self.setStyleSheet(stylesheet())

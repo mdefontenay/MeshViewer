@@ -327,3 +327,82 @@ class ColorField(QWidget):
                                   "Choose a colour")
         if c.isValid():
             self.edit.setText(c.name().upper())
+
+
+# ---------------------------------------------------------------------------
+# v2.25: pop-up choice button — opens the same menu as a right-click (replaces
+# QComboBox, whose macOS pop-up couldn't be styled without spacing glitches)
+# ---------------------------------------------------------------------------
+class MenuSelect(QPushButton):
+    """Looks like a field with a chevron; click -> right-click-style menu with
+    the choices (a check mark on the current one). QComboBox-like API."""
+    currentIndexChanged = Signal(int)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("MenuSelect")
+        self.setCursor(Qt.PointingHandCursor)
+        self._items = []                      # [(text, data)]
+        self._index = -1
+        self.clicked.connect(self._open)
+
+    # ---- QComboBox-like API ----
+    def addItem(self, text, data=None):
+        self._items.append((text, data))
+        if self._index < 0:
+            self.setCurrentIndex(0)
+        self._fit_width()
+
+    def count(self):
+        return len(self._items)
+
+    def currentIndex(self):
+        return self._index
+
+    def currentData(self):
+        return self._items[self._index][1] if 0 <= self._index < len(self._items) else None
+
+    def currentText(self):
+        return self._items[self._index][0] if 0 <= self._index < len(self._items) else ""
+
+    def findData(self, data):
+        return next((i for i, (_, d) in enumerate(self._items) if d == data), -1)
+
+    def setCurrentIndex(self, i):
+        if not 0 <= i < len(self._items):
+            return
+        changed = i != self._index
+        self._index = i
+        self.setText(self._items[i][0])
+        if changed:
+            self.currentIndexChanged.emit(i)
+
+    # ---- menu ----
+    def _open(self):
+        menu = Menu(self)
+        for i, (text, _) in enumerate(self._items):
+            a = menu.addAction(text)
+            a.setCheckable(True)
+            a.setChecked(i == self._index)
+            a.triggered.connect(lambda _=False, k=i: self.setCurrentIndex(k))
+        menu.setMinimumWidth(self.width())
+        menu.exec(self.mapToGlobal(self.rect().bottomLeft()))
+
+    def _fit_width(self):
+        fm = self.fontMetrics()
+        widest = max(fm.horizontalAdvance(t) for t, _ in self._items)
+        self.setMinimumWidth(widest + 44)     # text + padding + chevron
+
+    def paintEvent(self, e):
+        super().paintEvent(e)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        pen = QPen(self.palette().color(QPalette.PlaceholderText), 1.5)
+        pen.setCapStyle(Qt.RoundCap)
+        pen.setJoinStyle(Qt.RoundJoin)
+        p.setPen(pen)
+        cx, cy = self.width() - 14, self.height() / 2
+        path = QPainterPath(QPointF(cx - 3.5, cy - 1.5))
+        path.lineTo(QPointF(cx, cy + 2))
+        path.lineTo(QPointF(cx + 3.5, cy - 1.5))
+        p.drawPath(path)

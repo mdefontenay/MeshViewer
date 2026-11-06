@@ -15,7 +15,7 @@ from __future__ import annotations
 import re
 import sys
 
-from PySide6.QtCore import QItemSelectionModel, QPointF, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QItemSelectionModel, QPointF, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPalette, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView, QStyledItemDelegate, QTreeWidget, QTreeWidgetItem,
@@ -30,7 +30,12 @@ _SUFFIXES = (re.compile(r"\s*\(\d+\)$"),       # "Part (3)"   — duplicate name
              re.compile(r"\.\d+$"),            # "Part.2"     — solids of one part
              re.compile(r"[\s_\-]+\d+$"))      # "Part_02", "Part 2"
 # McMaster-Carr catalogue numbers: digits, one letter, digits — "91251A540", "5536K11".
+# At the start of the name (as before), or — v2.26 — anywhere in it, as a separate
+# word: "Socket Screw 91251A540", "Bracket_8975K12_2". In the middle, the letter
+# can't be an x (sizes like "100x200") and at least 2 digits must follow it
+# (alloys like "6061T6").
 _MCMASTER = re.compile(r"^(\d{3,5}[A-Za-z]\d{1,5})(?=$|[\s_\-:.(,])")
+_MCMASTER_ANY = re.compile(r"(?<![A-Za-z0-9])(\d{3,5}[A-WYZa-wyz]\d{2,5})(?![A-Za-z0-9])")
 MCMASTER_GROUP = "McMaster Parts"
 
 
@@ -46,8 +51,9 @@ def group_key(name: str) -> str:
 
 
 def mcmaster_number(name: str):
-    """'91251A540' for '91251A540_Socket Head Screw:2', else None."""
-    m = _MCMASTER.match(name.strip())
+    """'91251A540' for '91251A540_Socket Head Screw:2' or 'Screw 91251A540 (2)',
+    else None."""
+    m = _MCMASTER.match(name.strip()) or _MCMASTER_ANY.search(name)
     return m.group(1).upper() if m else None
 
 
@@ -73,6 +79,7 @@ class PartTree(QTreeWidget):
     zoom_requested = Signal(list)
     isolate_requested = Signal(list)
     context_requested = Signal(list, list, object)   # names, clicked row's names, position
+    rename_requested = Signal(str, str)              # v2.26: old name, new name
 
     ROW_RADIUS = 6.0
 
@@ -91,6 +98,7 @@ class PartTree(QTreeWidget):
         self.setMouseTracking(True)
         self.setSelectionMode(QAbstractItemView.ExtendedSelection)     # ⌘/⇧-click
         self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.setEditTriggers(QAbstractItemView.NoEditTriggers)   # rename: menu / Return
         self.customContextMenuRequested.connect(self._context_menu)
         self.itemChanged.connect(self._item_changed)
         self.itemSelectionChanged.connect(
@@ -153,7 +161,7 @@ class PartTree(QTreeWidget):
         it = QTreeWidgetItem([name])
         it.setIcon(0, color_dot(scene.colors[name]))
         it.setData(0, NAME, name)
-        it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
+        it.setFlags(it.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsEditable)
         it.setCheckState(0, Qt.Checked if scene.visible[name] else Qt.Unchecked)
         it.setToolTip(0, f"{name}\n{scene.info(name)}")
         self._parts[name] = it
@@ -197,8 +205,40 @@ class PartTree(QTreeWidget):
             self._update_group(p)
             p = p.parent()
 
+    # ---- NEW (v2.26): rename in place (right-click ▸ Rename…, or Return) ---------------
+    def start_rename(self, name):
+        it = self._parts.get(name)
+        if it is None or it.isHidden():
+            return False
+        p = it.parent()
+        while p is not None:
+            p.setExpanded(True)
+            p = p.parent()
+        self.scrollToItem(it)
+        self.setCurrentItem(it)
+        self.editItem(it, 0)
+        return True
+
+    def keyPressEvent(self, e):
+        names = self.selected_names()
+        if e.key() in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_F2) and len(names) == 1 \
+                and self.state() != QAbstractItemView.EditingState:
+            if self.start_rename(names[0]):
+                e.accept()
+                return
+        super().keyPressEvent(e)
+
     # ---- checkboxes ----------------------------------------------------------------
     def _item_changed(self, it, _col):
+        name = it.data(0, NAME)
+        if name is not None and it.text(0) != name:  # v2.26: typed a new name
+            new = it.text(0).strip()
+            self.blockSignals(True)
+            it.setText(0, name)                      # the scene decides; the list refills
+            self.blockSignals(False)
+            if new:                                  # after the editor has closed
+                QTimer.singleShot(0, lambda: self.rename_requested.emit(name, new))
+            return
         on = it.checkState(0) == Qt.Checked
         self.blockSignals(True)
         if it.data(0, MEMBERS):                      # a group: apply to everything in it

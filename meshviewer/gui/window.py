@@ -1,6 +1,8 @@
 """One document window: toolbar + side panel + 3D view."""
 from __future__ import annotations
 
+import subprocess
+import sys
 import traceback
 from pathlib import Path
 
@@ -12,6 +14,9 @@ from PySide6.QtWidgets import (
 )
 from pyvistaqt import QtInteractor
 
+from ..export import FORMATS as EXPORT_FORMATS
+from ..export import available as available_formats
+from ..export import export as write_export
 from ..formats import load, supported_extensions
 from ..model import MissingDependency
 from .icons import icon
@@ -19,6 +24,7 @@ from .scene import Scene
 from .sidebar import Sidebar
 from .style import accent, is_dark
 from .appearance_dialog import AppearanceDialog
+from .export_dialog import ExportDialog
 from .screenshot_dialog import ScreenshotDialog
 from .widgets import Capsule
 
@@ -84,6 +90,15 @@ class ViewerWindow(QMainWindow):
 
         self.sidebar = Sidebar()
         self.sidebar.quality_requested.connect(self._retessellate)
+        self.sidebar.axes_changed.connect(lambda mode: self.ctl.set_appearance(axes=mode))
+        self.sidebar.appearance_requested.connect(self.show_appearance)
+        self.sidebar.renamed.connect(self._edited_changed)        # v2.26
+        self.sidebar.set_axes_mode(self.ctl.appearance["axes"])
+        ep = self.sidebar.edit_panel                                       # Edit section
+        ep.edit_requested.connect(self._apply_edit)
+        ep.undo_requested.connect(lambda: self._edit_step(lambda s: s.undo_edit()))
+        ep.reset_requested.connect(lambda: self._edit_step(lambda s: s.reset_edits()))
+        ep.original_toggled.connect(lambda on: self.scene and self.scene.set_show_original(on))
         self.splitter = QSplitter(Qt.Horizontal)
         # Scrolls only if the window is too short for everything.
         self.side_scroll = QScrollArea()
@@ -145,6 +160,12 @@ class ViewerWindow(QMainWindow):
         self.unit_group.triggered.connect(
             lambda a: self.scene and self.scene.measure.set_display_unit(a.data()))
         self.a_fit = self._act("Fit", lambda: self.scene and self.scene.fit(), "Ctrl+0")
+        # NEW (v2.22): parallel projection is a toolbar toggle next to the views
+        self.a_parallel = self._act("Parallel Projection",
+                                    lambda on: self.scene and self.scene.set_parallel(on),
+                                    "Ctrl+5", checkable=True)
+        # Export (v2.23). (Edit lives in the sidebar since v2.24 — no button.)
+        self.a_export = self._act("Export…", self.export_model, "Ctrl+Shift+E")
         self.a_views = [
             self._act("Iso", lambda: self.scene and self.scene.view("iso"), "Ctrl+1"),
             self._act("X", lambda: self.scene and self.scene.view("x"), "Ctrl+2"),
@@ -155,14 +176,18 @@ class ViewerWindow(QMainWindow):
         for a, name in ((self.a_sidebar, "sidebar"), (self.a_fit, "fit"),
                         (self.a_views[0], "iso"), (self.a_section, "section"),
                         (self.a_shot, "camera"), (self.a_measure, "ruler"),
-                        (self.a_appearance, "appearance")):
+                        (self.a_appearance, "appearance"), (self.a_parallel, "parallel"),
+                        (self.a_export, "export")):
             a.setIcon(icon(name))
         tips = {self.a_sidebar: "Show or hide the sidebar", self.a_fit: "Fit the model in view",
                 self.a_views[0]: "Isometric view", self.a_views[1]: "Look along X",
                 self.a_views[2]: "Look along Y", self.a_views[3]: "Look along Z",
                 self.a_section: "Cross-section", self.a_shot: "Save a screenshot",
                 self.a_measure: "Measure distances, areas and volumes",
-                self.a_appearance: "Theme and 3D background"}
+                self.a_appearance: "Appearance: how things look in every window —\n"
+                                   "theme, background, axis labels, edge lines",
+                self.a_parallel: "Parallel projection (on) or perspective (off)",
+                self.a_export: "Export to another file format"}
         for a, tip in tips.items():
             a.setToolTip(f"{tip}  ({a.shortcut().toString(QKeySequence.NativeText)})")
 
@@ -173,12 +198,13 @@ class ViewerWindow(QMainWindow):
         tb.toggleViewAction().setVisible(False)
         # Groups of related buttons, each in one capsule (macOS 27 toolbar style).
         tb.addWidget(Capsule([self.a_sidebar]))
-        tb.addWidget(Capsule([self.a_fit, *self.a_views]))
+        tb.addWidget(Capsule([self.a_fit, *self.a_views, self.a_parallel]))
         tb.addWidget(Capsule(self.a_units))            # measurement units
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         tb.addWidget(spacer)
         # Screenshot, top right. (Section and Measure live in the sidebar.)
+        tb.addWidget(Capsule([self.a_export]))              # v2.23
         tb.addWidget(Capsule([self.a_appearance, self.a_shot]))
         self.addToolBar(tb)
 
@@ -187,6 +213,7 @@ class ViewerWindow(QMainWindow):
         m.addAction(self.ctl.about_action(m))     # NEW (v2.15): shown in the app menu on macOS
         m.addAction(self.a_open)
         m.addSeparator()
+        m.addAction(self.a_export)
         m.addAction(self.a_shot)
         m.addSeparator()
         m.addAction(self.a_close)
@@ -195,6 +222,7 @@ class ViewerWindow(QMainWindow):
         v.addAction(self.a_section)
         v.addAction(self.a_measure)
         v.addSeparator()
+        v.addAction(self.a_parallel)
         v.addAction(self.a_appearance)
         v.addAction(self.a_deselect)
         v.addSeparator()
@@ -216,7 +244,7 @@ class ViewerWindow(QMainWindow):
     def load(self, path: Path):
         self.path = Path(path)
         self.setWindowFilePath(str(self.path))      # native title + proxy icon
-        self.setWindowTitle(self.path.name)
+        self.setWindowTitle(f"{self.path.name}[*]")      # [*]: "edited" marker (v2.23)
         self.empty.setText(f"Opening {self.path.name}…")
         QApplication.setOverrideCursor(Qt.WaitCursor)
         path = self.path
@@ -238,6 +266,9 @@ class ViewerWindow(QMainWindow):
             return self._failed(RuntimeError(f"No {model.group_title.lower()} found in this file."))
         self.scene = Scene(self.plotter, model, dark=is_dark(), accent=accent())
         self.sidebar.bind(self.scene)
+        self.a_parallel.blockSignals(True)                  # show the scene's projection
+        self.a_parallel.setChecked(self.scene.state["parallel"])
+        self.a_parallel.blockSignals(False)
         # Menu opened just after VTK finishes handling the click (not inside it).
         self.scene.on_context = lambda names, clicked: QTimer.singleShot(
             0, lambda p=QCursor.pos(): self.sidebar.part_menu(names, clicked, p))
@@ -300,12 +331,12 @@ class ViewerWindow(QMainWindow):
 
     def apply_appearance(self):
         self.sidebar.list.set_density(self.ctl.appearance["density"])
+        self.sidebar.set_axes_mode(self.ctl.appearance["axes"])         # v2.21
         if self.scene:
             a = self.ctl.appearance
             self.scene.set_axis_font(a["axis_font"], rebuild=False)
             self.scene.set_edge_options(a["edge_width"], a["hide_edges_moving"], render=False)
-            self.scene.set_grid_lines(a["grid_lines"], rebuild=False)       # NEW (v2.15)
-            self.scene.set_axis_lines(a["axis_lines"], rebuild=False)       # NEW (v2.16)
+            self.scene.set_axes_mode(a["axes"], rebuild=False, render=False)  # v2.21
             self.scene.set_background(*self.ctl.background())        # rebuilds grid + axes
 
     def _sync_units(self):
@@ -352,6 +383,59 @@ class ViewerWindow(QMainWindow):
             finally:
                 QApplication.restoreOverrideCursor()
 
+    # ---- Edit section (v2.23; v2.24 no Edit button: always in the sidebar) --------
+    def _apply_edit(self, r, t, label):
+        if self.scene and self.scene.apply_edit(r, t, label):
+            self._edited_changed()
+
+    def _edit_step(self, fn):
+        if self.scene:
+            fn(self.scene)
+            self._edited_changed()
+
+    def _edited_changed(self):
+        edited = bool(self.scene and self.scene.has_changes)      # edits or renames
+        self.setWindowModified(edited)                  # dot in the close button (macOS)
+        self.sidebar.edit_panel.refresh()
+
+    # ---- NEW (v2.23): Export ----------------------------------------------------------
+    def export_model(self):
+        if not self.scene:
+            return
+        sc = self.scene
+        keys = available_formats(sc.model.kind, exact_cad=not sc.model.editable)
+        self._export_dialog = ExportDialog(
+            self, keys, has_hidden=not all(sc.visible.values()),
+            has_volume=sc.section.has_volume, edited=sc.model.edited,
+            renamed=sc.renamed)
+        self._export_dialog.accepted.connect(self._export_to_file)
+        self._export_dialog.open()
+
+    def _export_to_file(self):
+        sc, d = self.scene, self._export_dialog
+        fmt = d.fmt
+        label, ext = EXPORT_FORMATS[fmt]
+        base = self.path.name.split(".")[0] + ("_edited" if sc.has_changes else "")
+        fn, _ = QFileDialog.getSaveFileName(self, "Export", str(self.path.with_name(base + ext)),
+                                            f"{label} (*{ext})")
+        if not fn:
+            return
+        if not fn.lower().endswith(ext):
+            fn = fn[: -len(".ugrid")] + ext if fn.lower().endswith(".ugrid") else fn + ext
+        names = [n for n in sc.names if sc.visible[n] or not d.visible_only.isChecked()]
+        parts = {n: sc.model.parts[n] for n in names}
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            volume = sc.section.volume_grid() if fmt in ("vtu", "ugrid") else None
+            write_export(fmt, fn, parts, volume=volume)
+        except Exception as exc:                        # shown, not a crash
+            QApplication.restoreOverrideCursor()
+            QMessageBox.warning(self, "Export", f"Could not export:\n{exc}")
+            return
+        QApplication.restoreOverrideCursor()
+        if sys.platform == "darwin":                    # show the new file in Finder
+            subprocess.run(["open", "-R", fn], check=False)
+
     def _toggle_measure(self, on):
         if self.scene:
             if on and not self.a_sidebar.isChecked():
@@ -378,6 +462,18 @@ class ViewerWindow(QMainWindow):
                 self.ctl.open_path(Path(url.toLocalFile()), prefer=self)
 
     def closeEvent(self, e):
+        # NEW (v2.23): rotations / mirrors only live in memory until exported
+        if self.scene is not None and self.scene.has_changes:
+            box = QMessageBox(self)
+            box.setIcon(QMessageBox.Warning)
+            box.setText(f"Close {self.path.name} without exporting your changes?")
+            box.setInformativeText("Moves, rotations, mirrors and new part names are only "
+                                   "kept if you export the file.")
+            box.setStandardButtons(QMessageBox.Discard | QMessageBox.Cancel)
+            box.setDefaultButton(QMessageBox.Cancel)
+            if box.exec() != QMessageBox.Discard:
+                e.ignore()
+                return
         self.plotter.close()
         self.ctl.forget(self)
         super().closeEvent(e)

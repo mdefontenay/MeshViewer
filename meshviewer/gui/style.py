@@ -80,6 +80,8 @@ QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
                         border-radius: 12px; font-size: 12px; font-weight: 500; }}
 #Segmented QToolButton {{ min-height: 20px; padding: 1px 9px;
                           border-radius: 5px; font-size: 12px; }}
+#EditTools #Segmented QToolButton {{ padding: 1px 2px; }}  /* v2.26: narrow table cells */
+#EditTools QDoubleSpinBox {{ padding-left: 3px; padding-right: 3px; font-size: 12px; }}
 #Capsule QToolButton:hover, #Segmented QToolButton:hover {{ background: {hover}; }}
 #Capsule QToolButton:pressed, #Segmented QToolButton:pressed {{ background: {pressed}; }}
 #Capsule QToolButton:checked, #Segmented QToolButton:checked {{ background: {accent}; color: white; }}
@@ -88,6 +90,12 @@ QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
 QToolBar {{ spacing: 8px; padding: 3px 8px; border: none; }}
 
 /* ---- right-click menu: roomy and rounded, like macOS ---- */
+/* v2.25: choice button that opens the right-click-style menu (widgets.MenuSelect) */
+#MenuSelect {{
+    background: {field}; border: 1px solid {field_border}; border-radius: 6px;
+    padding: 3px 28px 3px 10px; text-align: left; color: {text}; min-height: 18px;
+}}
+#MenuSelect:hover {{ border-color: {accent}; }}
 #ContextMenu {{
     background: {menu}; border: 1px solid {menu_border}; border-radius: 10px;
     padding: 6px 5px;
