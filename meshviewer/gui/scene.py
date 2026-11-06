@@ -43,8 +43,10 @@ EDGE_WIDTHS = {"thin": 1.0, "medium": 1.5, "thick": 2.0}   # feature edge lines,
 
 # Viewport colours (background gradient bottom -> top, grid, feature edges)
 THEMES = {
-    False: dict(bg="#e8ebf0", bg_top="#ffffff", grid="#7a7a80", edge="#111111"),   # light
-    True:  dict(bg="#1c1c1e", bg_top="#3a3a3e", grid="#9a9aa2", edge="#0a0a0a"),   # dark
+    False: dict(bg="#e8ebf0", bg_top="#ffffff", grid="#7a7a80", edge="#111111",    # light
+                cut_fill="#d9dde4", cut_edge="#4b5260"),     # v2.19: cut volume mesh
+    True:  dict(bg="#1c1c1e", bg_top="#3a3a3e", grid="#9a9aa2", edge="#0a0a0a",    # dark
+                cut_fill="#3d4048", cut_edge="#aeb3bd"),
 }
 
 
@@ -515,6 +517,7 @@ class Scene:
         if self._edges is not None:
             self._edges.SetVisibility(self.state["feature_edges"] and not moving)
         self._surf.GetProperty().SetEdgeVisibility(self.state["mesh_edges"] and not moving)
+        self.section.set_moving(moving)            # v2.19: cut mesh edges too
         if not moving:
             self.p.render()
 
@@ -666,6 +669,10 @@ class Scene:
     def edge_color(self):
         return THEMES[self._dark]["edge"]
 
+    def theme_colors(self):
+        """Colours for the background actually shown (light or dark set)."""
+        return THEMES[self._dark]
+
     # ---- Appearance: axis labels, edge lines, grid lines ----------------------------
     def set_axis_font(self, size, rebuild=True):
         size = int(size)                              # points
@@ -786,6 +793,7 @@ class Scene:
             self._bbox_actor.GetProperty().SetColor(pv.Color(t["grid"]).float_rgb)
         if self.state.get("origin"):
             self._build_origin()                   # dot colour follows the background
+        self.section.restyle()                     # v2.19: cut mesh + outline colours
         if render:
             self.p.render()
 

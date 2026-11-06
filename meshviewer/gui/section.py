@@ -14,7 +14,9 @@ from __future__ import annotations
 import numpy as np
 import pyvista as pv
 from vtkmodules.vtkCommonDataModel import vtkPlane
-from vtkmodules.vtkFiltersCore import vtkAppendPolyData, vtkCleanPolyData, vtkPolyDataPlaneCutter
+from vtkmodules.vtkFiltersCore import (
+    vtkAppendPolyData, vtkCleanPolyData, vtkPlaneCutter, vtkPolyDataPlaneCutter,
+)
 from vtkmodules.vtkFiltersGeneral import vtkContourTriangulator
 
 
@@ -29,6 +31,11 @@ class Section:
         self.p = scene.p
         self.enabled = False
         self.fill = scene.model.is_cad     # closed CAD solids: fill; CFD boxes: outline only
+        # NEW (v2.19): meshes with volume cells show the cut cells instead of a fill
+        self.has_volume = scene.model.volume is not None
+        self._volume = None                # pv.UnstructuredGrid once loaded, False if none
+        self._vol_cutter = None            # kept: re-cutting reuses its search tree
+        self._vol_cut = None               # actor: cut cells with their edges
         self.show_handle = True
         self.on_widget_moved = None        # UI hook: called with (origin, normal)
 
@@ -98,9 +105,10 @@ class Section:
     def flip(self):
         self.set_plane(normal=-self.normal)
 
-    def set_fill(self, on):
+    def set_fill(self, on, caps=True):
         self.fill = bool(on)
-        self.update_caps()
+        if caps:
+            self.update_caps()
 
     def set_handle(self, on):
         self.show_handle = bool(on)
@@ -138,6 +146,7 @@ class Section:
         outlines, caps = vtkAppendPolyData(), vtkAppendPolyData()
         n_lines = n_caps = 0
         cap_part = []
+        cut_mesh = self.fill and self._cut_volume(plane)     # NEW (v2.19)
 
         for i in self._parts_touching_plane():
             name = self.scene.names[i]
@@ -150,7 +159,7 @@ class Section:
                 continue
             outlines.AddInputData(cut)
             n_lines += 1
-            if self.fill:
+            if self.fill and not cut_mesh:
                 cap = self._triangulate(cut)
                 if cap.GetNumberOfCells():
                     caps.AddInputData(cap)
@@ -179,7 +188,57 @@ class Section:
         return None
 
     def cap_actors(self):
-        return [self._caps] if self._caps is not None else []
+        return [a for a in (self._caps, self._vol_cut) if a is not None]
+
+    # ---- NEW (v2.19): cut cells of a volume mesh -------------------------------------
+    @property
+    def volume_cells(self):
+        """Number of 3D cells once loaded (0 = none / not loaded yet)."""
+        return self._volume.n_cells if self._volume else 0
+
+    def _cut_volume(self, plane):
+        """Show where the plane cuts the volume cells (fill + cell edges).
+        Returns False when the file has no volume cells (-> ordinary fill)."""
+        if not self.has_volume:
+            return False
+        if self._volume is None:                       # first time: read the cells
+            try:
+                self._volume = self.scene.model.volume() or False
+            except Exception as exc:                   # unreadable: plain fill instead
+                print(f"volume cells could not be read: {exc}")
+                self._volume = False
+        if not self._volume:
+            self.has_volume = False
+            return False
+        if self._vol_cutter is None:
+            self._vol_cutter = vtkPlaneCutter()        # multi-threaded, builds a search tree
+            self._vol_cutter.SetInputData(self._volume)
+            self._vol_cutter.InterpolateAttributesOff()
+        self._vol_cutter.SetPlane(plane)
+        self._vol_cutter.Update()
+        cut = pv.wrap(self._vol_cutter.GetOutput())
+        if cut.n_cells:
+            t = self.scene.theme_colors()
+            self._vol_cut = self.p.add_mesh(
+                cut, color=t["cut_fill"], show_edges=True, edge_color=t["cut_edge"],
+                line_width=1, lighting=False, pickable=False, reset_camera=False)
+            self.set_moving(self.scene._moving)
+        return True
+
+    def set_moving(self, moving):
+        """Cell edges off while the view moves (same as the model's edges)."""
+        if self._vol_cut is not None:
+            self._vol_cut.GetProperty().SetEdgeVisibility(
+                not (moving and self.scene.hide_edges_moving))
+
+    def restyle(self):
+        """Colours after a light / dark change."""
+        t = self.scene.theme_colors()
+        if self._vol_cut is not None:
+            self._vol_cut.GetProperty().SetColor(pv.Color(t["cut_fill"]).float_rgb)
+            self._vol_cut.GetProperty().SetEdgeColor(pv.Color(t["cut_edge"]).float_rgb)
+        if self._outline is not None:
+            self._outline.GetProperty().SetColor(pv.Color(self.scene.edge_color).float_rgb)
 
     def rebuild(self):
         """After the parts were replaced (new mesh quality)."""
@@ -271,15 +330,15 @@ class Section:
         return t.GetOutput()
 
     def _hide_caps(self):
-        for a in (self._caps, self._outline):
+        for a in (self._caps, self._outline, self._vol_cut):
             if a is not None:
                 a.SetVisibility(False)
 
     def _clear_caps(self):
-        for a in (self._caps, self._outline):
+        for a in (self._caps, self._outline, self._vol_cut):
             if a is not None:
                 self.p.remove_actor(a, render=False)
-        self._caps = self._outline = None
+        self._caps = self._outline = self._vol_cut = None
         self._cap_part = None
 
     def _sync_widget(self):

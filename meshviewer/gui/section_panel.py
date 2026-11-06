@@ -104,15 +104,17 @@ class SectionPanel(QWidget):
         d.addLayout(btns)
 
         self.fill = Switch()
-        self.fill.toggled.connect(lambda on: self.section and self.section.set_fill(on))
+        self.fill.toggled.connect(self._fill_toggled)
         self.handle = Switch(True)
         self.handle.toggled.connect(lambda on: self.section and self.section.set_handle(on))
+        self._labels = {}
         for text, sw, tip in (("Fill cut faces", self.fill, "Solid colour on the cut"),
                               ("Show plane", self.handle,
                                "Show the plane; drag it or its arrow in the 3D view")):
             row = QHBoxLayout()
             lbl = QLabel(text)
             lbl.setToolTip(tip)
+            self._labels[sw] = lbl
             row.addWidget(lbl)
             row.addStretch(1)
             row.addWidget(sw)
@@ -131,6 +133,7 @@ class SectionPanel(QWidget):
             box.setDecimals(max(0, min(4, int(np.ceil(-np.log10(step))) + 1)))
         Switch.set_silently(self.enable, section.enabled)
         Switch.set_silently(self.fill, section.fill)
+        self._sync_fill_label()
         Switch.set_silently(self.handle, section.show_handle)
         self.details.setVisible(section.enabled)
         self.hint.setVisible(not section.enabled)
@@ -159,6 +162,24 @@ class SectionPanel(QWidget):
             self.sync()
             if on:
                 self._caps_later()
+
+    def _sync_fill_label(self):
+        """NEW (v2.19): mesh files with volume cells show the cut cells instead
+        of a solid fill. (A file that turns out to have surfaces only goes back
+        to "Fill cut faces" once that's known.)"""
+        lbl = self._labels[self.fill]
+        if self.section and self.section.has_volume:
+            lbl.setText("Show cut mesh")
+            lbl.setToolTip("The volume cells where the plane cuts them, with their edges.\n"
+                           "The cells are read from the file the first time.")
+        else:
+            lbl.setText("Fill cut faces")
+            lbl.setToolTip("Solid colour on the cut")
+
+    def _fill_toggled(self, on):
+        if self.section:
+            self.section.set_fill(on, caps=False)
+            self._update_caps()              # busy cursor: may read the volume cells
 
     def _typed(self, *_):
         if not self.section:
@@ -194,6 +215,7 @@ class SectionPanel(QWidget):
             self.section.update_caps()
         finally:
             QApplication.restoreOverrideCursor()
+        self._sync_fill_label()
 
     def _caps_later(self):
         self._caps_timer.start()

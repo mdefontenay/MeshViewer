@@ -4,8 +4,11 @@
 # OpenCASCADE), so it no longer depends on this folder.
 #
 #   ./make_dmg.sh            full build (standalone app + checks + .dmg)
-#   ./make_dmg.sh --reuse    package an existing dist/Mesh Viewer.app (re-repairs and
+#   ./make_dmg.sh --reuse    package the app already built (re-repairs and
 #                            re-signs its libraries, no rebuild)
+#
+# NEW (v2.20): the app and the .dmg are made in ~/Downloads/MeshViewer-build/dist
+# (or $MESHVIEWER_WORK/dist), not in this folder.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -13,10 +16,12 @@ step() { printf "\n\033[1m==> %s\033[0m\n" "$1"; }
 die()  { printf "\n\033[31mError:\033[0m %s\n" "$1"; exit 1; }
 [ "$(uname)" = "Darwin" ] || die "run this on your Mac."
 
-APP="dist/Mesh Viewer.app"
+WORK="${MESHVIEWER_WORK:-$HOME/Downloads/MeshViewer-build}"
+VENV="$WORK/venv"
+APP="$WORK/dist/Mesh Viewer.app"
 NAME="Mesh Viewer"
 VERSION="$(sed -n 's/^__version__ = "\([^"]*\)".*/\1/p' meshviewer/__init__.py)"
-DMG="dist/$NAME $VERSION.dmg"
+DMG="$WORK/dist/$NAME $VERSION.dmg"
 
 # ---- 1. Self-contained app ---------------------------------------------------------
 if [ "${1:-}" != "--reuse" ]; then
@@ -24,8 +29,8 @@ if [ "${1:-}" != "--reuse" ]; then
 else
     [ -d "$APP" ] || die "$APP not found."
     step "Repairing bundled libraries"
-    .venv/bin/python fix_bundle.py "$APP" || true
-    .venv/bin/python slim_bundle.py "$APP"
+    "$VENV/bin/python" fix_bundle.py "$APP" || true
+    "$VENV/bin/python" slim_bundle.py "$APP"
     find "$APP/Contents" -type f \( -name "*.so" -o -name "*.dylib" \) -print0 \
         | xargs -0 codesign --force --sign - >/dev/null 2>&1 || true
     codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || true
@@ -96,7 +101,7 @@ rm -rf "$(dirname "$STAGE")"
 
 step "Done"
 cat <<MSG
-$(pwd)/$DMG  ($(du -h "$DMG" | cut -f1))
+$DMG  ($(du -h "$DMG" | cut -f1))
 
   Open it and drag Mesh Viewer onto Applications.
   On this Mac it opens normally. On another Mac (same chip type) the first

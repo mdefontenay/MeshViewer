@@ -5,6 +5,7 @@ To add a format: write a reader in mesh/ or cad/ that returns
 """
 from __future__ import annotations
 
+import functools
 import importlib
 from pathlib import Path
 
@@ -60,4 +61,7 @@ def load(path: Path, debug: bool = True, quality: int | None = None) -> Model:
                      retessellate=src.tessellate, quality_levels=list(src.levels), quality=q,
                      source=src, units="mm" if label in ("STEP", "IGES") else "")
 
-    return Model(kind=kind, fmt=label, parts=getattr(mod, func)(path, debug=debug))
+    model = Model(kind=kind, fmt=label, parts=getattr(mod, func)(path, debug=debug))
+    if hasattr(mod, "read_volume"):                 # NEW (v2.19): CGNS / UGRID volume cells
+        model.volume = functools.partial(mod.read_volume, path, debug=debug)
+    return model

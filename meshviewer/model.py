@@ -23,6 +23,9 @@ class Model:
     # Exact CAD geometry (STEP/IGES/BREP) for exact area / volume, else None.
     source: Optional[object] = None
     units: str = ""                 # "mm" when the reader converts to millimetres
+    # NEW (v2.19), meshes only: reads the 3D cells on demand (-> pv.UnstructuredGrid
+    # or None) for the section's "Show cut mesh". None = format without volume cells.
+    volume: Optional[Callable[[], object]] = None
 
     @property
     def is_cad(self) -> bool:

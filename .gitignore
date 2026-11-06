@@ -1,7 +1,8 @@
 # Python
 __pycache__/
 *.py[cod]
-.venv/
+# .venv is only a link to the Python environment in ~/Downloads/MeshViewer-build
+.venv
 
 # py2app build output (the app and .dmg go in GitHub Releases, not in git)
 build/

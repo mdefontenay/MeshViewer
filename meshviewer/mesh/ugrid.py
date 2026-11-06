@@ -184,3 +184,42 @@ def read_ugrid(path, debug=True):
                   f"{poly.n_points} pts, {poly.n_cells} cells")
 
     return bcs
+
+
+# ---- NEW (v2.19): volume cells, read only when the cut mesh is shown ------------------
+def read_volume(path, debug=True):
+    """Tetrahedra, pyramids, prisms and hexahedra as one pv.UnstructuredGrid
+    (None if the file has surfaces only). They follow the boundary tags:
+    tet (4 nodes), pyramid (5), prism (6), hex (8); node numbers 1-based."""
+    import os
+
+    from .volume import HEXA, PYRAMID, TETRA, WEDGE, build_grid, describe
+
+    endian, isize = _ugrid_sniff(path)
+    int_dt = np.dtype(f"{endian}i{isize}")
+    with open(path, "rb") as f:
+        header = np.fromfile(f, dtype=int_dt, count=7)
+        n_nodes, n_tri, n_quad, n_tet, n_pyr, n_pri, n_hex = (int(x) for x in header)
+        if n_tet + n_pyr + n_pri + n_hex == 0:
+            return None
+        pts = np.fromfile(f, dtype=np.dtype(f"{endian}f8"), count=n_nodes * 3)
+        if pts.size != n_nodes * 3:
+            raise ValueError("truncated coordinate block")
+        # skip triangles, quads and their boundary tags
+        f.seek(isize * (4 * n_tri + 5 * n_quad), os.SEEK_CUR)
+        blocks = {}
+        for ctype, n, npe in ((TETRA, n_tet, 4), (PYRAMID, n_pyr, 5),
+                              (WEDGE, n_pri, 6), (HEXA, n_hex, 8)):
+            if not n:
+                continue
+            c = np.fromfile(f, dtype=int_dt, count=n * npe)
+            if c.size != n * npe:
+                raise ValueError("truncated volume cell block")
+            c = c.reshape(n, npe).astype(np.int64) - 1
+            if ctype == PYRAMID:                 # UGRID pyramid node order -> VTK
+                c = c[:, [1, 0, 3, 4, 2]]
+            blocks[ctype] = [c]
+    grid = build_grid(pts.reshape(n_nodes, 3), blocks)
+    if debug and grid is not None:
+        print(f"  volume: {describe(grid)}")
+    return grid

@@ -17,8 +17,10 @@ except ImportError as exc:  # h5py is only needed for CGNS files
 
 
 # CGNS element-type code -> nodes per element (fixed-size types only).
-FIXED_NPE = {3: 2, 5: 3, 6: 6, 7: 4, 9: 8, 10: 4, 11: 10,
-             12: 5, 14: 6, 17: 8, 18: 14, 19: 25}
+# FIX (v2.19): QUAD_8 (8), QUAD_9 (9 — was 8), HEXA_20 (20 — was 14), HEXA_27
+# (27 — was 25) and the quadratic pyramids / prisms were missing or wrong.
+FIXED_NPE = {2: 1, 3: 2, 4: 3, 5: 3, 6: 6, 7: 4, 8: 8, 9: 9, 10: 4, 11: 10,
+             12: 5, 13: 14, 14: 6, 15: 15, 16: 18, 17: 8, 18: 20, 19: 27, 21: 13}
 
 
 def _cgns_label(node):
@@ -219,3 +221,75 @@ def read_cgns(path, debug=True):
             for zname, zone in _kids(base, "Zone_t"):
                 bcs.update(_extract_zone_cgns(zname, zone, debug))
     return bcs
+
+
+# ---- NEW (v2.19): volume cells, read only when the cut mesh is shown ------------------
+def _volume_types():
+    from .volume import HEXA, PYRAMID, TETRA, WEDGE
+    # CGNS code -> (VTK cell type, corner nodes). Quadratic cells keep their corners.
+    return {10: (TETRA, 4), 11: (TETRA, 4), 12: (PYRAMID, 5), 13: (PYRAMID, 5),
+            21: (PYRAMID, 5), 14: (WEDGE, 6), 15: (WEDGE, 6), 16: (WEDGE, 6),
+            17: (HEXA, 8), 18: (HEXA, 8), 19: (HEXA, 8)}
+
+
+def _mixed_offsets(conn, n_elem, e):
+    """Start of each element (at its type code) in a MIXED section."""
+    if "ElementStartOffset" in e:                     # CGNS 4: stored
+        return np.asarray(_cgns_data(e["ElementStartOffset"]), dtype=np.int64)[:n_elem]
+    starts = np.empty(n_elem, dtype=np.int64)          # CGNS 3: walk the list
+    i = 0
+    for k in range(n_elem):
+        starts[k] = i
+        i += 1 + FIXED_NPE.get(int(conn[i]), 0)
+    return starts
+
+
+def read_volume(path, debug=True):
+    """All 3D cells of every unstructured zone as one pv.UnstructuredGrid
+    (None if there are none). Polyhedral (NFACE_n) sections are skipped."""
+    from .volume import build_grid, describe
+
+    vtypes = _volume_types()
+    blocks, all_pts, base = {}, [], 0
+    with h5py.File(str(path), "r") as f:
+        for _, b in _kids(f, "CGNSBase_t"):
+            for zname, zone in _kids(b, "Zone_t"):
+                gcs = _kids(zone, "GridCoordinates_t")
+                if not gcs or "CoordinateX" not in gcs[0][1]:
+                    continue
+                gc = gcs[0][1]
+                pts = np.column_stack([np.ravel(_cgns_data(gc[f"Coordinate{a}"])) for a in "XYZ"])
+                for sname, e in _kids(zone, "Elements_t"):
+                    et = _cgns_data(e)
+                    if et is None or "ElementRange" not in e or "ElementConnectivity" not in e:
+                        continue
+                    tcode = int(np.ravel(et)[0])
+                    if tcode not in vtypes and tcode != 20:
+                        if tcode == 23 and debug:
+                            print(f"  {zname}/{sname}: polyhedral cells (NFACE_n) not shown")
+                        continue
+                    er = np.ravel(_cgns_data(e["ElementRange"]))
+                    n_elem = int(er[1] - er[0] + 1)
+                    conn = np.asarray(_cgns_data(e["ElementConnectivity"]), dtype=np.int64)
+                    if tcode in vtypes:                       # one cell type
+                        ctype, corners = vtypes[tcode]
+                        c = conn.reshape(n_elem, FIXED_NPE[tcode])[:, :corners]
+                        blocks.setdefault(ctype, []).append(c - 1 + base)
+                    else:                                      # MIXED: type code per cell
+                        starts = _mixed_offsets(conn, n_elem, e)
+                        codes = conn[starts]
+                        for code in np.unique(codes):
+                            if int(code) not in vtypes:
+                                continue                       # faces / edges in the mix
+                            ctype, corners = vtypes[int(code)]
+                            s = starts[codes == code] + 1
+                            c = conn[s[:, None] + np.arange(corners)]
+                            blocks.setdefault(ctype, []).append(c - 1 + base)
+                all_pts.append(pts)
+                base += len(pts)
+    if not all_pts:
+        return None
+    grid = build_grid(np.vstack(all_pts), blocks)
+    if debug and grid is not None:
+        print(f"  volume: {describe(grid)}")
+    return grid
