@@ -52,6 +52,46 @@ the old numbers:
 
 </details>
 
+## 2.15 — Simulation results on the boundaries (FUN3D / Tecplot)
+
+| File | |
+|---|---|
+| `mesh/tecplot.py` (new), `formats.py` | Opens **Tecplot ASCII `.dat`** results as FUN3D writes them (`project_tec_boundary.dat`): one part per boundary ("boundary 1 WING" → WING) with every variable at its nodes. FEBLOCK and POINT packing, triangles and quads, cell-centred variables; a boundary written more than once keeps the last time step. Binary `.plt` / `.szplt` are not read |
+| `gui/results_panel.py` (new), `gui/sidebar.py` | **Results** section, shown when the file has results: *Field* (every variable, plus *Speed* \|u, v, w\|), *Colour the boundaries*, the colour scale with its numbers, *Min* / *Max* (empty = auto), max · mean · min on the visible boundaries, and *Values* (every field) |
+| `gui/cfd_view.py`, `gui/scene.py` | The colours are drawn over the visible parts: blue scale for fields of one sign, blue–grey–red centred on zero for signed ones (cp, u, v, w). Cut by the section plane, mesh edges follow the toolbar, hiding a part updates the colours and the numbers |
+| `gui/memory.py`, `gui/window.py` | The field, range and on / off are remembered per file |
+
+## 2.14.2 — Internal flow, exact CAD cross section; no y+ colours on the walls
+
+| File | |
+|---|---|
+| `gui/inflation_panel.py`, `gui/cfd_view.py`, `gui/scene.py`, `cfd.py` | **Colour walls by y+ removed** (and the walls' re-splitting and per-point leading edges it needed). The y+ along the flow is now the page's curve only; the max / min / mean of the tile come from it |
+| `cfd.py`, `gui/cfd_panel.py`, `gui/inflation_panel.py`, `gui/inflation_view.py`, `cfd_export.py` | **Flow: External / Internal (pipe or duct)**, in the CFD section and CFD mode. Internal: Reynolds number on the hydraulic diameter D (auto: 2ab / (a + b) from the walls' widths across the flow, or typed), skin friction of developed pipe flow (laminar 16 / Re below 2300, Petukhov above), no compressibility correction; the "boundary layer" is the pipe radius and the check is that the layers fit in it; y+ along the pipe: a flat plate from the inlet until the developed value |
+| `cad/occt.py`, `gui/section_view.py` | Cross section of STEP / IGES / BREP: the walls are cut from the **CAD curves** themselves (smooth at any zoom), once the plane stops moving — the triangles while it moves |
+| `gui/section_view.py` | Flow direction: three thin **inlet arrows** on the upstream edge of the view instead of the boxed arrow; a small dot / cross when the flow goes through the plane |
+
+## 2.14.1 — Even y+ colours on CAD, max y+ tile, plots alike
+
+| File | |
+|---|---|
+| `gui/inflation_panel.py`, `gui/cfd_view.py`, `cfd.py` | Colour walls by y+ (CAD): the walls are split into small triangles of about the same size (no edge longer than h, about 3 000 of them by area; cached) before the y+ is worked out and drawn, so the long thin triangles of the CAD tessellation no longer smear the colours; the colours are drawn without that mesh's lines. The leading-edge strips are square (a wing gets strips along its span, not cut through its thickness) |
+| `gui/inflation_view.py` | the y+ tile is like the mesh's: **max y+ on the walls** big (green / orange / red against the target), *min · mean* beside it, the y+ at the end of the walls below; the check line gives max, min and mean |
+| `gui/inflation_view.py` | the two plots share one look: a **y-axis title** along the axis (Height (mm) · y+ of the first layer), the x-axis title under it, reference lines named at the right with their value under the name, an end label moved off them; y+ along the flow **always shows the viscous sublayer** (y+ 5) and notes the first layer it uses |
+| `gui/cfd_panel.py`, `gui/inflation_panel.py` | **Temperature** greyed out for *Air — altitude*, like density, viscosity and sound speed (the altitude's standard temperature); typed for water |
+
+## 2.14 — CFD export, y+ along the flow, wall functions, temperature, update check
+
+| File | |
+|---|---|
+| `gui/section_view.py` | Cross section: layers **stop where they would cross** — two walls facing each other meet half-way, a concave curve stops at its centre, another part stops them (each point of the cut gets the largest thickness it can take; the rings are trimmed where they cross). Long faces are split so the layers can stop part-way along them |
+| `cfd_export.py` (new), `gui/export_dialog.py`, `gui/window.py`, `gui/inflation_panel.py` | Export (⇧⌘E), CAD files: tabs **3D model / CFD settings**. CFD settings writes the inflation layers for **OpenFOAM** (snappyHexMeshDict addLayersControls), **Fluent Meshing** (Add Boundary Layers), **STAR-CCM+** (Prism Layer Mesher), **Pointwise** (T-Rex), or a **CSV** of every input and computed value plus one row per layer |
+| `cfd.py`, `gui/inflation_panel.py`, `gui/inflation_view.py`, `gui/cfd_view.py`, `gui/scene.py` | **y+ along the flow**: each wall point's distance from its own leading edge (strips along the flow, as for the auto length), local Reynolds number and skin friction → the y+ of the first layer. **Colour walls by y+** in CFD mode (same colours as the mesh's), a third tab **y+ along the flow** (curve against the distance from the leading edge, with the target), a check line and Values rows (max / mean / min) |
+| `gui/wall_help.py` (new), `gui/cfd_panel.py`, `gui/inflation_panel.py` | **?** next to Target y+ (CFD section and CFD mode): resolve the wall (y+ ≈ 1) or use wall functions (30 – 300), with a plot of the law of the wall (Spalding, u+ = y+, log law, the zones), the buffer layer to avoid, and **Use y+ = 1 / 50** |
+| `cfd.py`, `gui/widgets.py`, `gui/cfd_panel.py`, `gui/inflation_panel.py` | **Temperature** input (K / °C / °F; empty = the standard one): air keeps the altitude's pressure, ρ, μ, a follow T; water: density (Thiesen), viscosity (Vogel), speed of sound (Marczak; sea water Mackenzie) |
+| `gui/memory.py`, `gui/window.py`, `gui/inflation_view.py`, `gui/section_view.py` | Remembered per file too: the Inflation page (open or not, which tab), Flip side, the flow arrow and the cross-section zoom |
+| `gui/about_dialog.py` | **Check for Updates** asks GitHub for the latest release: newer → "A new update is available" + Download; same → up to date; older → this app is a pre-release |
+| `cfd.py` | first cell layer: no crash on a mesh without volume cells |
+
 ## 2.13.2 — Simpler cross section; every number in Values
 
 | File | |

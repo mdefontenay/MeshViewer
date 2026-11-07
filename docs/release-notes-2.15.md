@@ -1,4 +1,38 @@
-## What's new in 2.13.2
+## What's new in 2.15
+
+- **Simulation results**: open the Tecplot `.dat` that FUN3D writes
+  (`project_tec_boundary.dat`, File ▸ Open) and colour the boundaries by any of its
+  variables — cp, Mach, pressure, y+, speed… — in the new **Results** section, with
+  the scale, your own min / max, and max · mean · min.
+
+## In 2.14.2
+
+- **Internal flow** (pipe or duct): Reynolds number on the hydraulic diameter, developed
+  pipe-flow friction, y+ along the pipe from the inlet.
+- Cross section of CAD files cut from the exact CAD curves: smooth at any zoom.
+- Cleaner flow arrows in the cross section.
+- The y+ colours on the walls are gone (the y+ along the flow tab stays).
+
+## In 2.14.1
+
+- The y+ tile shows the **max** on the walls, with min and mean beside it.
+- Layer size and y+ plots now look alike, with y-axis titles; the y+ plot always shows
+  where the viscous sublayer ends.
+- Temperature is greyed out for air at an altitude (standard atmosphere).
+
+## In 2.14
+
+- **Export ▸ CFD settings** (CAD files): the inflation layers for OpenFOAM
+  (snappyHexMesh), Fluent Meshing, STAR-CCM+ or Pointwise, or a CSV of every input
+  and value.
+- **y+ along the flow**: a new tab with the y+ of the first layer from the leading edge.
+- **?** next to Target y+: resolve the wall or use wall functions, with the law of the wall.
+- **Temperature** input for water (air: from the altitude).
+- Cross section: layers **stop where they would cross** (narrow gaps, other parts).
+- Every file also remembers its Inflation page, Flip side and zoom.
+- **Check for Updates** tells you whether a newer version is out.
+
+## In 2.13.2
 
 - Cross section, simpler: only the inflation layers, a **Flip side** button (layers
   outside the model by default, inside for internal flow) and a **Fit view** button.
@@ -124,7 +158,7 @@
 
 ## Install
 
-1. Download **Mesh Viewer 2.13.2.dmg** below.
+1. Download **Mesh Viewer 2.15.dmg** below.
 2. Open it and drag **Mesh Viewer** onto **Applications**.
 3. **First launch:** the app isn't notarized by Apple, so macOS blocks it the first
    time. Try to open it once, then go to **System Settings → Privacy & Security**

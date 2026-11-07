@@ -12,6 +12,10 @@ of the inflation layer calculator. Inputs are in the sidebar (CFD mode).
 v2.12.2: the plot takes the full width, under tabs; drawn like the rest of the app.
 v2.13: second tab "Cross section" (section_view.py): the section plane's cut, in 2D,
 with the inflation layers estimated on the walls.
+v2.14: third tab "y+ along the flow" — the y+ of the first layer from the leading edge
+(flat plate, from each wall point's own leading edge), against the target; a check line
+for it; the tab, Flip side, the flow arrow and the cross-section zoom are remembered per
+file (get_state / set_state).
 Everything is drawn with QPainter in the app's colours (light and dark).
 """
 from __future__ import annotations
@@ -26,10 +30,12 @@ from PySide6.QtWidgets import (
     QStackedWidget, QToolTip, QVBoxLayout, QWidget,
 )
 
+from .cfd_panel import yplus_grade
 from .section_view import SectionLegend, SectionView
 from .widgets import Capsule
 
 RED, GREEN = "#ff453a", "#30b350"                  # status colours (tiles, checks)
+VISCOUS = 5.0                                      # y+ where the viscous sublayer ends
 
 
 def length_unit(m):
@@ -71,22 +77,30 @@ class _Tile(QFrame):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(12, 8, 12, 8)
         lay.setSpacing(1)
-        cap = QLabel(caption)
-        cap.setObjectName("Caption")
-        lay.addWidget(cap)
+        self.caption = QLabel(caption)
+        self.caption.setObjectName("Caption")
+        lay.addWidget(self.caption)
+        row = QHBoxLayout()                    # v2.14.1: big value, small note beside it
+        row.setSpacing(8)
         self.value = QLabel("—")
         self.value.setObjectName("TileValue")
         self.value.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        lay.addWidget(self.value)
+        row.addWidget(self.value, 0, Qt.AlignBottom)
+        self.side = QLabel("")
+        self.side.setObjectName("SmallNote")
+        row.addWidget(self.side, 0, Qt.AlignBottom)
+        row.addStretch(1)
+        lay.addLayout(row)
         self.note = QLabel("")
         self.note.setObjectName("InfoLine")
         lay.addWidget(self.note)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
-    def set(self, value, note="", state=None):
+    def set(self, value, note="", state=None, side=""):
         self.value.setText(value)
         self.note.setText(note)
-        color = {"ok": GREEN, "warn": "#ff9f0a", "bad": RED}.get(state)
+        self.side.setText(side)
+        color = {"ok": GREEN, "warn": "#ff9f0a", "bad": RED}.get(state, state)
         self.value.setStyleSheet(f"color: {color};" if color else "")
 
 
@@ -104,29 +118,23 @@ def series_color(widget, key):
     return QColor(SERIES[key][1 if _dark(widget) else 0])
 
 
-class InflationPlot(QWidget):
-    """Layer size plot: one bar per layer (its height), a line for the total
-    thickness of the layers so far, and two reference lines — the boundary
-    layer thickness and the next cell size. Hover a layer for its numbers."""
-    PAD_L, PAD_R, PAD_T, PAD_B = 56, 132, 26, 34
+class _Plot(QWidget):
+    """v2.14.1: what the two plots share, so they look and read the same — horizontal
+    grid, y ticks, a y-axis title along the axis, an x-axis title, reference lines
+    labelled at the right (name, then value), an end label, hover crosshair."""
+    PAD_L, PAD_R, PAD_T, PAD_B = 76, 132, 14, 40
+    EMPTY = "Fill in the CFD mode inputs in the sidebar"
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.r = None
-        self.hover = None                      # layer number under the mouse
+        self.hover = None
         self.setMinimumHeight(320)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.setMouseTracking(True)
 
-    def set_result(self, r):
-        self.r = r if r and r.get("ok") else None
-        self.update()
-
-    # data -> pixels
-    def _ranges(self):
-        r = self.r
-        top = max(r["y_tot"], r["d99"], r["y_des"]) * 1.08
-        return (0.0, r["N"] + 0.5), (0.0, top)
+    def _ranges(self):                          # ((x0, x1), (y0, y1))
+        raise NotImplementedError
 
     def _px(self, x, y):
         (x0, x1), (y0, y1) = self._ranges()
@@ -135,49 +143,139 @@ class InflationPlot(QWidget):
         return QPointF(self.PAD_L + (x - x0) / (x1 - x0) * w,
                        self.PAD_T + (1 - (y - y0) / (y1 - y0)) * h)
 
-    def paintEvent(self, _):
+    def _begin(self):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         pal = self.palette()
-        text = pal.color(QPalette.WindowText)
-        muted = pal.color(QPalette.PlaceholderText)
-        grid = QColor(text)
-        grid.setAlphaF(0.07)
+        self._text = pal.color(QPalette.WindowText)
+        self._muted = pal.color(QPalette.PlaceholderText)
+        self._grid = QColor(self._text)
+        self._grid.setAlphaF(0.07)
         font = QFont(p.font())
         font.setPixelSize(11)
         p.setFont(font)
-        if self.r is None:
-            p.setPen(muted)
-            p.drawText(self.rect(), Qt.AlignCenter, "Fill in the CFD mode inputs in the sidebar")
-            return
-        r = self.r
-        (x0, x1), (y0, y1) = self._ranges()
-        f, unit = length_unit(y1)
-        left, right = self.PAD_L, self.width() - self.PAD_R
-        base = self._px(0, 0).y()
+        self._labels = []                       # y of the reference labels drawn
+        return p
 
-        # horizontal grid + height labels (no vertical grid)
-        ystep = nice_step(y1 - y0, 5)
-        gy = 0.0
+    def _frame(self, p, y_title, x_title, y_label, x_ticks):
+        """Grid, ticks and the two axis titles. y_label(v) / x_ticks [(x, text)]."""
+        (x0, x1), (y0, y1) = self._ranges()
+        left, right = self.PAD_L, self.width() - self.PAD_R
+        base = self._px(x0, y0).y()
+        top = self._px(x0, y1).y()
+        step = nice_step(y1 - y0, 5)
+        gy = y0
         while gy <= y1 + 1e-12:
-            y = self._px(0, gy).y()
-            p.setPen(QPen(grid, 1))
+            y = self._px(x0, gy).y()
+            p.setPen(QPen(self._grid, 1))
             p.drawLine(QPointF(left, y), QPointF(right, y))
-            p.setPen(muted)
-            p.drawText(QRectF(0, y - 7, left - 10, 14), Qt.AlignRight | Qt.AlignVCenter,
-                       f"{gy * f:.3g}")
-            gy += ystep
-        p.setPen(muted)
-        p.drawText(QRectF(0, 2, left + 120, 14), Qt.AlignLeft | Qt.AlignVCenter,
-                   f"Height ({unit})")
+            p.setPen(self._muted)
+            p.drawText(QRectF(24, y - 7, left - 34, 14), Qt.AlignRight | Qt.AlignVCenter,
+                       y_label(gy))
+            gy += step
+        for x, text in x_ticks:
+            q = self._px(x, y0).x()
+            p.drawText(QRectF(q - 30, base + 6, 60, 14), Qt.AlignHCenter, text)
+        p.setPen(self._text)                    # axis titles, text colour
+        p.drawText(QRectF(left, self.height() - 16, right - left, 14), Qt.AlignHCenter, x_title)
+        p.save()
+        p.translate(12, (top + base) / 2)
+        p.rotate(-90)
+        p.drawText(QRectF(-(base - top) / 2, -7, base - top, 14), Qt.AlignCenter, y_title)
+        p.restore()
+
+    def _ref(self, p, y, style, title, sub):
+        """A reference line across the plot, labelled at the right."""
+        left, right = self.PAD_L, self.width() - self.PAD_R
+        yy = self._px(self._ranges()[0][0], y).y()
+        self._labels.append(yy)
+        pen = QPen(self._muted, 1.2)
+        pen.setStyle(style)
+        p.setPen(pen)
+        p.drawLine(QPointF(left, yy), QPointF(right, yy))
+        p.setPen(self._text)
+        p.drawText(QRectF(right + 8, yy - 15, self.PAD_R - 8, 14), Qt.AlignLeft | Qt.AlignBottom,
+                   title)
+        p.setPen(self._muted)
+        p.drawText(QRectF(right + 8, yy - 1, self.PAD_R - 8, 14), Qt.AlignLeft | Qt.AlignTop, sub)
+
+    def _line(self, p, pts, c):
+        """The series line with a soft area under it."""
+        base = self._px(self._ranges()[0][0], self._ranges()[1][0]).y()
+        line = QPainterPath(pts[0])
+        for q in pts[1:]:
+            line.lineTo(q)
+        area = QPainterPath(line)
+        area.lineTo(pts[-1].x(), base)
+        area.lineTo(pts[0].x(), base)
+        area.closeSubpath()
+        fill = QColor(c)
+        fill.setAlphaF(0.10)
+        p.fillPath(area, fill)
+        p.setPen(QPen(c, 2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        p.setBrush(Qt.NoBrush)
+        p.drawPath(line)
+
+    def _end_label(self, p, q, text):
+        """Label at the end of the line, moved up or down off the reference labels
+        (each takes 30 px: name above its line, value below)."""
+        y = q.y()
+        for _ in range(4):
+            near = [ly for ly in self._labels if ly - 24 < y < ly + 24]
+            if not near:
+                break
+            y = near[0] - 24 if y <= near[0] else near[0] + 24
+        p.setPen(self._text)
+        p.drawText(QRectF(self.width() - self.PAD_R + 8, y - 7, self.PAD_R - 8, 14),
+                   Qt.AlignLeft | Qt.AlignVCenter, text)
+
+    def _hover_at(self, p, x, q, c):
+        cross = QColor(self._text)
+        cross.setAlphaF(0.25)
+        p.setPen(QPen(cross, 1))
+        (x0, _), (y0, y1) = self._ranges()
+        p.drawLine(QPointF(x, self._px(x0, y1).y()), QPointF(x, self._px(x0, y0).y()))
+        p.setPen(QPen(self.palette().color(QPalette.Window), 2))
+        p.setBrush(c)
+        p.drawEllipse(q, 4.5, 4.5)
+
+    def _empty(self, p, text=None):
+        p.setPen(self._muted)
+        p.drawText(self.rect(), Qt.AlignCenter, text or self.EMPTY)
+
+    def leaveEvent(self, _):
+        self.hover = None
+        QToolTip.hideText()
+        self.update()
+
+
+class InflationPlot(_Plot):
+    """Layer size plot: one bar per layer (its height), a line for the total
+    thickness of the layers so far, and two reference lines — the boundary
+    layer thickness and the next cell size. Hover a layer for its numbers."""
+
+    def set_result(self, r):
+        self.r = r if r and r.get("ok") else None
+        self.update()
+
+    def _ranges(self):
+        r = self.r
+        top = max(r["y_tot"], r["d99"], r["y_des"]) * 1.08
+        return (0.0, r["N"] + 0.5), (0.0, top)
+
+    def paintEvent(self, _):
+        p = self._begin()
+        if self.r is None:
+            return self._empty(p)
+        r = self.r
+        (_, _), (_, y1) = self._ranges()
+        f, unit = length_unit(y1)
         n = r["N"]
         xstep = max(1, int(nice_step(n, 10)))
-        for k in [1] + list(range(xstep, n + 1, xstep)):
-            x = self._px(k, 0).x()
-            p.drawText(QRectF(x - 20, base + 6, 40, 14), Qt.AlignHCenter, str(k))
-        p.drawText(QRectF(left, self.height() - 15, right - left, 14), Qt.AlignHCenter,
-                   "Layer number (1 = at the wall)")
-
+        ticks = [(k, str(k)) for k in [1] + list(range(xstep, n + 1, xstep))]
+        self._frame(p, f"Height ({unit})", "Layer number (1 = at the wall)",
+                    lambda v: f"{v * f:.3g}", ticks)
+        base = self._px(0, 0).y()
         # one bar per layer: its height (4 px rounded top, 2 px gap)
         slot = (self._px(1, 0).x() - self._px(0, 0).x())
         bw = max(1.0, slot - 2.0)
@@ -196,57 +294,15 @@ class InflationPlot(QWidget):
                                  rect.height() + 1))
             p.fillPath(path, c)
             p.restore()
-
-        # total thickness of the layers so far (line + soft area)
         total_c = series_color(self, "total")
         pts = [self._px(i, t) for i, t in enumerate(r["total"])]
-        line = QPainterPath(pts[0])
-        for q in pts[1:]:
-            line.lineTo(q)
-        area = QPainterPath(line)
-        area.lineTo(pts[-1].x(), base)
-        area.lineTo(pts[0].x(), base)
-        area.closeSubpath()
-        fill = QColor(total_c)
-        fill.setAlphaF(0.10)
-        p.fillPath(area, fill)
-        p.setPen(QPen(total_c, 2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
-        p.setBrush(Qt.NoBrush)
-        p.drawPath(line)
-
-        # reference lines, labelled at the right end (text colour, not series colour)
-        for y, style, title in ((r["d99"], Qt.DashLine, "Boundary layer"),
-                                (r["y_des"], Qt.DotLine, "Next cell size")):
-            yy = self._px(0, y).y()
-            pen = QPen(muted, 1.2)
-            pen.setStyle(style)
-            p.setPen(pen)
-            p.drawLine(QPointF(left, yy), QPointF(right, yy))
-            p.setPen(text)
-            p.drawText(QRectF(right + 8, yy - 15, self.PAD_R - 8, 14),
-                       Qt.AlignLeft | Qt.AlignBottom, title)
-            p.setPen(muted)
-            p.drawText(QRectF(right + 8, yy - 1, self.PAD_R - 8, 14),
-                       Qt.AlignLeft | Qt.AlignTop, show_length(y))
-        # end label of the total line
-        p.setPen(text)
-        end = pts[-1]
-        p.drawText(QRectF(right + 8, end.y() - 7, self.PAD_R - 8, 14),
-                   Qt.AlignLeft | Qt.AlignVCenter, f"Total {show_length(r['y_tot'])}")
-
-        # hover: crosshair + point on the line
+        self._line(p, pts, total_c)
+        self._ref(p, r["d99"], Qt.DashLine, "Pipe radius" if r.get("internal") else
+                  "Boundary layer", show_length(r["d99"]))
+        self._ref(p, r["y_des"], Qt.DotLine, "Next cell size", show_length(r["y_des"]))
+        self._end_label(p, pts[-1], f"Total {show_length(r['y_tot'])}")
         if self.hover is not None:
-            i = self.hover
-            x = self._px(i, 0).x()
-            cross = QColor(text)
-            cross.setAlphaF(0.25)
-            p.setPen(QPen(cross, 1))
-            p.drawLine(QPointF(x, self.PAD_T), QPointF(x, base))
-            q = pts[i]
-            ring = pal.color(QPalette.Window)
-            p.setPen(QPen(ring, 2))
-            p.setBrush(total_c)
-            p.drawEllipse(q, 4.5, 4.5)
+            self._hover_at(p, self._px(self.hover, 0).x(), pts[self.hover], total_c)
 
     def _layer_at(self, e):
         if self.r is None:
@@ -270,10 +326,63 @@ class InflationPlot(QWidget):
                           f"Layer {i}\nLayer height {show_length(r['heights'][i - 1])}\n"
                           f"Total so far {show_length(r['total'][i])}", self)
 
-    def leaveEvent(self, _):
-        self.hover = None
-        QToolTip.hideText()
+
+class YplusAlongPlot(_Plot):
+    """NEW (v2.14): y+ of the first layer against the distance from the leading edge
+    (one line), with the target and the edge of the viscous sublayer (always shown,
+    v2.14.1). Hover for the numbers."""
+    EMPTY = ("Fill in the CFD mode inputs in the sidebar\n"
+             "(a flow direction is needed for the distance from the leading edge)")
+
+    def set_result(self, r):
+        ok = r and r.get("ok") and r.get("local") and len(r["local"]["curve"][0])
+        self.r = r if ok else None
         self.update()
+
+    def _ranges(self):
+        xs, yp = self.r["local"]["curve"]
+        top = max(float(yp.max()), self.r["target"] * 1.3, VISCOUS) * 1.08
+        return (0.0, float(xs[-1])), (0.0, top)
+
+    def paintEvent(self, _):
+        p = self._begin()
+        if self.r is None:
+            return self._empty(p)
+        r = self.r
+        xs, yp = r["local"]["curve"]
+        (x0, x1), _ = self._ranges()
+        f, unit = length_unit(x1)
+        step = nice_step(x1 - x0, 8)
+        ticks = [(k * step, f"{k * step * f:.3g}") for k in range(int(x1 / step + 1e-9) + 1)]
+        edge = "inlet" if r.get("internal") else "leading edge"
+        self._frame(p, "y+ of the first layer", f"Distance from the {edge} ({unit})",
+                    lambda v: f"{v:.3g}", ticks)
+        c = series_color(self, "total")
+        pts = [self._px(x, y) for x, y in zip(xs, yp)]
+        self._line(p, pts, c)
+        self._ref(p, r["target"], Qt.DashLine, "Target", f"y+ {r['target']:g}")
+        self._ref(p, VISCOUS, Qt.DotLine, "Viscous sublayer", f"ends at y+ {VISCOUS:g}")
+        self._end_label(p, pts[-1], f"End y+ {yp[-1]:.3g}")
+        if self.hover is not None:
+            self._hover_at(p, pts[self.hover].x(), pts[self.hover], c)
+
+    def mouseMoveEvent(self, e):
+        if self.r is None:
+            return
+        xs, yp = self.r["local"]["curve"]
+        (x0, x1), _ = self._ranges()
+        w = self.width() - self.PAD_L - self.PAD_R
+        x = x0 + (e.position().x() - self.PAD_L) / max(w, 1) * (x1 - x0)
+        if not x0 <= x <= x1:
+            return self.leaveEvent(None)
+        i = int(np.clip(np.searchsorted(xs, x), 0, len(xs) - 1))
+        if i != self.hover:
+            self.hover = i
+            self.update()
+        edge = "inlet" if self.r.get("internal") else "leading edge"
+        QToolTip.showText(e.globalPosition().toPoint(),
+                          f"{show_length(xs[i])} from the {edge}\n"
+                          f"y+ {yp[i]:.3g}  ({yp[i] / self.r['target']:.2g} × target)", self)
 
 
 class _Legend(QWidget):
@@ -336,7 +445,9 @@ class InflationView(QScrollArea):
         for i, (key, caption, tip) in enumerate((
                 ("re", "Reynolds number", "Re = ρ U L / μ  (laminar below 5·10⁵)"),
                 ("y_calc", "First layer height for target y+", "y_min = y+ μ / (ρ u*)"),
-                ("yplus", "Estimated y+", "y+ of the first layer used: y_min u* ρ / μ"),
+                ("yplus", "Max y+ on the walls",
+                 "y+ of the first layer along the flow (see the y+ along the flow tab):\n"
+                 "max big, min · mean beside it — green ≤ 1.25 × target, orange ≤ 2.5 ×"),
                 ("d99", "Boundary layer thickness", "δ99, flat plate: 0.38 L / Re^⅕ (turbulent) "
                                                     "or 4.91 L / √Re (laminar); supersonic ÷ rc^⅑"),
                 ("y_tot", "Total thickness of the layers",
@@ -358,7 +469,8 @@ class InflationView(QScrollArea):
         group = QActionGroup(self)
         group.setExclusive(True)
         self.tabs = {}
-        for key, text in (("plot", "Layer size plot"), ("section", "Cross section")):
+        for key, text in (("plot", "Layer size plot"), ("section", "Cross section"),
+                          ("yplus", "y+ along the flow")):
             a = QAction(text, self)
             a.setCheckable(True)
             a.triggered.connect(lambda _=False, k=key: self.show_tab(k))
@@ -385,12 +497,17 @@ class InflationView(QScrollArea):
         sb.addWidget(Capsule([self.flip_action], name="Segmented"))
         sb.addWidget(Capsule([self.fit_action], name="Segmented"))
         bar.addWidget(self.section_bar)
+        self.yplus_note = QLabel("")                   # v2.14.1: what the y+ curve assumes
+        self.yplus_note.setObjectName("InfoLine")
+        bar.addWidget(self.yplus_note)
         cl.addLayout(bar)
         self.views = QStackedWidget()
         self.plot = InflationPlot()
         self.views.addWidget(self.plot)
         self.section = SectionView()                   # v2.13: follows the section plane
         self.views.addWidget(self.section)
+        self.yplus_plot = YplusAlongPlot()             # v2.14
+        self.views.addWidget(self.yplus_plot)
         self.flip_action.toggled.connect(self.section.set_flip)
         self.fit_action.triggered.connect(self.section.fit)
         self.section_legend.toggled.connect(self.section.set_show)
@@ -406,14 +523,42 @@ class InflationView(QScrollArea):
 
     def show_tab(self, key):
         self.tabs[key].setChecked(True)
-        self.views.setCurrentWidget(self.plot if key == "plot" else self.section)
+        self.views.setCurrentWidget({"plot": self.plot, "section": self.section,
+                                     "yplus": self.yplus_plot}[key])
         self.legend.setVisible(key == "plot")
         self.section_legend.setVisible(key == "section")
         self.section_bar.setVisible(key == "section")
+        self.yplus_note.setVisible(key == "yplus")
+
+    def current_tab(self):
+        return next((k for k, a in self.tabs.items() if a.isChecked()), "plot")
+
+    # ---- v2.14: remembered per file -------------------------------------------------------
+    def get_state(self):
+        sec = self.section
+        return {"tab": self.current_tab(), "flip": self.flip_action.isChecked(),
+                "flow": bool(sec.show.get("flow")), "view": sec.view_state()}
+
+    def set_state(self, st):
+        st = st or {}
+        self.flip_action.setChecked(bool(st.get("flip", False)))
+        on = bool(st.get("flow", False))
+        self.section_legend.set_on("flow", on)
+        self.section.set_show("flow", on)
+        self.section.restore_view(st.get("view"))
+        self.show_tab(st.get("tab") if st.get("tab") in self.tabs else "plot")
 
     def set_result(self, r):
         self.plot.set_result(r)
         self.section.set_result(r)
+        self.yplus_plot.set_result(r)
+        if r and r.get("ok"):
+            self.yplus_note.setText(
+                f"First layer {show_length(r['y_min'])} · " +
+                ("entrance: flat plate from the inlet, then developed pipe flow"
+                 if r.get("internal") else "flat plate, turbulent from the leading edge"))
+        else:
+            self.yplus_note.setText("")
         if not r or not r.get("ok"):
             for t in self.tiles.values():
                 t.set("—")
@@ -423,28 +568,63 @@ class InflationView(QScrollArea):
         self.regime.setText(("Turbulent" if r["turbulent"] else "Laminar") + " · " +
                             ("Supersonic" if r["supersonic"] else "Subsonic"))
         if r.get("walls"):                       # v2.12: which walls, which length
-            self.regime.setText(self.regime.text() + f" · {r['walls']} · L {r['L']:.4g} m")
+            self.regime.setText(self.regime.text() + f" · {r['walls']} · "
+                                f"{'D' if r.get('internal') else 'L'} {r['L']:.4g} m")
+        if r.get("internal"):                    # v2.14.2
+            self.regime.setText("Internal · " + self.regime.text())
         self.tiles["re"].set(f"{r['Re']:.3g}", "turbulent" if r["turbulent"] else "laminar")
         self.tiles["y_calc"].set(show_length(r["y_calc"]), f"{r['y_calc']:.3g} m")
         off = abs(r["yplus_est"] - r["target"]) / max(r["target"], 1e-12)
-        self.tiles["yplus"].set(f"{r['yplus_est']:.3g}", f"target {r['target']:g}",
-                                "ok" if off < 0.2 else "warn")
-        self.tiles["d99"].set(show_length(r["d99"]), f"{r['d99']:.3g} m")
+        loc = r.get("local")
+        if loc is not None:                      # v2.14.1: like the mesh — max, min · mean
+            self.tiles["yplus"].caption.setText(f"Max y+ on {r.get('walls') or 'the walls'}")
+            self.tiles["yplus"].set(f"{loc['max']:.3g}", f"target {r['target']:g} · end of the "
+                                    f"walls {r['yplus_est']:.3g}",
+                                    yplus_grade(loc["max"] / r["target"]),
+                                    side=f"min {loc['min']:.3g} · mean {loc['mean']:.3g}")
+        else:
+            self.tiles["yplus"].caption.setText("Estimated y+")
+            self.tiles["yplus"].set(f"{r['yplus_est']:.3g}", f"target {r['target']:g}",
+                                    "ok" if off < 0.2 else "warn")
+        self.tiles["d99"].caption.setText("Pipe radius" if r.get("internal")
+                                          else "Boundary layer thickness")
+        self.tiles["d99"].set(show_length(r["d99"]), "developed flow: the boundary layer fills it"
+                              if r.get("internal") else f"{r['d99']:.3g} m")
         self.tiles["y_tot"].set(show_length(r["y_tot"]), f"{r['N']} layers × G {r['G']:g}",
                                 "ok" if r["covers_bl"] else "bad")
         self.tiles["y_max"].set(show_length(r["y_max"]),
                                 f"next cell {show_length(r['y_des'])}",
                                 "ok" if r["smooth"] else "warn")
         ok, warn = f"<span style='color:{GREEN}'>✓</span>", "<span style='color:#ff9f0a'>⚠</span>"
+        if r.get("internal"):                    # v2.14.2: the layers must fit in the pipe
+            first = (f"{ok if r['covers_bl'] else warn} The layers ({show_length(r['y_tot'])} "
+                     f"in total) take {r['y_tot'] / r['d99'] * 100:.0f} % of the pipe radius "
+                     f"({show_length(r['d99'])})")
+        else:
+            first = (f"{ok if r['covers_bl'] else warn} The layers ({show_length(r['y_tot'])} "
+                     f"in total) {'are thicker than' if r['covers_bl'] else 'are thinner than'} "
+                     f"the boundary layer ({show_length(r['d99'])})")
         lines = [
-            f"{ok if r['covers_bl'] else warn} The layers ({show_length(r['y_tot'])} in total) "
-            f"{'are thicker than' if r['covers_bl'] else 'are thinner than'} the boundary layer "
-            f"({show_length(r['d99'])})",
+            first,
             f"{ok if r['smooth'] else warn} Step to the mesh: the next cell "
             f"({show_length(r['y_des'])}) is {r['y_des'] / r['y_max']:.2g} × the max layer "
             f"height (about 2 × is smooth)",
-            f"{ok if off < 0.2 else warn} Estimated y+ {r['yplus_est']:.3g} for a target of "
-            f"{r['target']:g}",
         ]
+        if loc is None:
+            lines.append(f"{ok if off < 0.2 else warn} Estimated y+ {r['yplus_est']:.3g} for a "
+                         f"target of {r['target']:g}")
+        else:                                    # v2.14: does y+ leave its zone anywhere?
+            t = r["target"]
+            if t < 5:
+                bad, why = loc["max"] > 5, "reaches the buffer layer (y+ > 5)"
+            elif t >= 30:
+                bad = loc["min"] < 30 or loc["max"] > 300
+                why = "leaves the log layer (30 – 300)"
+            else:
+                bad, why = True, "is in the buffer layer (5 – 30)"
+            lines.append(
+                f"{warn if bad else ok} y+ on the walls: max {loc['max']:.3g} (near the "
+                f"{'inlet' if r.get('internal') else 'leading edge'}), min {loc['min']:.3g}, mean {loc['mean']:.3g} for a target of {t:g}"
+                + (f" — {why}" if bad else ""))
         self.checks.setText("<br>".join(lines))
 

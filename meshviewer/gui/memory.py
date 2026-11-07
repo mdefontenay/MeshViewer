@@ -2,7 +2,8 @@
 
 Saved when its window closes (and when the app quits), restored when it opens:
 camera, projection, display toggles, unit, part colours, renamed and hidden
-parts, and the section plane. Edits (moves, rotations) are not: they belong to
+parts, and the section plane. CFD inputs (v2.10 / v2.11); v2.14: the Inflation page —
+which page and tab, Flip side, the flow arrow, the cross-section zoom. Edits (moves, rotations) are not: they belong to
 an export. Stored in the app's settings, for the last 200 files.
 
     state = capture(scene)          ->  dict (JSON-friendly)
@@ -64,6 +65,8 @@ def capture(scene):
         "hidden": [orig.get(n, n) for n in scene.names if not scene.visible[n]],
         "cfd": scene.cfd_settings,                                # v2.10
         "inflation": scene.inflation_settings,                    # v2.11: CFD mode
+        "inflation_page": getattr(scene, "inflation_page", None),  # v2.14: tab, zoom…
+        "results": getattr(scene, "results_settings", None),      # v2.15: field, range
         "hidden_faces": {orig.get(n, n): sorted(v) for n, v in scene.hidden_faces.items()
                          if v},                                   # v2.12
         "section": {"enabled": sec.enabled, "origin": list(map(float, sec.origin)),
@@ -100,6 +103,10 @@ def restore(scene, state):
         scene.cfd_settings = state["cfd"]
     if state.get("inflation"):
         scene.inflation_settings = state["inflation"]
+    if state.get("inflation_page"):                                 # v2.14
+        scene.inflation_page = state["inflation_page"]
+    if state.get("results"):                                        # v2.15
+        scene.results_settings = state["results"]
     hidden = {current(n): set(v) for n, v in (state.get("hidden_faces") or {}).items()
               if current(n) in scene.model.parts}                # v2.12: hidden surfaces
     if hidden:

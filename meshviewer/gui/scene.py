@@ -26,7 +26,7 @@ from ..model import Model
 from .background import ImageBackground, is_dark_image, load_image
 from .. import transform as xf
 from .measure import AXIS_COLORS, Measure
-from .cfd_view import FlowView, WallView, YplusView
+from .cfd_view import FlowView, ResultsView, WallView, YplusView
 from .quality_view import GHOST_OPACITY, QualityView
 from .section import Section
 
@@ -164,8 +164,11 @@ class Scene:
         self.flow = FlowView(self)                # v2.10: CFD ▸ Show flow vectors
         self.yplus_view = YplusView(self)         # v2.11.3: CFD ▸ Colour by y+
         self.walls = WallView(self)               # v2.12: CFD mode ▸ inflation walls
+        self.results = ResultsView(self)          # v2.15: Results ▸ a solution field
+        self.results_settings = None              # v2.15: field, range (remembered)
         self.cfd_settings = None                  # v2.10: CFD section (remembered per file)
         self.inflation_settings = None            # v2.11: CFD mode (CAD), remembered too
+        self.inflation_page = None                # v2.14: Inflation page tab, zoom… (memory)
         self.measure = Measure(self)
         self.set_theme(dark, render=False)
         self.set_parallel(self.state["parallel"])
@@ -294,6 +297,9 @@ class Scene:
         return f"{poly.n_cells:,} faces · {poly.n_points:,} points"
 
     def _after_visibility_change(self):
+        rv = getattr(self, "results", None)                 # v2.15: only visible boundaries
+        if rv is not None:
+            rv.refresh()
         if self.section.enabled:
             self.section.update_caps()      # also renders
         else:
@@ -803,9 +809,9 @@ class Scene:
         quality = getattr(self, "quality", None)
         if quality is not None and quality.hides_surface:   # coloured copy shown instead
             self._surf.SetVisibility(False)
-        yv = getattr(self, "yplus_view", None)              # v2.11.4: y+ colours follow too
-        if yv is not None:
-            yv.apply_lines()
+        for yv in (getattr(self, "yplus_view", None), getattr(self, "results", None)):
+            if yv is not None:                              # v2.11.4: y+ colours follow too
+                yv.apply_lines()
 
     def set_ghost(self, on, render=True):
         """NEW (v2.9): faces see-through, so the bad cells inside show."""
@@ -1083,4 +1089,4 @@ class Scene:
         """Everything the section plane should cut."""
         return [self._surf, self._edges, *self._face_actors, *self._highlights.values(),
                 *self.quality.actors(), *self.yplus_view.actors(),
-                *self.walls.actors()]
+                *self.walls.actors(), *self.results.actors()]

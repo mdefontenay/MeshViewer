@@ -91,7 +91,13 @@ class YplusView:
             self.p.render()
             return
         part = sc.model.parts[name]
-        if len(ratio) != part.n_points:
+        self.show_surface(part, ratio)
+
+    def show_surface(self, part, ratio):
+        """The colours on one surface, ratio at each of its points."""
+        self.hide(render=False)
+        sc = self.scene
+        if part is None or ratio is None or len(ratio) != part.n_points:
             self.p.render()
             return
         surf = pv.PolyData(np.asarray(part.points), faces=part.faces)
@@ -185,3 +191,78 @@ class WallView:
 
     def actors(self):
         return list(self._actors)
+
+
+# ---- NEW (v2.15): Results — the boundaries painted by a solution field -----------------------
+# Colour scales (dataviz reference palette): one hue, light -> dark, for magnitudes; blue ->
+# grey -> red around zero for fields that change sign (cp, u, v, w…).
+SEQUENTIAL = ("#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95", "#0d366b")
+DIVERGING = ("#104281", "#2a78d6", "#9ec5f4", "#f0efec", "#f2a7a6", "#e34948", "#a52a29")
+
+
+def ramp_rgb(values, lo, hi, stops):
+    """Colour (n, 3) uint8 for values on lo..hi (clamped); NaN -> grey."""
+    v = np.asarray(values, dtype=float)
+    t = np.clip((np.nan_to_num(v, nan=lo) - lo) / ((hi - lo) or 1.0), 0.0, 1.0)
+    cols = np.array([[int(c[i:i + 2], 16) for i in (1, 3, 5)] for c in stops], float)
+    xs = np.linspace(0.0, 1.0, len(stops))
+    out = np.stack([np.interp(t, xs, cols[:, k]) for k in range(3)], axis=1)
+    out[~np.isfinite(v)] = [int(NAN_COLOR[i:i + 2], 16) for i in (1, 3, 5)]
+    return out.astype(np.uint8)
+
+
+def field_values(poly, name):
+    """(values, "point" | "cell") of a field on a boundary, or (None, None)."""
+    if name in poly.point_data:
+        return np.asarray(poly.point_data[name], dtype=float), "point"
+    if name in poly.cell_data:
+        return np.asarray(poly.cell_data[name], dtype=float), "cell"
+    return None, None
+
+
+class ResultsView(YplusView):
+    """The visible boundaries that carry `field`, coloured on lo..hi (drawn just in
+    front of the model, cut by the section plane, edges like the model's)."""
+
+    def __init__(self, scene):
+        super().__init__(scene)
+        self.spec = None                      # (field, lo, hi, stops) while shown
+
+    def show_field(self, field, lo, hi, stops):
+        self.hide(render=False)
+        sc = self.scene
+        self.spec = (field, lo, hi, stops)
+        polys = []
+        for n in sc.names:
+            part = sc.model.parts.get(n)
+            if part is None or not sc.visible.get(n):
+                continue
+            vals, where = field_values(part, field)
+            if vals is None:
+                continue
+            surf = pv.PolyData(np.asarray(part.points), faces=part.faces)
+            data = surf.point_data if where == "point" else surf.cell_data
+            data["ResultRGB"] = ramp_rgb(vals, lo, hi, stops)
+            polys.append(surf)
+        if not polys:
+            self.p.render()
+            return
+        surf = polys[0] if len(polys) == 1 else pv.merge(polys)
+        self._actor = self.p.add_mesh(surf, scalars="ResultRGB", rgb=True, edge_color="#202020",
+                                      pickable=False, reset_camera=False, lighting=True,
+                                      smooth_shading=True, ambient=0.25, diffuse=0.8)
+        m = self._actor.GetMapper()
+        m.SetResolveCoincidentTopologyToPolygonOffset()
+        m.SetRelativeCoincidentTopologyPolygonOffsetParameters(-2, -2)
+        sc.section.clip(self._actor)
+        self.apply_lines()
+        self.p.render()
+
+    def refresh(self):
+        """Visibility or the model changed: draw again with the same field."""
+        if self.spec is not None:
+            self.show_field(*self.spec)
+
+    def clear(self):
+        self.spec = None
+        self.hide()

@@ -5,6 +5,7 @@ with every computed number; the auto length is the longest streamwise distance.
     ⌄ Flow                                          Values
       Fluid          [ Air — altitude          ▾ ]
       Altitude       [ 0        ] m     ?          (U.S. Standard Atmosphere)
+      Temperature    [ 288.15   ] K                (v2.14; v2.14.1: locked for air, typed for water)
       Density        [ 1.225    ] kg/m³
       Viscosity      [ 1.789e-5 ] Pa·s
       Sound speed    [ 340.29   ] m/s
@@ -16,7 +17,7 @@ with every computed number; the auto length is the longest streamwise distance.
     ⌄ y+ estimator                              ?   Values
       Boundary       [ wing                    ▾ ]
       Length         [ auto: 1.23 ] m                   longest distance along the flow
-      Target y+      [ 1 ]
+      Target y+ ?    [ 1 ]          (v2.14: ? = resolve the wall or wall functions)
       ┌ Max y+ on wing (from the mesh)
       │ 3.2   min 0.8
       │ First cell height for y+ = 1
@@ -38,15 +39,16 @@ from .jobs import run_job
 from .measure import UNITS, fmt
 from .cfd_view import YPLUS_STOPS
 from .widgets import (
-    CollapsibleSection, FormulasButton, GradientBar, MenuSelect, NumberField, Switch, UnitField,
-    ValuesButton, color_dot, help_button,
+    CollapsibleSection, FormulasButton, GradientBar, MenuSelect, NumberField, Switch,
+    TemperatureField, UnitField, ValuesButton, color_dot, help_button,
 )
+from .wall_help import label_with_help, wall_help_button
 
 YPLUS_URL = "https://www.cfd-online.com/Wiki/Dimensionless_wall_distance_(y_plus)"
 ATMOSPHERE_URL = "https://www.engineeringtoolbox.com/standard-atmosphere-d_604.html"
 FLUIDS = (("air", "Air — altitude"), ("fresh", "Fresh water — depth"),
           ("sea", "Sea water — depth"), ("custom", "Custom"))
-DEFAULTS = {"fluid": "air", "level": 0.0, "mach": 0.3, "direction": [1.0, 0.0, 0.0],
+DEFAULTS = {"fluid": "air", "level": 0.0, "temperature": None, "kind": "external", "mach": 0.3, "direction": [1.0, 0.0, 0.0],
             "boundary": None, "length": None, "target": 1.0, "vectors": False,
             "speed_unit": "m/s", "compressible": True, "colour": False,       # v2.11.3
             "units": {}}                                     # v2.11.4: unit of each field
@@ -79,9 +81,13 @@ FLOW_FORMULAS = [
     ("Density (R = 287.05 J/(kg·K))", r"\rho = \frac{p}{R\, T}"),
     ("Viscosity (Sutherland)", r"\mu = 1.458\times10^{-6}\, \frac{T^{3/2}}{T + 110.4}"),
     ("Speed of sound (γ = 1.4)", r"a = \sqrt{\gamma R T}"),
-    "Water at 15 °C",
+    "Water (15 °C unless a temperature is typed)",
     ("Density at a depth d (bulk modulus K)",
      r"\rho = \rho_0 \left(1 + \frac{\rho_0\, g_0\, d}{K}\right)"),
+    ("Typed temperature t (°C), fresh water: density (Thiesen), viscosity (Vogel), speed "
+     "of sound (Marczak); sea water: scaled to its 15 °C values, sound speed from Mackenzie",
+     r"\rho_0 = 1000 \left(1 - \frac{(t + 288.94)(t - 3.99)^2}{508929.2\,(t + 68.13)}\right)"
+     r" \qquad \mu = 2.414\times10^{-5} \cdot 10^{\,247.8 / (T - 140)}"),
     "Flow",
     ("Speed", r"U = M\, a"),
     ("Kinematic viscosity and dynamic pressure",
@@ -105,6 +111,13 @@ YPLUS_FORMULAS = [
     ("y+ of a first cell of height y", r"y^+ = \frac{y\, u_*\, \rho}{\mu}"),
     ("First cell height for the target y+", r"y_1 = \frac{y^+_{\mathrm{target}}\, \mu}"
      r"{\rho\, u_*}"),
+    "Internal flow — pipe or duct (v2.14.2)",
+    ("Hydraulic diameter (when empty): from the boundary's widths a, b across the flow; "
+     "Reynolds number on D", r"D = \frac{2ab}{a + b} \qquad \mathrm{Re}_D = "
+     r"\frac{\rho U D}{\mu}"),
+    ("Developed flow, smooth pipe: laminar below Re 2300, else Petukhov (Fanning Cf); no "
+     "compressibility correction", r"C_f = \frac{16}{\mathrm{Re}_D} \qquad C_f = "
+     r"\frac{(0.790 \ln \mathrm{Re}_D - 1.64)^{-2}}{4}"),
     "From the mesh",
     ("First cell at a wall node P: the shortest step to a node Q off the wall, along an "
      "edge of a cell touching the wall, measured along the wall normal n̂",
@@ -206,6 +219,15 @@ class CfdPanel(QWidget):
         hl.addWidget(self.level_help)
         hl.addStretch(1)
         g.addWidget(self.level_head, 1, 0)
+        # NEW (v2.14): temperature — empty = the standard one (ISA at the altitude, 15 °C water)
+        self.temp = TemperatureField()
+        self.temp.setToolTip("Free-stream temperature. Air: the standard one at the altitude\n"
+                             "(U.S. Standard Atmosphere), locked like ρ, μ and a. Water: type\n"
+                             "it (empty = 15 °C)")
+        self._temp_auto = False                    # v2.14.1: showing air's standard T
+        self.temp.valueChanged.connect(self._fluid_changed)
+        self.temp.unitChanged.connect(self._fluid_changed)
+        self.temp_label, self.temp_unit = _row(g, 2, "Temperature", self.temp)
 
         self.rho = UnitField(DENSITY_UNITS)
         self.mu = UnitField(VISCOSITY_UNITS)
@@ -214,7 +236,7 @@ class CfdPanel(QWidget):
                 ("Density", self.rho, "ρ of the free stream"),
                 ("Viscosity", self.mu, "Dynamic viscosity μ of the free stream"),
                 ("Sound speed", self.a, "Speed of sound a (speed U = Mach × a)")),
-                start=2):
+                start=3):
             box.setToolTip(tip)
             box.valueChanged.connect(self._property_typed)
             box.unitChanged.connect(self._unit_changed)
@@ -223,13 +245,13 @@ class CfdPanel(QWidget):
         self.mach = NumberField(0.3)
         self.mach.setToolTip("Free-stream Mach number (U = Mach × a)")
         self.mach.valueChanged.connect(self._update)
-        _row(g, 5, "Mach", self.mach)
+        _row(g, 6, "Mach", self.mach)
         # v2.11.2: the speed can be typed too; Mach follows (and the other way round)
         self.u = UnitField(SPEED_UNITS)                # v2.11.3 units; v2.11.4 a UnitField
         self.u.setToolTip("Free-stream speed U (Mach = U / a)")
         self.u.valueChanged.connect(self._speed_typed)
         self.u.unitChanged.connect(self._unit_changed)
-        _row(g, 6, "Speed U", self.u)
+        _row(g, 7, "Speed U", self.u)
 
         # v2.11.1: X / Y / Z above the three fields (like the section normal), and the
         # fields use the unit columns too, so the numbers are not clipped.
@@ -253,11 +275,11 @@ class CfdPanel(QWidget):
             b.valueChanged.connect(self._direction_changed)
             dl.addWidget(b, 1)
             self.direction.append(b)
-        g.addWidget(axes, 7, 1, 1, 3)
+        g.addWidget(axes, 8, 1, 1, 3)
         lab = QLabel("Direction")
         lab.setToolTip("Flow direction X / Y / Z (any length)")
-        g.addWidget(lab, 8, 0)
-        g.addWidget(dirs, 8, 1, 1, 3)
+        g.addWidget(lab, 9, 0)
+        g.addWidget(dirs, 9, 1, 1, 3)
         fl.addLayout(g)
 
         r = QHBoxLayout()
@@ -290,17 +312,29 @@ class CfdPanel(QWidget):
         self.boundary.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.boundary.currentIndexChanged.connect(self._boundary_changed)
         _row(g, 0, "Boundary", self.boundary, wide=True)
+        self.kind = MenuSelect()                       # v2.14.2: external / internal flow
+        self.kind.addItem("External — around the walls", "external")
+        self.kind.addItem("Internal — pipe or duct", "internal")
+        self.kind.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.kind.setToolTip("External: flat plate, Reynolds number on the length L.\n"
+                             "Internal: developed pipe flow, Reynolds number on the hydraulic\n"
+                             "diameter D")
+        self.kind.currentIndexChanged.connect(self._kind_changed)
+        _row(g, 1, "Flow", self.kind, wide=True)
         self.length = UnitField(LENGTH_UNITS)
         self.length.setToolTip("Reference length for the Reynolds number. Empty = the\n"
                                "longest distance across the boundary along the flow\n"
                                "(e.g. the root chord of a swept wing)")
         self.length.valueChanged.connect(self._update)
         self.length.unitChanged.connect(self._unit_changed)
-        _row(g, 1, "Length", self.length)
+        self.length_label, _ = _row(g, 2, "Length", self.length)
         self.target = NumberField(1.0)
         self.target.setToolTip("The y+ you want: gives the first cell height to use")
         self.target.valueChanged.connect(self._update)
-        _row(g, 2, "Target y+", self.target)
+        lab, _ = _row(g, 3, "Target y+", self.target)
+        lab.hide()                                     # v2.14: "?" = which y+ to aim for
+        g.addWidget(label_with_help("Target y+", wall_help_button(
+            self.target.value, self._set_target)), 3, 0)
         yl.addLayout(g)
         r = QHBoxLayout()                              # v2.11.4: back to the auto length
         r.setContentsMargins(0, 0, 0, 0)
@@ -418,6 +452,8 @@ class CfdPanel(QWidget):
         for key, box in self._unit_fields().items():                 # v2.11.4
             box.set_unit(units.get(key, next(iter(box.units))))
         self.level.setValue(st["level"])
+        self._temp_auto = False
+        self.temp.setValue(st.get("temperature"))
         self.mach.setValue(st["mach"])
         for b, v in zip(self.direction, st["direction"]):
             b.setValue(v)
@@ -428,6 +464,10 @@ class CfdPanel(QWidget):
         self._fill_properties(custom=st if st["fluid"] == "custom" else None)
         Switch.set_silently(self.vectors, bool(st["vectors"]))
         Switch.set_silently(self.compressible, bool(st["compressible"]))
+        self.kind.blockSignals(True)
+        self.kind.setCurrentIndex(max(self.kind.findData(st.get("kind", "external")), 0))
+        self.kind.blockSignals(False)
+        self._kind_labels()
         Switch.set_silently(self.colour, bool(st["colour"]))
         self.legend.setVisible(self.colour.isChecked())
         self._update(save=False)
@@ -450,6 +490,7 @@ class CfdPanel(QWidget):
 
     def settings(self):
         return {"fluid": self.fluid.currentData(), "level": self.level.value() or 0.0,
+                "temperature": None if self._temp_auto else self.temp.value(),
                 "rho": self.rho.value(), "mu": self.mu.value(), "a": self.a.value(),
                 "mach": self.mach.value(), "direction": [b.value() or 0.0 for b in self.direction],
                 "boundary": self.boundary.currentData(), "length": self.length.value(),
@@ -457,11 +498,12 @@ class CfdPanel(QWidget):
                 "speed_unit": self.u.unit(),
                 "units": {k: b.unit() for k, b in self._unit_fields().items()},
                 "compressible": self.compressible.isChecked(),
+                "kind": self.kind.currentData(),
                 "colour": self.colour.isChecked()}
 
     def _unit_fields(self):
         return {"level": self.level, "rho": self.rho, "mu": self.mu, "a": self.a, "u": self.u,
-                "length": self.length}
+                "length": self.length, "temperature": self.temp}
 
     def refresh_colors(self):
         """v2.11.4: a part's colour changed: its dot in the Boundary menu follows."""
@@ -477,6 +519,28 @@ class CfdPanel(QWidget):
 
     def _auto_length(self):
         self.length.setValue(None)
+        self._update()
+
+    def _kind_changed(self, *_):
+        self._kind_labels()
+        self._update()
+
+    def _kind_labels(self):
+        """v2.14.2: external flow (length L) or internal (hydraulic diameter D)."""
+        internal = self.kind.currentData() == "internal"
+        self.length_label.setText("Diameter D" if internal else "Length")
+        self.length.setToolTip(
+            "Hydraulic diameter D of the pipe or duct. Empty = 2ab / (a + b) from the\n"
+            "boundary's widths across the flow (a round pipe: its diameter)" if internal else
+            "Reference length for the Reynolds number. Empty = the\n"
+            "longest distance across the boundary along the flow\n"
+            "(e.g. the root chord of a swept wing)")
+        self.auto_length.setText("Back to auto diameter" if internal else "Back to auto length")
+        self.compressible.setEnabled(not internal)       # flat-plate correction: external only
+
+    def _set_target(self, v):
+        """v2.14: "Use y+ = …" in the wall-function card."""
+        self.target.setValue(v)
         self._update()
 
     def activate(self, on):
@@ -496,7 +560,8 @@ class CfdPanel(QWidget):
 
     def _fill_properties(self, custom=None):
         kind = self.fluid.currentData()
-        for w in (self.level, self.level_head, self.level_unit):
+        for w in (self.level, self.level_head, self.level_unit, self.temp, self.temp_label,
+                  self.temp_unit):
             w.setVisible(kind != "custom")
         for box in (self.rho, self.mu, self.a):     # v2.11.2: only typed for "Custom"
             box.setEnabled(kind == "custom")
@@ -512,7 +577,11 @@ class CfdPanel(QWidget):
                 self.a.setValue(custom.get("a"))
             return
         h = self.level.value() or 0.0
-        props = cfd.air(h) if kind == "air" else cfd.water(h, kind)
+        t = self._temperature(kind)                 # v2.14: None = standard
+        props = cfd.air(h, t) if kind == "air" else cfd.water(h, kind, t)
+        if kind == "air":
+            self.temp.setValue(props["T"])
+        self.temp.setPlaceholderText(f"auto: {self.temp.shown(props['T_std']):.4g}")
         self._props = props
         self.rho.setValue(props["rho"])
         self.mu.setValue(props["mu"])
@@ -522,6 +591,16 @@ class CfdPanel(QWidget):
         """Your own density, viscosity or sound speed (Custom only: the boxes are
         locked for air and water)."""
         self._update()
+
+    def _temperature(self, kind):
+        """v2.14.1: air at an altitude — its standard temperature, greyed out like ρ, μ
+        and a; water — typed (empty = 15 °C). Returns the temperature to use, or None."""
+        air = kind == "air"
+        if not air and self._temp_auto:              # leaving air: forget its standard T
+            self.temp.setValue(None)
+        self._temp_auto = air
+        self.temp.setEnabled(not air)
+        return None if air else self.temp.value()
 
     def _speed_typed(self, u):
         """NEW (v2.11.2): a typed speed sets the Mach number (M = U / a)."""
@@ -622,8 +701,11 @@ class CfdPanel(QWidget):
         name = self.boundary.currentData()
         to_m, note = self._to_metres()
         auto = None
+        internal = self.kind.currentData() == "internal"        # v2.14.2
         if name in sc.model.parts:                # v2.11.1: longest streamwise distance
-            auto = cfd.streamwise_length(sc.model.parts[name].points, self._dir()) * to_m
+            pts = sc.model.parts[name].points
+            auto = (cfd.hydraulic_diameter(pts, self._dir()) if internal else
+                    cfd.streamwise_length(pts, self._dir())) * to_m
         self.length.setPlaceholderText(f"auto: {auto / self.length.factor:.4g}" if auto
                                        else "auto")
         self.auto_length.setVisible(self.length.value() is not None)
@@ -640,7 +722,8 @@ class CfdPanel(QWidget):
             self._paint(None)
             self._status("Fill in the flow to get y+.")
             return
-        f = cfd.flow(rho, mu, a, mach, length or 0.0, compressible=self.compressible.isChecked())
+        f = cfd.flow(rho, mu, a, mach, length or 0.0, compressible=self.compressible.isChecked(),
+                     internal=internal)
         if not self.u.hasFocus():
             self.u.setValue(f["U"])
         if not length or not f["u_star"]:
@@ -698,19 +781,23 @@ class CfdPanel(QWidget):
                 rows += [("Total temperature T₀",
                           g(self._props["T"] * (1 + (cfd.GAMMA - 1) / 2 * m * m)), "K")]
             if length:
-                rows += [("Reynolds Re (length L)", f"{f['Re']:.4g}", ""),
-                         ("Boundary layer", "turbulent" if f["Re"] > 5e5 else "laminar", "")]
+                internal = bool(f.get("internal"))
+                rows += [("Reynolds Re (diameter D)" if internal else "Reynolds Re (length L)",
+                          f"{f['Re']:.4g}", ""),
+                         ("Boundary layer", "turbulent" if f["Re"] > (cfd.RE_PIPE if internal
+                                                                     else 5e5) else "laminar", "")]
         self.flow_values.set_rows(rows)
 
         rows = [("Boundary", self.boundary.currentData() or "—", ""),
-                ("Length L (typed)" if self.length.value() else "Length L (auto)",
-                 g(length), "m")]
+                (("Diameter D" if self.kind.currentData() == "internal" else "Length L") +
+                 (" (typed)" if self.length.value() else " (auto)"), g(length), "m")]
         if auto and self.length.value():
-            rows.append(("Auto (longest along the flow)", g(auto), "m"))
+            rows.append(("Auto (hydraulic diameter)" if self.kind.currentData() == "internal"
+                         else "Auto (longest along the flow)", g(auto), "m"))
         if f is not None and f.get("u_star"):
             u = f["u_star"]
             rows += [("Reynolds Re", f"{f['Re']:.4g}", "")]
-            if self.compressible.isChecked():
+            if self.compressible.isChecked() and not f.get("internal"):
                 rows += [("Cf incompressible", g(f["Cf_inc"]), ""),
                          ("Compressibility factor", g(f["Cf"] / f["Cf_inc"]), "")]
             rows += [("Skin friction Cf", g(f["Cf"]), ""),

@@ -19,6 +19,7 @@ from .icons import icon
 from .edit_panel import EditPanel
 from .cfd_panel import CfdPanel
 from .inflation_panel import InflationPanel
+from .results_panel import ResultsPanel
 from .info_panel import InfoPanel
 from .measure_panel import MeasurePanel
 from .quality_panel import QualityPanel
@@ -170,6 +171,19 @@ class Sidebar(QWidget):
         fb.addWidget(_divider())
         lay.addWidget(self.cfd_box)
 
+        # ---- NEW (v2.15): Results — a solution field on the boundaries ------------------
+        self.results_panel = ResultsPanel()
+        self.results_section = CollapsibleSection("Results", self.results_panel, "results",
+                                                  remember=False, start_open=True)
+        self.results_box = QWidget()               # section + divider, files with fields
+        rb = QVBoxLayout(self.results_box)
+        rb.setContentsMargins(0, 0, 0, 0)
+        rb.setSpacing(8)
+        rb.addWidget(self.results_section)
+        rb.addWidget(_divider())
+        lay.addWidget(self.results_box)
+        self.results_box.setVisible(False)
+
         # ---- Boundaries / Parts -----------------------------------------
         parts = QWidget()
         pl = QVBoxLayout(parts)
@@ -256,6 +270,8 @@ class Sidebar(QWidget):
         self.cfd_panel.bind(scene)                                    # v2.10
         self.cfd_box.setVisible(not scene.model.is_cad)               # v2.11: meshes
         self.inflation_box.setVisible(scene.model.is_cad)             # v2.11: CAD
+        self.results_box.setVisible(ResultsPanel.has_results(scene.model))   # v2.15
+        self.results_panel.bind(scene)
         self.inflation_panel.bind(scene)
         self.inflation_section.set_expanded(self.inflation_panel.enabled)
 

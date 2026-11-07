@@ -47,6 +47,7 @@ except ImportError:                     # cadquery-ocp 8.x moved it
     from OCP.collections import Sequence_TDF_Label as TDF_LabelSequence
 
 _as_face = getattr(TopoDS, "Face_s", None) or TopoDS.Face   # 7.x: Face_s, 8.x: Face
+_as_edge = getattr(TopoDS, "Edge_s", None) or TopoDS.Edge   # v2.14.2
 
 
 # ---- Tessellation settings ------------------------------------------------
@@ -285,6 +286,49 @@ class CadFile:
         faces = self.part_faces.get(name, [])
         ids = range(len(faces)) if face_ids is None else face_ids
         return sum(_props(faces[i], "area") for i in ids if 0 <= i < len(faces))
+
+    # ---- NEW (v2.14.2): exact cut by a plane (the Cross section of CFD mode) ----------------
+    def section(self, name, face_ids, origin, normal, deflection):
+        """The cut of a part's faces (all, or face_ids) by the plane, from the CAD curves
+        themselves — not the triangles: a list of N×3 point arrays, one per cut edge,
+        no further than `deflection` from the curve (and no more than ~3° per step).
+        Empty when the plane misses, None when the cut fails."""
+        from OCP.BRepAdaptor import BRepAdaptor_Curve
+        from OCP.BRepAlgoAPI import BRepAlgoAPI_Section
+        from OCP.GCPnts import GCPnts_TangentialDeflection
+        from OCP.TopAbs import TopAbs_EDGE
+        from OCP.TopoDS import TopoDS_Compound
+        from OCP.gp import gp_Dir, gp_Pln, gp_Pnt
+        faces = self.part_faces.get(name, [])
+        ids = range(len(faces)) if face_ids is None else face_ids
+        builder, comp = BRep_Builder(), TopoDS_Compound()
+        builder.MakeCompound(comp)
+        n = 0
+        for i in ids:
+            if 0 <= i < len(faces):
+                builder.Add(comp, faces[i])
+                n += 1
+        if not n:
+            return []
+        try:
+            pln = gp_Pln(gp_Pnt(*map(float, origin)), gp_Dir(*map(float, normal)))
+            sec = BRepAlgoAPI_Section(comp, pln, False)
+            sec.Approximation(True)
+            sec.Build()
+            if not sec.IsDone():
+                return None
+            out = []
+            exp = TopExp_Explorer(sec.Shape(), TopAbs_EDGE)
+            while exp.More():
+                curve = BRepAdaptor_Curve(_as_edge(exp.Current()))
+                exp.Next()
+                d = GCPnts_TangentialDeflection(curve, 0.05, float(deflection), 2)
+                pts = np.array([d.Value(k).Coord() for k in range(1, d.NbPoints() + 1)])
+                if len(pts) >= 2:
+                    out.append(pts)
+            return out
+        except Exception:                                  # noqa: BLE001
+            return None
 
     def exact_volume(self, name):
         """Volume of a part that is a closed solid, else None."""

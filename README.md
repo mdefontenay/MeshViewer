@@ -1,7 +1,8 @@
 # Mesh Viewer
 
 A fast, native-feeling macOS viewer for **CAD files** (STEP, IGES, BREP, STL, …)
-and **CFD meshes** (CGNS, UGRID). Double-click a file and inspect it: show or
+and **CFD meshes** (CGNS, UGRID), with **simulation results** from FUN3D
+(Tecplot `.dat`). Double-click a file and inspect it: show or
 hide parts, cut it with a section plane, measure distances, areas and volumes,
 estimate y+ and inflation layers for CFD, and export clean screenshots.
 
@@ -35,12 +36,17 @@ others could benefit from it.
 - **CFD** (meshes): y+ estimate on a boundary from the flow (air at an altitude,
   water at a depth, or your own values) and the mesh's first cell layer; the
   boundary **coloured by y+**; first cell height for a target y+; compressibility
-  correction; a unit menu on every input; flow direction arrows.
+  correction; a temperature input for water; a unit menu on every input; flow direction arrows.
 - **CFD mode** (CAD): an inflation layer calculator — choose the walls (a part, or
   faces you pick), get the first layer height for a target y+, the layer heights
   for N layers and a growth rate, and compare them to the boundary layer. A page
-  under the 3D view shows a **layer size plot** and a **cross section** of the
-  walls with the layers drawn on them (see [CFD tools](#cfd-tools)).
+  under the 3D view shows a **layer size plot**, a **cross section** of the walls
+  with the layers drawn on them, and the **y+ along the flow** (see
+  [CFD tools](#cfd-tools)). External flow or **internal flow** (pipe or duct).
+- **CFD export**: the inflation layers as settings for OpenFOAM (snappyHexMesh),
+  Fluent Meshing, STAR-CCM+ or Pointwise, or a CSV of every input and value.
+- **Which y+?** A **?** next to Target y+ explains resolving the wall (y+ ≈ 1) versus
+  wall functions (30 – 300), with a plot of the law of the wall.
 - **Formulas** and **Values**: every equation used, shown like LaTeX, and every
   computed number (Re, Cf, δ99, u*…) in a pop-up.
 - **Cell quality** (meshes): skewness, aspect ratio, scaled Jacobian and volume of
@@ -64,6 +70,7 @@ others could benefit from it.
 | Kind | Formats |
 |------|---------|
 | Mesh | CGNS `.cgns`, UGRID `.lb8/.b8/.lb4/.b4.ugrid` (boundary names from `.mapbc`) |
+| Results | Tecplot ASCII `.dat` (FUN3D `project_tec_boundary.dat`: the boundaries with their solution) |
 | CAD, exact geometry | STEP `.step/.stp`, IGES `.iges/.igs`, BREP `.brep/.brp` |
 | CAD, triangulated | STL `.stl`, OBJ `.obj`, PLY `.ply`, glTF `.gltf/.glb`, VRML `.wrl/.vrml` |
 
@@ -94,10 +101,33 @@ the boundary-layer thickness and the size of the layers, then two tabs:
   the boundary layer and the size of the next cell of the mesh.
 - **Cross section**: turn on the section plane (sidebar ▸ Section) and the cut
   of the walls is drawn in 2D, with the layers on it. It follows the plane as you
-  move it. Scroll to zoom, drag to pan.
+  move it. Scroll to zoom, drag to pan. Layers stop where they would cross: in a
+  narrow gap they meet half-way, and they stop at other parts.
+- **y+ along the flow**: the y+ of the first layer from the leading edge to the
+  end of the walls (a flat plate: the same on both sides of a wing). It is highest
+  near the leading edge, where the boundary layer is thinnest. For internal flow it
+  runs from the inlet and levels off at the developed pipe-flow value.
+
+The settings can then go straight to your mesher: **Export… ▸ CFD settings**
+writes them for OpenFOAM, Fluent Meshing, STAR-CCM+ or Pointwise, or as a CSV.
 
 Below, simple checks say whether the layers cover the boundary layer and step
 smoothly into the mesh.
+
+## Simulation results
+
+Open the Tecplot file a solver writes for its boundaries — FUN3D's
+`project_tec_boundary.dat` — with File ▸ Open (⌘O). Each boundary becomes a part,
+and a **Results** section appears in the sidebar: pick a *Field* (any variable in
+the file, or *Speed*), switch on *Colour the boundaries*, and the walls are coloured
+with a scale underneath. Fields that change sign (cp, u, v, w) use a blue–grey–red
+scale centred on zero, the others a blue one. Type a *Min* / *Max* to fix the range
+(empty = automatic). Hiding parts and the section plane work as usual, and the
+numbers (max · mean · min) are for the visible boundaries.
+
+Only the ASCII format is read, not the binary `.plt` / `.szplt`: if the solver
+writes binary, switch its output to ASCII or re-save the file as ASCII in Tecplot 360.
+If the file holds several time steps, the last one is shown.
 
 ## Download
 
@@ -202,23 +232,34 @@ Keep the MeshViewer folder where it is: this app runs the code from it.
       too when they close up. Clicking empty space clears the faces.
   - **Cell quality** (meshes): pick a measure, set the "bad" threshold on the
     histogram (click / drag), then Zoom, Show bad cells or Colour by quality.
-  - **CFD**: fluid (air at an altitude, fresh / sea water at a depth, or custom),
+  - **CFD**: external or internal flow (pipe or duct: Reynolds number on the hydraulic
+    diameter D); fluid (air at an altitude, fresh / sea water at a depth, or custom),
     Mach or speed U, and flow direction; y+ on a boundary (measured from the first
     cell layer of volume meshes), *Colour by y+*, and the first cell height for a
-    target y+; flow vectors. *Formulas* and *Values* next to each group.
+    target y+; flow vectors. *Formulas* and *Values* next to each group. *Temperature*:
+    the standard one for air (greyed out, from the altitude), typed for water (empty =
+    15 °C); the **?** next to *Target y+* helps pick it (resolve the wall or wall
+    functions) and can set it for you.
+  - **Results** (Tecplot `.dat` files): *Field*, *Colour the boundaries*, the colour
+    scale, *Min* / *Max* (empty = auto), max · mean · min on the visible boundaries,
+    and *Values* with every field.
   - **CFD mode** (CAD files): switch it on, fill in the **Flow** (same inputs as
     the CFD section) and the **Inflation layers**:
     - *Walls*: the whole model, one part, or *Pick faces…* — ⇧-click faces of one
       part in 3D, then *Apply*. The walls are tinted in 3D.
-    - *Length L* (auto: the longest distance along the flow), *Target y+*,
-      *Compressibility correction*.
+    - *Length L* (auto: the longest distance along the flow), *Target y+* (with its
+      **?**), *Compressibility correction*.
     - *First layer* (auto from y+, or typed), *Layers*, *Growth rate* (1 to 2),
       *Next cell* (a multiple of the largest layer).
+    - *Flow*: external (Reynolds number on the length L) or internal — a pipe or duct
+      (on the hydraulic diameter D, auto from the walls' widths across the flow).
+    - The page's y+ tile shows the max along the flow, with min and mean beside it.
 
     The bar under the 3D view switches between the model and the *Inflation
     layers* page. In its *Cross section* tab, *Flip side* puts the layers on the
     other side of the walls (for internal flow), *Fit view* fits the cut, and the
-    legend shows or hides the flow direction arrow.
+    legend shows or hides the flow direction arrow. The *y+ along the flow* tab shows
+    the y+ against the distance from the leading edge.
   - **Parts**: list, filter, Show All / Hide All.
 - **Show** (toolbar, also View ▸ Show): mesh edges, feature edges, faces (off =
   edges only) · axes, grid, bounding box, origin marker — each on / off.
@@ -236,14 +277,18 @@ Keep the MeshViewer folder where it is: this app runs the code from it.
   not on STEP / IGES / BREP. Edits and renamed parts stay in memory until you
   export them.
 - **File ▸ Open Recent**; every file reopens the way you left it (camera, display
-  toggles, unit, colours, names, hidden parts, section).
+  toggles, unit, colours, names, hidden parts, section, CFD inputs, the Inflation
+  page with its tab and zoom).
 - **Export…** (⇧⌘E): STL (binary or one named solid per part), OBJ and PLY (with
   the part colours), VTU
   (ParaView) and, for meshes, UGRID + .mapbc with the volume cells. Includes your
   edits; hidden parts can be left out. STEP / IGES / BREP export their current
-  triangle mesh (STL, OBJ, PLY).
-- **About Mesh Viewer** is in the app menu, with *Check for Updates…* (opens the
-  latest GitHub release).
+  triangle mesh (STL, OBJ, PLY). For CAD files, the **CFD settings** tab exports the
+  CFD mode's inflation layers for OpenFOAM, Fluent Meshing, STAR-CCM+ or Pointwise,
+  or everything as a CSV.
+- **About Mesh Viewer** is in the app menu, with *Check for Updates…*: it asks
+  GitHub for the latest release and says whether a newer version is out (with a
+  Download button), you're up to date, or you have a pre-release.
 
 ## Project layout
 
@@ -255,10 +300,12 @@ meshviewer/
   model.py              what readers return: {part name: surface} + kind / format / units
   transform.py          Edit: rotations, mirrors, moves
   export.py             Export: STL, OBJ, PLY, VTU, UGRID writers
+  cfd_export.py         Export ▸ CFD settings: OpenFOAM, Fluent, STAR-CCM+, Pointwise, CSV
   quality.py            cell quality measures (skewness, aspect ratio, Jacobian, volume)
   cfd.py                y+ estimate, standard atmosphere, water, first cell layer, inflation layers
   polys.py              small surface helpers (faces by size, edge lengths)
   mesh/  cgns.py ugrid.py volume.py mesh readers, volume cells
+         tecplot.py                 Tecplot ASCII results (FUN3D boundaries)
   cad/   occt.py                    OpenCASCADE core: read, name, tessellate, exact area/volume
          step.py iges.py brep.py    exact-geometry CAD readers
          stl.py tessellated.py      triangulated CAD formats
@@ -273,9 +320,11 @@ meshviewer/
     edit_panel.py, export_dialog.py   Edit section, Export sheet
     quality_panel.py, quality_view.py Cell quality section and its 3D overlays
     info_panel.py       Info section
-    cfd_panel.py, cfd_view.py         CFD section and its flow arrows
+    cfd_panel.py, cfd_view.py         CFD section and its flow arrows; results colours
+    results_panel.py    Results section: field, colour scale, range
     inflation_panel.py, inflation_view.py  CFD mode (CAD): inflation layer inputs and page
     section_view.py     CFD mode: the section plane's cut with the layers estimated
+    wall_help.py        the "?" next to Target y+: wall functions and the law of the wall
     memory.py           files reopen the way you left them
     jobs.py             background work
     background.py       picture behind the 3D view

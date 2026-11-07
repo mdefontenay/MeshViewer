@@ -18,6 +18,14 @@ v2.13.1: a flow-direction arrow (toggled from the legend in the card's header).
 v2.13.2: only the walls and the layers (the boundary-layer and next-cell lines and
 the smoothing are gone); the layers' side no longer trusts the surface normals
 alone: a layer never starts inside the solid (tested on the cut); "Flip side" swaps.
+v2.14: layers stop where they would cross — two walls facing each other (they meet
+half-way), a concave curve (they meet at its centre), or another part (they stop at
+it). Each point of the cut gets the largest thickness it can take before its layer
+gets closer to another wall than to its own (collision_caps); the rings are trimmed
+where they cross. The zoom is remembered per file (view_state / restore_view).
+v2.14.2: for STEP / IGES / BREP the walls are cut from the CAD curves themselves (smooth
+at any zoom) once the plane stops moving — the triangles while it moves; the flow arrow
+is three thin inlet arrows on the upstream edge of the view.
 """
 from __future__ import annotations
 
@@ -98,6 +106,138 @@ def offsets(pts, segs, perp):
     for col in (0, 1):
         np.minimum.at(cosa, segs[:, col], np.einsum("ij,ij->i", pn[segs[:, col]], perp))
     return pn / np.maximum(cosa, 0.35)[:, None]
+
+
+# ---- NEW (v2.14): layers that cross --------------------------------------------------------
+def _samples(a, b, h, most=6000):
+    """Points along the segments a→b, about h apart (at most `most` of them)."""
+    ln = np.linalg.norm(b - a, axis=1)
+    k = np.maximum(1, np.ceil(ln / max(h, 1e-300))).astype(int)
+    if k.sum() > most:
+        k = np.maximum(1, (k * most / k.sum()).astype(int))
+    seg = np.repeat(np.arange(len(a)), k)
+    start = np.repeat(np.cumsum(k) - k, k)
+    t = (np.arange(k.sum()) - start) / np.repeat(k, k)
+    return a[seg] + (b[seg] - a[seg]) * t[:, None]
+
+
+def densify(pts, segs, perp, h, most=4000):
+    """Split segments longer than h (each new piece keeps its segment's side), so the
+    layer thickness can change along a long flat face (e.g. where it faces a wall)."""
+    a, b = pts[segs[:, 0]], pts[segs[:, 1]]
+    ln = np.linalg.norm(b - a, axis=1)
+    k = np.maximum(1, np.ceil(ln / max(h, 1e-300))).astype(int)
+    extra = int((k - 1).sum())
+    if extra == 0:
+        return pts, segs, perp
+    if extra > most:
+        k = np.maximum(1, np.ceil((k - 1) * most / extra).astype(int) + 1)
+        k = np.where(ln > h, k, 1)
+    new_pts, new_segs, new_perp = [pts], [], []
+    nxt = len(pts)
+    for s_, kk in enumerate(k):
+        i, j = segs[s_]
+        if kk == 1:
+            new_segs.append([(i, j)])
+            new_perp.append(perp[s_:s_ + 1])
+            continue
+        t = np.arange(1, kk)[:, None] / kk
+        mid = a[s_] + (b[s_] - a[s_]) * t
+        ids = np.arange(nxt, nxt + kk - 1)
+        nxt += kk - 1
+        chain = np.concatenate([[i], ids, [j]])
+        new_pts.append(mid)
+        new_segs.append(np.column_stack([chain[:-1], chain[1:]]))
+        new_perp.append(np.repeat(perp[s_:s_ + 1], kk, axis=0))
+    return (np.vstack(new_pts), np.vstack(new_segs).astype(int), np.vstack(new_perp))
+
+
+def collision_caps(pts, segs, off, obstacles=(), eps=1e-3):
+    """Per point of the cut: the largest thickness d its layer can take.
+
+    The layer at point P is P + off·d. It has crossed another layer when it gets
+    closer than d to another part of the walls: |off·d − v| < d for a point W of
+    the walls (v = W − P) — the smallest root of that quadratic. Walls that face
+    each other meet half-way; a concave curve stops at its centre. Obstacles
+    (other parts, [N×2 polylines]) stop the layer where its ray hits them."""
+    n = len(pts)
+    cap = np.full(n, np.inf)
+    if n == 0 or not len(segs):
+        return cap
+    a, b = pts[segs[:, 0]], pts[segs[:, 1]]
+    span = float(np.ptp(pts, axis=0).max()) or 1.0
+    w = np.vstack([pts, _samples(a, b, span / 400)])
+    A = np.einsum("ij,ij->i", off, off) - (1 - eps) ** 2
+    step = max(1, int(3e6 // max(len(w), 1)))
+    for k in range(0, n, step):
+        o, P, Ak = off[k:k + step], pts[k:k + step], A[k:k + step, None]
+        v = w[None, :, :] - P[:, None, :]
+        av = np.einsum("ij,imj->im", o, v)
+        vv = np.einsum("imj,imj->im", v, v)
+        disc = av * av - Ak * vv
+        ok = (av > 0) & (disc > 0) & (vv > (span * 1e-9) ** 2)
+        d1 = np.where(ok, vv / np.where(ok, av + np.sqrt(np.maximum(disc, 0)), 1.0), np.inf)
+        cap[k:k + step] = d1.min(axis=1)
+    if len(obstacles):                                # rays against other parts
+        c = np.vstack([q[:-1] for q in obstacles])
+        e = np.vstack([q[1:] for q in obstacles])
+        de = e - c
+        step = max(1, int(3e6 // max(len(c), 1)))
+        for k in range(0, n, step):
+            o, P = off[k:k + step, None, :], pts[k:k + step, None, :]
+            den = o[..., 0] * de[None, :, 1] - o[..., 1] * de[None, :, 0]
+            w_ = c[None] - P
+            safe = np.where(np.abs(den) > 1e-300, den, 1.0)
+            d = (w_[..., 0] * de[None, :, 1] - w_[..., 1] * de[None, :, 0]) / safe
+            t = (w_[..., 0] * o[..., 1] - w_[..., 1] * o[..., 0]) / safe
+            hit = (np.abs(den) > 1e-300) & (t >= 0) & (t <= 1) & (d > span * 1e-7)
+            cap[k:k + step] = np.minimum(cap[k:k + step],
+                                         np.where(hit, d, np.inf).min(axis=1))
+    return cap
+
+
+def _dist_to_segments(q, a, b):
+    """Shortest distance from each point q (K×2) to the segments a→b."""
+    ab = b - a
+    l2 = np.maximum(np.einsum("ij,ij->i", ab, ab), 1e-300)
+    out = np.full(len(q), np.inf)
+    step = max(1, int(2e6 // max(len(a), 1)))
+    for k in range(0, len(q), step):
+        d = q[k:k + step, None, :] - a[None]
+        t = np.clip(np.einsum("kmj,mj->km", d, ab) / l2, 0, 1)
+        r = d - t[..., None] * ab[None]
+        out[k:k + step] = np.sqrt(np.einsum("kmj,kmj->km", r, r).min(axis=1))
+    return out
+
+
+def trimmed_ring(pts, segs, off, cap, depth, obstacles=(), eps=1e-3):
+    """The cut pushed out by `depth`, without the parts that crossed: (x0, y0, x1, y1)
+    arrays of segments, in plane coordinates. A segment with one end past its cap is
+    cut where it starts to cross (bisection)."""
+    q = pts + off * depth
+    ok = cap >= depth
+    i, j = segs[:, 0], segs[:, 1]
+    both = ok[i] & ok[j]
+    one = ok[i] ^ ok[j]
+    p0, p1 = [q[i[both]]], [q[j[both]]]
+    if one.any():
+        good = np.where(ok[i[one]][:, None], q[i[one]], q[j[one]])
+        bad = np.where(ok[i[one]][:, None], q[j[one]], q[i[one]])
+        a, b = pts[segs[:, 0]], pts[segs[:, 1]]
+        loops = [o for o in obstacles if len(o) > 3 and np.allclose(o[0], o[-1])]
+        lo, hi = np.zeros(len(good)), np.ones(len(good))
+        for _ in range(12):                           # where the segment starts to cross
+            mid = (lo + hi) / 2
+            m = good + (bad - good) * mid[:, None]
+            fine = _dist_to_segments(m, a, b) >= depth * (1 - eps)
+            if loops:
+                fine &= ~_inside(m, loops)
+            lo = np.where(fine, mid, lo)
+            hi = np.where(fine, hi, mid)
+        p0.append(good)
+        p1.append(good + (bad - good) * lo[:, None])
+    p0, p1 = np.vstack(p0), np.vstack(p1)
+    return p0, p1
 
 
 class SectionLegend(QWidget):
@@ -191,6 +331,9 @@ class SectionView(QWidget):
         self._msg = ""
         self._view = None                # (centre x, centre y, pixels per model unit)
         self._drag = None
+        self._pending = None             # v2.14: a remembered view, for its plane
+        self._exact_due = False          # v2.14.2: exact CAD cut once the plane stops
+        self._rings = None               # v2.14: trimmed layer rings (cache)
         self.setMinimumHeight(320)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.setMouseTracking(True)
@@ -226,6 +369,19 @@ class SectionView(QWidget):
         self._view = None
         self.update()
 
+    # ---- v2.14: the zoom, remembered per file ------------------------------------------------
+    def view_state(self):
+        sc = self.panel.scene if self.panel is not None else None
+        if self._view is None or sc is None or not sc.section.enabled:
+            return None
+        return {"view": list(map(float, self._view)),
+                "origin": list(map(float, sc.section.origin)),
+                "normal": list(map(float, sc.section.normal))}
+
+    def restore_view(self, st):
+        """Used when the cut first shows, if the plane is still where it was."""
+        self._pending = st if st and st.get("view") else None
+
     # ---- follow the section plane --------------------------------------------------------
     def _signature(self):
         p = self.panel
@@ -246,15 +402,49 @@ class SectionView(QWidget):
             return
         key = self._signature()
         if key == self._key:
+            if self._exact_due:          # v2.14.2: the plane stopped: the exact CAD cut
+                self._exact_due = False
+                self._compute(exact=True)
+                self.update()
             return
         new_plane = self._key is None or key is None or key[:4] != self._key[:4]
         self._key = key
-        self._compute()
+        self._compute()                  # the triangles first: quick while the plane moves
+        self._exact_due = self._can_exact()
         if new_plane:
             self._view = None            # refit when the plane moves to a new place
+            pend, self._pending = self._pending, None
+            if pend and key is not None and key[1] and \
+                    np.allclose(pend["origin"], key[2], atol=1e-6) and \
+                    np.allclose(pend["normal"], key[3], atol=1e-6):
+                self._view = tuple(pend["view"])
         self.update()
 
-    def _compute(self):
+    # ---- NEW (v2.14.2): the exact cut of CAD faces -----------------------------------------
+    def _can_exact(self):
+        p = self.panel
+        sc = p.scene if p is not None else None
+        return bool(sc is not None and sc.section.enabled and
+                    hasattr(sc.model.source, "section") and not sc.model.edited)
+
+    def _exact_poly(self, name, face_ids, o, n):
+        """The part's cut from its CAD curves (smooth), as lines in 3D; None if it fails."""
+        sc = self.panel.scene
+        src = sc.model.source
+        orig = {v: k for k, v in sc._alias.items()}.get(name, name)
+        edges = src.section(orig, face_ids, o, n, getattr(src, "diag", 1.0) * 2e-6)
+        if not edges:
+            return None
+        pts, lines, k = [], [], 0
+        for e in edges:
+            pts.append(e)
+            lines.append(np.column_stack([np.full(len(e) - 1, 2), np.arange(k, k + len(e) - 1),
+                                          np.arange(k + 1, k + len(e))]).ravel())
+            k += len(e)
+        poly = pv.PolyData(np.vstack(pts), lines=np.concatenate(lines))
+        return poly.clean(tolerance=getattr(src, "diag", 1.0) * 1e-7, absolute=True)
+
+    def _compute(self, exact=False):
         self._cut = None
         p = self.panel
         sc = p.scene if p is not None else None
@@ -268,14 +458,29 @@ class SectionView(QWidget):
             return
         o, n = np.asarray(sec.origin, float), np.asarray(sec.normal, float)
         u, v = _basis(n)
-        context = []
+        context, obstacles = [], []
+        wall_part = p.walls["part"] if p.walls else None          # None: the whole model
+        exact_polys = {}                                         # v2.14.2: CAD curves
+        if exact:
+            for name in ([wall_part] if wall_part else
+                         [nm for nm in sc.names if sc.visible.get(nm)]):
+                if sc.visible.get(name):
+                    try:
+                        exact_polys[name] = self._exact_poly(name, None, o, n)
+                    except Exception:                            # noqa: BLE001
+                        exact_polys[name] = None
         for name in sc.names:
             if not sc.visible.get(name):
                 continue
             try:
-                context += _loops(sc.model.parts[name].slice(normal=n, origin=o), o, u, v)
+                ex = exact_polys.get(name)
+                loops = _loops(ex if ex is not None else
+                               sc.model.parts[name].slice(normal=n, origin=o), o, u, v)
             except Exception:                                    # noqa: BLE001
-                pass
+                continue
+            context += loops
+            if wall_part is not None and name != wall_part:      # v2.14: layers stop there
+                obstacles += [q for q, _ in loops]
         wall = p._wall_mesh()
         if wall is None:                 # whole model
             shown = [sc.model.parts[nm] for nm in sc.names if sc.visible.get(nm)]
@@ -307,6 +512,26 @@ class SectionView(QWidget):
         perp = np.column_stack([-t[:, 1], t[:, 0]]) / ln[:, None]
         n2 = np.column_stack([normals @ u, normals @ v])
         perp[np.einsum("ij,ij->i", perp, n2) < 0] *= -1
+        if exact:                        # v2.14.2: the walls from the CAD curves (smooth)
+            ex = self._exact_walls(exact_polys, wall_part, o, n)
+            if ex is not None and ex.n_lines:
+                e_pts = (np.asarray(ex.points) - o) @ np.column_stack([u, v])
+                e_lines = np.asarray(ex.lines).reshape(-1, 3)[:, 1:]
+                ea, eb = e_pts[e_lines[:, 0]], e_pts[e_lines[:, 1]]
+                et = eb - ea
+                eln = np.linalg.norm(et, axis=1)
+                ok = eln > 0
+                if ok.any():
+                    e_lines, ea, eb, et, eln = e_lines[ok], ea[ok], eb[ok], et[ok], eln[ok]
+                    e_perp = np.column_stack([-et[:, 1], et[:, 0]]) / eln[:, None]
+                    # side: the one of the nearest triangle cut segment
+                    tm, em = (a + b) / 2, (ea + eb) / 2
+                    near = np.empty(len(em), int)
+                    for k in range(0, len(em), 1000):
+                        d2 = ((em[k:k + 1000, None, :] - tm[None]) ** 2).sum(-1)
+                        near[k:k + 1000] = d2.argmin(axis=1)
+                    e_perp[np.einsum("ij,ij->i", e_perp, perp[near]) < 0] *= -1
+                    pts, lines, a, b, perp = e_pts, e_lines, ea, eb, e_perp
         # v2.13.2: a layer must not start inside a solid — check on the cut (normals of
         # imported CAD can point inward); open surfaces keep their normal's side
         closed = [q for q, cl in context if cl and len(q) > 3]
@@ -318,10 +543,32 @@ class SectionView(QWidget):
             perp[bad] *= -1
         if self.flip:
             perp = -perp
+        # v2.14: points along long faces, so the layers can stop part-way along them
+        pts, lines, perp = densify(pts, lines, perp, (np.ptp(pts, axis=0).max() or 1.0) / 150)
         off = offsets(pts, lines, perp)
+        try:                                                     # v2.14: layers that cross
+            cap = collision_caps(pts, lines, off, obstacles)
+        except (MemoryError, ValueError):
+            cap = np.full(len(pts), np.inf)
         self._cut = {"context": context, "u": u, "v": v, "n": n, "pts": pts, "segs": lines,
-                     "off": off}
+                     "off": off, "cap": cap, "obstacles": obstacles}
+        self._rings = None
         self._msg = ""
+
+    def _exact_walls(self, polys, wall_part, o, n):
+        """The walls' exact cut: the wall part (or its picked faces), or every part."""
+        p = self.panel
+        if wall_part is not None:
+            if p.walls.get("faces"):
+                try:
+                    return self._exact_poly(wall_part, p.walls["faces"], o, n)
+                except Exception:                                # noqa: BLE001
+                    return None
+            return polys.get(wall_part)
+        got = [q for q in polys.values() if q is not None]
+        if not got or len(got) < len(polys):
+            return None
+        return pv.merge(got) if len(got) > 1 else got[0]
 
     # ---- view transform ------------------------------------------------------------------
     def _to_m(self):
@@ -400,7 +647,7 @@ class SectionView(QWidget):
         if c.get("segs") is not None:
             to_m = self._to_m()
             k = view[2]
-            pts, segs, off = c["pts"], c["segs"], c["off"]
+            pts, segs, off, cap = c["pts"], c["segs"], c["off"], c["cap"]
             layer = series_color(self, "layer")
 
             def ring(d):
@@ -413,8 +660,26 @@ class SectionView(QWidget):
                     pa.lineTo(xs[j], ys[j])
                 return pa
 
-            def band(d0, d1):
-                q0, q1 = pts + off * d0, pts + off * d1
+            def trimmed(n_layer, d):
+                """v2.14: ring n, without the parts that crossed (cached)."""
+                key = (id(r), id(c))
+                if self._rings is None or self._rings[0] != key:
+                    self._rings = (key, {})
+                cache = self._rings[1]
+                if n_layer not in cache:
+                    cache[n_layer] = trimmed_ring(pts, segs, off, cap, d, c["obstacles"])
+                q0, q1 = cache[n_layer]
+                x0, y0 = self._px(q0, view)
+                x1, y1 = self._px(q1, view)
+                pa = QPainterPath()
+                for k_ in range(len(x0)):
+                    pa.moveTo(x0[k_], y0[k_])
+                    pa.lineTo(x1[k_], y1[k_])
+                return pa
+
+            def band(d0, d1):                 # v2.14: no thicker than each point's cap
+                q0 = pts + off * np.minimum(d0, cap)[:, None]
+                q1 = pts + off * np.minimum(d1, cap)[:, None]
                 x0, y0 = self._px(q0, view)
                 x1, y1 = self._px(q1, view)
                 pa = QPainterPath()
@@ -444,7 +709,7 @@ class SectionView(QWidget):
                 line.setAlphaF(0.85)
                 p.setPen(QPen(line, 1))
                 for i in range(max(solid, 1), len(tops)):
-                    p.drawPath(ring(tops[i]))
+                    p.drawPath(trimmed(i, tops[i]))
             # the walls themselves
             p.setPen(QPen(text, 1.6))
             p.drawPath(ring(0.0))
@@ -486,46 +751,66 @@ class SectionView(QWidget):
                    "Scroll to zoom · drag to pan · double-click to fit")
 
     def _draw_flow(self, p, c, text, muted, back):
-        """v2.13.1: the flow direction (sidebar ▸ Flow ▸ Direction) seen on the plane,
-        in the top-right corner; a dot / cross when it goes through the plane."""
+        """v2.13.1: the flow direction (sidebar ▸ Flow ▸ Direction) seen on the plane.
+        v2.14.2: three thin inlet arrows on the upstream edge of the view, pointing in
+        (like streamlines coming in); a small dot / cross symbol when the flow goes
+        through the plane."""
         d = self.panel._dir() if self.panel is not None else np.zeros(3)
         nd = np.linalg.norm(d)
-        cx, cy, rad = self.width() - 62.0, 62.0, 34.0
-        p.setPen(Qt.NoPen)
-        p.setBrush(back)
-        p.drawRoundedRect(QRectF(cx - rad - 12, cy - rad - 10, 2 * rad + 24, 2 * rad + 34), 8, 8)
-        p.setPen(muted)
-        p.drawText(QRectF(cx - 60, cy + rad + 4, 120, 14), Qt.AlignCenter, "Flow")
         if nd == 0:
-            p.drawText(QRectF(cx - 60, cy - 7, 120, 14), Qt.AlignCenter, "no direction")
             return
         d = d / nd
         a = np.array([d @ c["u"], d @ c["v"]])
         out = float(d @ c["n"])                       # towards the viewer
-        p.setPen(QPen(text, 2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
-        p.setBrush(Qt.NoBrush)
+        ink = QColor(text)
+        ink.setAlphaF(0.55)
+        w, h = float(self.width()), float(self.height())
         if np.linalg.norm(a) < 0.25:                  # mostly through the plane
-            p.drawEllipse(QPointF(cx, cy), 13, 13)
+            cx, cy = w - 26.0, 44.0
+            p.setPen(QPen(ink, 1.5))
+            p.setBrush(Qt.NoBrush)
+            p.drawEllipse(QPointF(cx, cy), 10, 10)
             if out > 0:                               # coming out: a dot
-                p.setBrush(text)
-                p.drawEllipse(QPointF(cx, cy), 3.5, 3.5)
+                p.setPen(Qt.NoPen)
+                p.setBrush(ink)
+                p.drawEllipse(QPointF(cx, cy), 3, 3)
             else:                                     # going in: a cross
-                p.drawLine(QPointF(cx - 9, cy - 9), QPointF(cx + 9, cy + 9))
-                p.drawLine(QPointF(cx - 9, cy + 9), QPointF(cx + 9, cy - 9))
+                p.drawLine(QPointF(cx - 6, cy - 6), QPointF(cx + 6, cy + 6))
+                p.drawLine(QPointF(cx - 6, cy + 6), QPointF(cx + 6, cy - 6))
+            p.setPen(muted)
+            p.drawText(QRectF(cx - 220, cy - 7, 204, 14), Qt.AlignRight | Qt.AlignVCenter,
+                       "Flow towards you" if out > 0 else "Flow away from you")
             return
         a = a / np.linalg.norm(a)
         dx, dy = a[0], -a[1]                          # screen y goes down
-        tail = QPointF(cx - dx * rad, cy - dy * rad)
-        tip = QPointF(cx + dx * rad, cy + dy * rad)
-        p.drawLine(tail, tip)
-        for ang in (0.5, -0.5):                       # arrow head
-            ca, sa = np.cos(ang), np.sin(ang)
-            hx, hy = -(dx * ca - dy * sa), -(dx * sa + dy * ca)
-            p.drawLine(tip, QPointF(tip.x() + hx * 11, tip.y() + hy * 11))
-        if abs(out) > 0.2:
-            p.setPen(muted)
-            p.drawText(QRectF(cx - 60, cy + rad - 8, 120, 12), Qt.AlignCenter,
-                       f"{abs(out) * 100:.0f} % through the plane")
+        px, py = -dy, dx                              # across the flow
+        cx, cy = w / 2, h / 2 + 10
+        # from the middle to the upstream edge of the view (clear of the header / footer)
+        reach = min((cx - 18) / abs(dx) if abs(dx) > 1e-6 else np.inf,
+                    (cy - 40) / abs(dy) if abs(dy) > 1e-6 else np.inf)
+        bx, by = cx - dx * reach, cy - dy * reach
+        length, gap = 44.0, 30.0
+        for k in (-1, 0, 1):
+            tx, ty = bx + px * gap * k, by + py * gap * k
+            tip = QPointF(tx + dx * length, ty + dy * length)
+            p.setPen(QPen(ink, 1.5, Qt.SolidLine, Qt.RoundCap))
+            p.drawLine(QPointF(tx, ty), tip)
+            head = QPainterPath(tip)                  # small filled head
+            for s_ in (1, -1):
+                head.lineTo(tip.x() - dx * 8 + px * 4 * s_, tip.y() - dy * 8 + py * 4 * s_)
+            head.closeSubpath()
+            p.fillPath(head, ink)
+        sides = [(bx + px * gap * k + dx * length / 2, by + py * gap * k + dy * length / 2)
+                 for k in (1.9, -1.9)]               # the label beside the arrows, in view
+        lx, ly = next(((x, y) for x, y in sides if 30 <= y <= h - 44 and 10 <= x <= w - 10),
+                      sides[0])
+        ly = min(max(ly, 30.0), h - 44)
+        p.setPen(muted)
+        label = "Flow" + (f" · {abs(out) * 100:.0f} % through the plane" if abs(out) > 0.2
+                          else "")
+        tw = p.fontMetrics().horizontalAdvance(label) + 8
+        rx = min(max(lx - tw / 2, 4.0), w - tw - 4)          # kept in the view
+        p.drawText(QRectF(rx, ly - 7, tw, 14), Qt.AlignCenter, label)
 
     # ---- zoom / pan ----------------------------------------------------------------------
     def wheelEvent(self, e):

@@ -13,6 +13,8 @@ from PySide6.QtWidgets import (
 )
 from pyvistaqt import QtInteractor
 
+from ..cfd_export import FORMATS as CFD_FORMATS, SUFFIX as CFD_SUFFIX
+from ..cfd_export import export as write_cfd
 from ..export import FORMATS as EXPORT_FORMATS
 from ..export import available as available_formats
 from ..export import export as write_export
@@ -315,8 +317,13 @@ class ViewerWindow(QMainWindow):
         self._section_switched(self.scene.section.enabled)
         self._set_loaded(True)
         ip = self.sidebar.inflation_panel                  # v2.11: CFD mode as left
+        page = getattr(self.scene, "inflation_page", None) or {}
+        self.inflation_view.set_state(page)                # v2.14: tab, flip side, zoom
         self.inflation_view.set_result(ip.result)
         self._cfd_mode(model.is_cad and ip.enabled, open_page=False)
+        if model.is_cad and ip.enabled and page.get("page") == "cfd":
+            self.a_page_cfd.setChecked(True)
+            self._show_page("cfd")
         memory.restore_camera(self.scene, saved)
         self.ctl.add_recent(self.path)                   # v2.9: File ▸ Open Recent
         self.plotter.render()
@@ -495,6 +502,7 @@ class ViewerWindow(QMainWindow):
         self.sidebar.info_panel.model_changed()        # v2.9: new bounds
         self.sidebar.cfd_panel.model_changed()         # v2.10: flow vectors, length
         self.sidebar.inflation_panel.model_changed()   # v2.12: walls, arrows, auto length
+        self.sidebar.results_panel.model_changed()     # v2.15: results follow the edits
 
     def _unit_chosen(self, a):
         if self.scene:
@@ -509,15 +517,20 @@ class ViewerWindow(QMainWindow):
             return
         sc = self.scene
         keys = available_formats(sc.model.kind, exact_cad=not sc.model.editable)
+        ip = self.sidebar.inflation_panel
+        cfd = ({"on": ip.enabled and bool((ip.result or {}).get("ok"))}   # v2.14: CAD files
+               if sc.model.is_cad else None)
         self._export_dialog = ExportDialog(
             self, keys, has_hidden=not all(sc.visible.values()),
             has_volume=sc.section.has_volume, edited=sc.model.edited,
-            renamed=sc.renamed)
+            renamed=sc.renamed, cfd=cfd)
         self._export_dialog.accepted.connect(self._export_to_file)
         self._export_dialog.open()
 
     def _export_to_file(self):
         sc, d = self.scene, self._export_dialog
+        if d.what == "cfd":                              # v2.14: CFD settings
+            return self._export_cfd(d.cfd_fmt)
         fmt = d.fmt
         label, ext = EXPORT_FORMATS[fmt]
         base = self.path.name.split(".")[0] + ("_edited" if sc.has_changes else "")
@@ -540,6 +553,25 @@ class ViewerWindow(QMainWindow):
             return
         QApplication.restoreOverrideCursor()
         if sys.platform == "darwin":                    # show the new file in Finder
+            subprocess.run(["open", "-R", fn], check=False)
+
+    def _export_cfd(self, kind):
+        """NEW (v2.14): the inflation layers for a mesher, or a CSV of everything."""
+        label, ext = CFD_FORMATS[kind]
+        base = self.path.name.split(".")[0] + CFD_SUFFIX[kind]
+        fn, _ = QFileDialog.getSaveFileName(self, "Export CFD settings",
+                                            str(self.path.with_name(base + ext)),
+                                            f"{label.split(' — ')[0]} (*{ext})")
+        if not fn:
+            return
+        if not fn.lower().endswith(ext):
+            fn += ext
+        try:
+            write_cfd(kind, fn, self.sidebar.inflation_panel.export_info(self.path.name))
+        except Exception as exc:                        # shown, not a crash
+            QMessageBox.warning(self, "Export", f"Could not export:\n{exc}")
+            return
+        if sys.platform == "darwin":
             subprocess.run(["open", "-R", fn], check=False)
 
     def _toggle_measure(self, on):
@@ -588,6 +620,13 @@ class ViewerWindow(QMainWindow):
     def remember_view(self):
         """v2.9: camera, colours, hidden parts, section… for the next time."""
         if self.scene is not None and self.path is not None:
+            try:                                        # v2.14: the Inflation page too
+                self.scene.inflation_page = {
+                    **self.inflation_view.get_state(),
+                    "page": "cfd" if self.stack.currentWidget() is self.inflation_view
+                    else "model"}
+            except Exception:                           # noqa: BLE001
+                pass
             try:
                 memory.save(self.path, memory.capture(self.scene))
             except Exception as exc:                    # never block closing

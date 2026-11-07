@@ -535,6 +535,35 @@ class UnitField(NumberField):
             self.unitChanged.emit(self.menu.currentData())
 
 
+class TemperatureField(UnitField):
+    """NEW (v2.14): a UnitField for temperatures — K, °C, °F have an offset, not
+    only a factor. value() / setValue() are in kelvin."""
+    UNITS = {"K": (1.0, 0.0), "°C": (1.0, 273.15), "°F": (5 / 9, 459.67 * 5 / 9)}
+
+    def __init__(self, value=None, parent=None):
+        self._offset = 0.0
+        super().__init__({k: f for k, (f, _) in self.UNITS.items()}, value, parent)
+        self.menu.setToolTip("Unit")
+
+    def value(self):
+        v = self._value
+        return None if v is None else v * self.factor + self._offset
+
+    def setValue(self, v):
+        NumberField.setValue(self, None if v is None else (v - self._offset) / self.factor)
+
+    def _unit_picked(self, i, emit=True):
+        si = self.value()
+        self.factor, self._offset = self.UNITS[self.menu.currentData()]
+        self.setValue(si)
+        if emit:
+            self.unitChanged.emit(self.menu.currentData())
+
+    def shown(self, kelvin):
+        """A temperature in kelvin, in the unit picked (for placeholders)."""
+        return (kelvin - self._offset) / self.factor
+
+
 class ValuesButton(QPushButton):
     """NEW (v2.11.1): small "Values" link; click -> a pop-up list of computed numbers.
 

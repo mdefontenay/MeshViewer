@@ -18,6 +18,8 @@ FORMATS = [
     ((".cgns",),                                     "mesh", "CGNS",  "mesh.cgns", "read_cgns"),
     ((".lb8.ugrid", ".b8.ugrid", ".lb4.ugrid",
       ".b4.ugrid", ".ugrid"),                        "mesh", "UGRID", "mesh.ugrid", "read_ugrid"),
+    # NEW (v2.15): results on the boundaries (FUN3D _tec_boundary.dat, Tecplot ASCII)
+    ((".dat",),                                      "mesh", "Tecplot", "mesh.tecplot", "read_tecplot"),
     # ---- CAD: exact geometry (OpenCASCADE, adjustable mesh quality) ------
     ((".step", ".stp"),                              "cad",  "STEP",  "cad.step",  "read_step"),
     ((".iges", ".igs"),                              "cad",  "IGES",  "cad.iges",  "read_iges"),
