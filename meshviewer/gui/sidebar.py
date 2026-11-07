@@ -277,6 +277,7 @@ class Sidebar(QWidget):
         self.list.populate(scene)
         self.list.set_selected(scene.selected_parts)
         self.cfd_panel.refresh_names()                 # v2.10: boundary list (renames)
+        self.inflation_panel.refresh_names()           # v2.12: walls list
         self._apply_filter(self.filter.text())
 
         n_faces = sum(p.n_cells for p in m.parts.values())
@@ -364,6 +365,8 @@ class Sidebar(QWidget):
     def _set_all(self, on):
         if self.scene:
             self._visibility_changed(list(self.scene.names), on)
+            if on and self.scene.n_hidden_faces:      # v2.12: hidden surfaces too
+                self.scene.show_faces()
 
     def _isolate(self, names):
         if self.scene:
@@ -383,8 +386,11 @@ class Sidebar(QWidget):
             title = names[0] if len(names) == 1 else f"{len(names)} parts"
             head = menu.addAction(title)
             head.setEnabled(False)
-            what = "" if len(names) == 1 else f" {len(names)} Parts"
+            what = " Part" if len(names) == 1 else f" {len(names)} Parts"      # v2.12
             menu.addAction(f"Hide{what}", lambda: self._visibility_changed(names, False))
+            hit = self.scene.context_hit                 # v2.12: the CAD face under the cursor
+            if hit and hit[1] is not None and hit[0] in names:
+                menu.addAction("Hide Surface", lambda h=hit: self.scene.hide_face(*h))
             menu.addAction(f"Isolate{what}", lambda: self._isolate(names))
             menu.addAction("Zoom To", lambda: self.scene.zoom_to(names))
             if len(names) == 1 and clicked == names:           # v2.8.3
@@ -406,8 +412,12 @@ class Sidebar(QWidget):
                 menu.addMenu(sub)
             menu.addSeparator()
         menu.addAction("Show All", lambda: self._set_all(True))
+        k = self.scene.n_hidden_faces
+        if k:                                            # v2.12
+            menu.addAction(f"Show Hidden Surfaces ({k})", self.scene.show_faces)
         menu.addAction("Fit View", self.scene.fit)
         menu.exec(global_pos)
+        self.scene.context_hit = None
         self.scene.end_stuck_drag()            # no zoom mode left behind
 
     def _section_for_colors(self):
@@ -432,6 +442,7 @@ class Sidebar(QWidget):
         for n in names:
             self.list.set_color(n, self.scene.colors[n])
         self.cfd_panel.refresh_colors()                # v2.11.4: Boundary menu dots
+        self.inflation_panel.refresh_colors()          # v2.12: Walls menu dots
 
     # ---- NEW (v2.8.3): rename a part ---------------------------------------------------
     def rename(self, name):

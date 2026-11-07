@@ -136,3 +136,52 @@ class YplusView:
 
     def actors(self):
         return [self._actor] if self._actor is not None else []
+
+
+# ---- NEW (v2.12): CFD mode (CAD) — the walls that get inflation layers -----------------
+WALL_COLOR = "#00b5ad"
+
+
+class WallView:
+    """The chosen walls tinted in the 3D view (CFD mode)."""
+
+    def __init__(self, scene):
+        self.scene = scene
+        self.p = scene.p
+        self._actors = []
+
+    def show(self, mesh):
+        """mesh: the wall surface (PolyData) or None to hide."""
+        self.hide(render=False)
+        if mesh is None or not mesh.n_cells:
+            self.p.render()
+            return
+        fill = self.p.add_mesh(mesh, color=WALL_COLOR, opacity=0.6, pickable=False,
+                               reset_camera=False, lighting=False)    # same tint any side
+        m = fill.GetMapper()                         # just in front of the part
+        m.SetResolveCoincidentTopologyToPolygonOffset()
+        m.SetRelativeCoincidentTopologyPolygonOffsetParameters(-2, -2)
+        self._actors.append(fill)
+        rim = mesh.extract_feature_edges(boundary_edges=True, feature_edges=False,
+                                         manifold_edges=False, non_manifold_edges=False)
+        if rim.n_cells:
+            self._actors.append(self.p.add_mesh(rim, color=WALL_COLOR, line_width=3,
+                                                lighting=False, pickable=False,
+                                                reset_camera=False))
+        for a in self._actors:
+            self.scene.section.clip(a)
+        self.p.render()
+
+    def hide(self, render=True):
+        for a in self._actors:
+            self.p.remove_actor(a, render=False)
+        self._actors = []
+        if render:
+            self.p.render()
+
+    @property
+    def shown(self):
+        return bool(self._actors)
+
+    def actors(self):
+        return list(self._actors)

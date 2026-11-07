@@ -26,7 +26,7 @@ from ..model import Model
 from .background import ImageBackground, is_dark_image, load_image
 from .. import transform as xf
 from .measure import AXIS_COLORS, Measure
-from .cfd_view import FlowView, YplusView
+from .cfd_view import FlowView, WallView, YplusView
 from .quality_view import GHOST_OPACITY, QualityView
 from .section import Section
 
@@ -123,6 +123,10 @@ class Scene:
         self.selected_parts: list[str] = []          # multi-selection (parts)
         self.selected_faces: dict[str, set] = {}     # CAD faces (measure mode)
         self.on_pick = None          # UI hook: called with the selected part list after a click
+        self.hidden_faces: dict[str, set] = {}       # v2.12: right-click ▸ Hide Surface
+        self._display = {}                           # v2.12: part -> block drawn (normals)
+        self.face_pick = None        # v2.12: CFD mode picks walls: (part, face id, additive)
+        self.context_hit = None      # v2.12: (part, face id) under the last right-click
 
         # Defaults: meshes show element edges, CAD shows sharp (feature) edges.
         self.state = dict(grid=True, parallel=True, mesh_edges=not model.is_cad,
@@ -159,6 +163,7 @@ class Scene:
         self.quality = QualityView(self)          # v2.9: Cell quality overlays
         self.flow = FlowView(self)                # v2.10: CFD ▸ Show flow vectors
         self.yplus_view = YplusView(self)         # v2.11.3: CFD ▸ Colour by y+
+        self.walls = WallView(self)               # v2.12: CFD mode ▸ inflation walls
         self.cfd_settings = None                  # v2.10: CFD section (remembered per file)
         self.inflation_settings = None            # v2.11: CFD mode (CAD), remembered too
         self.measure = Measure(self)
@@ -177,9 +182,11 @@ class Scene:
         # Normals computed here once (split at sharp CAD corners so they stay crisp).
         blocks = pv.MultiBlock()
         for n in self.names:
-            blocks[n] = self.model.parts[n].compute_normals(
+            shown = self._shown_part(n)                # v2.12: without hidden surfaces
+            blocks[n] = shown if not shown.n_cells else shown.compute_normals(
                 cell_normals=False, split_vertices=self.model.is_cad,
                 feature_angle=FEATURE_ANGLE, consistent_normals=False)
+            self._display[n] = blocks[n]
         self._surf, self._surf_map = self.p.add_composite(
             blocks, color="#bbbbbb", smooth_shading=True, show_edges=self.state["mesh_edges"],
             edge_color="#202020", reset_camera=False, pickable=True)
@@ -189,6 +196,56 @@ class Scene:
         self._apply_lines()                       # v2.8.4: edges-only look survives rebuilds
         for n in self.names:
             self._apply_block(n)
+
+    # ---- NEW (v2.12): hide single CAD surfaces (right-click ▸ Hide Surface) ------------
+    def _shown_part(self, name):
+        """The part without its hidden surfaces; cell data "orig_id" = cell number in
+        the full part (for picking)."""
+        poly = self.model.parts[name]
+        ids = self.hidden_faces.get(name)
+        if not ids or "face_id" not in poly.cell_data:
+            return poly
+        drop = np.isin(poly.cell_data["face_id"], list(ids))
+        if drop.all():
+            return pv.PolyData()
+        full = poly.copy(deep=False)
+        full.cell_data["orig_id"] = np.arange(poly.n_cells)
+        return full.remove_cells(np.flatnonzero(drop), inplace=False)
+
+    def face_at(self, name, cell):
+        """CAD face id of a cell of a part (None for files without CAD faces)."""
+        poly = self.model.parts.get(name)
+        if poly is None or cell is None or "face_id" not in poly.cell_data:
+            return None
+        return int(poly.cell_data["face_id"][cell])
+
+    def hide_face(self, name, face_id):
+        self.hidden_faces.setdefault(name, set()).add(int(face_id))
+        self._rebuild_surfaces()
+
+    def show_faces(self, names=None):
+        """Hidden surfaces back (of these parts, or of all)."""
+        for n in (list(self.hidden_faces) if names is None else names):
+            self.hidden_faces.pop(n, None)
+        self._rebuild_surfaces()
+
+    @property
+    def n_hidden_faces(self):
+        return sum(len(v) for v in self.hidden_faces.values())
+
+    def _rebuild_surfaces(self):
+        cam = self.p.camera_position
+        for a in (self._surf, self._edges):
+            if a is not None:
+                self.p.remove_actor(a, render=False)
+        self._surf = self._surf_map = self._edges = self._edges_map = None
+        self._build_surfaces()
+        self.set_feature_edges(self.state["feature_edges"], render=False)
+        self.section.rebuild()
+        self._refresh_face_overlay()
+        self.set_selection(self.selected_parts, render=False)
+        self.p.camera_position = cam
+        self.p.render()
 
     def _apply_block(self, name):
         attr = self._surf_map.block_attr[self._block(name)]
@@ -324,7 +381,8 @@ class Scene:
         self._rpress = None
         if abs(x1 - x0) > CLICK_TOLERANCE_PX or abs(y1 - y0) > CLICK_TOLERANCE_PX:
             return                          # right-drag zooms; not a click
-        name = self.pick(x1, y1)
+        name, cell, _ = self.pick_full(x1, y1)
+        self.context_hit = (name, self.face_at(name, cell)) if name else None   # v2.12
         if name and name in self.selected_parts and len(self.selected_parts) > 1:
             names = list(self.selected_parts)     # act on the whole selection
         else:
@@ -347,6 +405,9 @@ class Scene:
     def click(self, x, y, additive=False):
         """What a click at display (x, y) does, depending on the measure mode."""
         name, cell, pos = self.pick_full(x, y)
+        if self.face_pick is not None:                # v2.12: CFD mode picks its walls
+            self.face_pick(name, self.face_at(name, cell), additive)
+            return
         m = self.measure
         if m.mode in ("distance", "point"):
             m.add_point(pos, name, cell)
@@ -406,7 +467,11 @@ class Scene:
         if actor is self._surf:
             i = picker.GetFlatBlockIndex() - 1
             if 0 <= i < len(self.names) and self.visible[self.names[i]]:
-                return self.names[i], int(picker.GetCellId()), pos
+                n, cell = self.names[i], int(picker.GetCellId())
+                shown = self._display.get(n)               # v2.12: surfaces hidden
+                if shown is not None and "orig_id" in shown.cell_data and cell >= 0:
+                    cell = int(shown.cell_data["orig_id"][cell])
+                return n, cell, pos
             return None, None, None
         name = self.section.cap_owner(actor, picker.GetCellId())
         return (name, None, pos) if name else (None, None, None)
@@ -615,7 +680,8 @@ class Scene:
                 d.clear()
                 d.update(items)
         for d in (self.model.parts, self.colors, self.visible, self.selected_faces,
-                  self._highlights, self._flipped, self._orig_points):
+                  self._highlights, self._flipped, self._orig_points, self.hidden_faces,
+                  self._display):
             rekey(d)
         self.names[self.names.index(old)] = new       # same block index
         self.selected_parts = [new if n == old else n for n in self.selected_parts]
@@ -773,7 +839,7 @@ class Scene:
     def _build_edges(self):
         blocks = pv.MultiBlock()
         for n in self.names:
-            blocks[n] = self.model.parts[n].extract_feature_edges(
+            blocks[n] = self._shown_part(n).extract_feature_edges(
                 feature_angle=FEATURE_ANGLE, boundary_edges=True, feature_edges=True,
                 manifold_edges=False, non_manifold_edges=False)
         self._edges, self._edges_map = self.p.add_composite(
@@ -1016,4 +1082,5 @@ class Scene:
     def clippable_actors(self):
         """Everything the section plane should cut."""
         return [self._surf, self._edges, *self._face_actors, *self._highlights.values(),
-                *self.quality.actors(), *self.yplus_view.actors()]
+                *self.quality.actors(), *self.yplus_view.actors(),
+                *self.walls.actors()]

@@ -100,6 +100,8 @@ class ViewerWindow(QMainWindow):
         self.sidebar.renamed.connect(self._edited_changed)        # v2.8.3
         self.sidebar.inflation_panel.mode_toggled.connect(self._cfd_mode)       # v2.11
         self.sidebar.inflation_panel.changed.connect(self.inflation_view.set_result)
+        self.sidebar.inflation_panel.wants_model.connect(self._show_model_page)   # v2.12
+        self.inflation_view.section.set_panel(self.sidebar.inflation_panel)       # v2.13
         ep = self.sidebar.edit_panel                                       # Edit section
         ep.edit_requested.connect(self._apply_edit)
         ep.undo_requested.connect(lambda: self._edit_step(lambda s: s.undo_edit()))
@@ -419,6 +421,11 @@ class ViewerWindow(QMainWindow):
             self.a_page_model.setChecked(True)
             self._show_page("model")
 
+    def _show_model_page(self):
+        """v2.12: picking walls happens in the 3D view."""
+        self.a_page_model.setChecked(True)
+        self._show_page("model")
+
     def _show_page(self, page):
         if self.scene is None:
             return
@@ -487,12 +494,14 @@ class ViewerWindow(QMainWindow):
         self.sidebar.edit_panel.refresh()
         self.sidebar.info_panel.model_changed()        # v2.9: new bounds
         self.sidebar.cfd_panel.model_changed()         # v2.10: flow vectors, length
+        self.sidebar.inflation_panel.model_changed()   # v2.12: walls, arrows, auto length
 
     def _unit_chosen(self, a):
         if self.scene:
             self.scene.measure.set_display_unit(a.data())
             self.sidebar.info_panel.refresh()           # v2.9: Info in the new unit
             self.sidebar.cfd_panel.model_changed()      # v2.10: mesh length in metres
+            self.sidebar.inflation_panel.model_changed()   # v2.12: auto length in metres
 
     # ---- NEW (v2.8): Export ----------------------------------------------------------
     def export_model(self):

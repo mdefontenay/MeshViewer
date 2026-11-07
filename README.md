@@ -3,7 +3,7 @@
 A fast, native-feeling macOS viewer for **CAD files** (STEP, IGES, BREP, STL, …)
 and **CFD meshes** (CGNS, UGRID). Double-click a file and inspect it: show or
 hide parts, cut it with a section plane, measure distances, areas and volumes,
-and export clean screenshots.
+estimate y+ and inflation layers for CFD, and export clean screenshots.
 
 ![Mesh Viewer: a STEP assembly with its parts list](docs/screenshots/main_dark.png)
 
@@ -32,12 +32,17 @@ others could benefit from it.
   and right-clicking one gives **Search in McMaster**.
 - **Section plane**: set its origin and normal, slide it, flip it, or drag it in
   3D. The cut faces are filled in.
-- **CFD**: y+ estimate on a boundary from the flow (air at an altitude, water at a
-  depth, or your own values) and the mesh's first cell layer; first cell height
-  for a target y+; flow direction arrows.
-- **CFD mode** (CAD): an inflation layer calculator — first cell for a target y+,
-  layer heights for N layers and a growth rate, boundary-layer thickness, with a
-  plot and the layer stack on a page under the 3D view.
+- **CFD** (meshes): y+ estimate on a boundary from the flow (air at an altitude,
+  water at a depth, or your own values) and the mesh's first cell layer; the
+  boundary **coloured by y+**; first cell height for a target y+; compressibility
+  correction; a unit menu on every input; flow direction arrows.
+- **CFD mode** (CAD): an inflation layer calculator — choose the walls (a part, or
+  faces you pick), get the first layer height for a target y+, the layer heights
+  for N layers and a growth rate, and compare them to the boundary layer. A page
+  under the 3D view shows a **layer size plot** and a **cross section** of the
+  walls with the layers drawn on them (see [CFD tools](#cfd-tools)).
+- **Formulas** and **Values**: every equation used, shown like LaTeX, and every
+  computed number (Re, Cf, δ99, u*…) in a pop-up.
 - **Cell quality** (meshes): skewness, aspect ratio, scaled Jacobian and volume of
   every cell, as a histogram; show the bad cells, colour the cut by quality, find
   inverted cells.
@@ -64,6 +69,35 @@ others could benefit from it.
 
 Native SolidWorks, CATIA, NX, Creo, Inventor, Parasolid (`.x_t`), ACIS (`.sat`)
 and JT files are closed formats: export STEP (best) or IGES from those programs.
+
+## CFD tools
+
+Two sections help set up a CFD mesh:
+
+- **CFD** (for meshes, CGNS / UGRID): checks the y+ of a mesh you already have,
+  from its first cell layer, and can paint the boundary by y+.
+- **CFD mode** (for CAD files): plans the inflation layers before you mesh. Pick
+  the walls, set the flow and the layers, and switch to the **Inflation layers**
+  page under the 3D view.
+
+![CFD mode: the flow and inflation layer inputs, with the walls tinted in 3D](docs/screenshots/cfd_mode_dark.png)
+
+<p align="center">
+  <img src="docs/screenshots/inflation_plot_light.png" width="49%" alt="Layer size plot: each layer's height and the total thickness against the boundary layer">
+  <img src="docs/screenshots/cross_section_dark.png" width="49%" alt="Cross section: the inflation layers estimated around a wing section">
+</p>
+
+The page shows the Reynolds number, the first layer height, the estimated y+,
+the boundary-layer thickness and the size of the layers, then two tabs:
+
+- **Layer size plot**: a bar per layer and the total thickness so far, against
+  the boundary layer and the size of the next cell of the mesh.
+- **Cross section**: turn on the section plane (sidebar ▸ Section) and the cut
+  of the walls is drawn in 2D, with the layers on it. It follows the plane as you
+  move it. Scroll to zoom, drag to pan.
+
+Below, simple checks say whether the layers cover the boundary layer and step
+smoothly into the mesh.
 
 ## Download
 
@@ -147,7 +181,9 @@ Keep the MeshViewer folder where it is: this app runs the code from it.
 - **Select**: click a part, or ⌘/⇧-click to add parts. Click empty space or press
   Esc to clear.
 - **Right-click** a part (in 3D or in the list):
-  - Hide, Isolate, Zoom To, Colour…, Show All
+  - Hide Part, Isolate, Zoom To, Colour…, Show All
+  - Hide Surface (STEP / IGES / BREP): hides only the face under the cursor;
+    *Show All* brings it back
   - Rename… (also: select a part and press Return) — Export uses the new names
   - Search in McMaster (when a McMaster part number is anywhere in the name)
   - Right-clicking inside a multi-selection acts on the whole selection.
@@ -167,12 +203,22 @@ Keep the MeshViewer folder where it is: this app runs the code from it.
   - **Cell quality** (meshes): pick a measure, set the "bad" threshold on the
     histogram (click / drag), then Zoom, Show bad cells or Colour by quality.
   - **CFD**: fluid (air at an altitude, fresh / sea water at a depth, or custom),
-    Mach and flow direction; y+ on a boundary (measured from the first cell layer
-    of volume meshes) and the first cell height for a target y+; flow vectors.
-  - **CFD mode** (CAD files): switch it on, fill in the flow (y+, Mach, length,
-    altitude) and the layers (first cell, N, growth rate, desired cell). The bar
-    under the 3D view then switches between the model and the *Inflation layers*
-    page (numbers, plot, layer stack, checks).
+    Mach or speed U, and flow direction; y+ on a boundary (measured from the first
+    cell layer of volume meshes), *Colour by y+*, and the first cell height for a
+    target y+; flow vectors. *Formulas* and *Values* next to each group.
+  - **CFD mode** (CAD files): switch it on, fill in the **Flow** (same inputs as
+    the CFD section) and the **Inflation layers**:
+    - *Walls*: the whole model, one part, or *Pick faces…* — ⇧-click faces of one
+      part in 3D, then *Apply*. The walls are tinted in 3D.
+    - *Length L* (auto: the longest distance along the flow), *Target y+*,
+      *Compressibility correction*.
+    - *First layer* (auto from y+, or typed), *Layers*, *Growth rate* (1 to 2),
+      *Next cell* (a multiple of the largest layer).
+
+    The bar under the 3D view switches between the model and the *Inflation
+    layers* page. In its *Cross section* tab, *Flip side* puts the layers on the
+    other side of the walls (for internal flow), *Fit view* fits the cut, and the
+    legend shows or hides the flow direction arrow.
   - **Parts**: list, filter, Show All / Hide All.
 - **Show** (toolbar, also View ▸ Show): mesh edges, feature edges, faces (off =
   edges only) · axes, grid, bounding box, origin marker — each on / off.
@@ -229,6 +275,7 @@ meshviewer/
     info_panel.py       Info section
     cfd_panel.py, cfd_view.py         CFD section and its flow arrows
     inflation_panel.py, inflation_view.py  CFD mode (CAD): inflation layer inputs and page
+    section_view.py     CFD mode: the section plane's cut with the layers estimated
     memory.py           files reopen the way you left them
     jobs.py             background work
     background.py       picture behind the 3D view

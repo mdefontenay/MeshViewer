@@ -64,6 +64,8 @@ def capture(scene):
         "hidden": [orig.get(n, n) for n in scene.names if not scene.visible[n]],
         "cfd": scene.cfd_settings,                                # v2.10
         "inflation": scene.inflation_settings,                    # v2.11: CFD mode
+        "hidden_faces": {orig.get(n, n): sorted(v) for n, v in scene.hidden_faces.items()
+                         if v},                                   # v2.12
         "section": {"enabled": sec.enabled, "origin": list(map(float, sec.origin)),
                     "normal": list(map(float, sec.normal_raw)), "fill": sec.fill,
                     "handle": sec.show_handle},
@@ -98,6 +100,11 @@ def restore(scene, state):
         scene.cfd_settings = state["cfd"]
     if state.get("inflation"):
         scene.inflation_settings = state["inflation"]
+    hidden = {current(n): set(v) for n, v in (state.get("hidden_faces") or {}).items()
+              if current(n) in scene.model.parts}                # v2.12: hidden surfaces
+    if hidden:
+        scene.hidden_faces = hidden
+        scene._rebuild_surfaces()
     s = state.get("section")
     if s:
         sec = scene.section

@@ -456,11 +456,16 @@ class NumberField(QLineEdit):
         self.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self.setMinimumWidth(56)
         self._value = None
+        self._range = None                     # v2.12.1: (low, high) typed values snap into
         self.setValue(value)
         self.editingFinished.connect(self._finished)
 
     def value(self):
         return self._value
+
+    def setRange(self, low, high):
+        """v2.12.1: typed numbers outside [low, high] snap to the nearest end."""
+        self._range = (float(low), float(high))
 
     def setValue(self, v):
         self._value = None if v is None else float(v)
@@ -478,6 +483,8 @@ class NumberField(QLineEdit):
             self.style().unpolish(self)
             self.style().polish(self)
             return
+        if v is not None and self._range is not None:
+            v = min(max(v, self._range[0]), self._range[1])
         changed = v != self._value
         NumberField.setValue(self, v)
         if changed:

@@ -1,4 +1,45 @@
-## What's new in 2.11.4
+## What's new in 2.13.2
+
+- Cross section, simpler: only the inflation layers, a **Flip side** button (layers
+  outside the model by default, inside for internal flow) and a **Fit view** button.
+  No more lag from smoothing.
+- All the computed numbers are in the **Values** pop-up.
+
+## In 2.13.1
+
+- Cross section: choose **external or internal flow**, show or hide each element from
+  the legend, and a **flow direction** arrow.
+
+## In 2.13
+
+- **Cross section** tab on the Inflation page: turn on the section plane and it shows
+  the cut in 2D, with an estimate of the inflation layers on the walls (scroll to zoom
+  in on the wall, drag to pan). Follows the plane as you move it.
+
+## In 2.12.2
+
+- Inflation page: the layer size plot takes the full width under tabs, redrawn to
+  match the app (bars per layer, total-thickness line, labelled reference lines, hover).
+- Plain names in CFD mode: First layer, Layers, Growth rate, Next cell (× max layer height).
+
+## In 2.12.1
+
+- CFD mode's **Flow** inputs now match the mesh CFD section (fluid, altitude or depth,
+  locked properties unless Custom, Mach / speed U, direction).
+- Growth rate limited to 1–2; **Desired cell** is a factor of the largest layer.
+- Cleaner inflation plot.
+
+## In 2.12
+
+- **CFD mode** (CAD) reworked like the mesh CFD section: folding Flow / Inflation
+  layers groups with **Formulas** and **Values**, unit menus, a typed speed U, flow
+  direction and arrows.
+- **Walls**: give the inflation layers to the whole model, a part, or **faces of one
+  part** picked in the 3D view (⇧-click, then Apply). They're tinted in 3D and set
+  the auto length L.
+- Right-click a surface: **Hide Part** or **Hide Surface**; *Show All* brings them back.
+
+## In 2.11.4
 
 - CFD: a **unit menu** on every input (altitude, density, viscosity, speeds, length).
 - Boundary menu with each part's colour; **Back to auto length** after typing L.
@@ -83,7 +124,7 @@
 
 ## Install
 
-1. Download **Mesh Viewer 2.11.4.dmg** below.
+1. Download **Mesh Viewer 2.13.2.dmg** below.
 2. Open it and drag **Mesh Viewer** onto **Applications**.
 3. **First launch:** the app isn't notarized by Apple, so macOS blocks it the first
    time. Try to open it once, then go to **System Settings → Privacy & Security**

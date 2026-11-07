@@ -210,21 +210,32 @@ def sutherland(t, ref=MU0, s=S_MU):
 
 
 def inflation(yplus=1.0, mach=0.3, length=1.0, altitude=0.0, y_min=None, layers=30,
-              growth=1.2, y_des=None, speed="local", compressible=False):
+              growth=1.2, y_des=None, speed="local", compressible=False, fluid=None,
+              y_des_factor=2.0):
     """Everything the inflation layer calculator shows (SI units).
 
     speed: "local" -> U = M · √(γ R T) at the altitude; "sea" -> U = M · 343 m/s.
     y_min: first cell height (None -> the one that gives `yplus`).
     y_des: desired size of the first cell outside the inflation layers.
     compressible (v2.11.3): Cf multiplied by compressibility(M) (Raymer).
+    fluid (v2.12.1): {"rho", "mu", "a"[, "T", "p"]} — the free stream from the CFD
+        section (air at an altitude, water, custom); U = M · a. None: the original
+        calculator's air at `altitude` (speed "local" / "sea").
+    y_des_factor (v2.12.1): y_des = factor × the largest layer (when y_des is None).
     """
-    atm = air(altitude)
-    t, p = atm["T"], atm["p"]
-    rho = p / (R_GAS * t)
-    mu = sutherland(t)
-    k = sutherland(t, K0, S_K)
-    a = float(np.sqrt(GAMMA * R_GAS * t))
-    u = mach * (a if speed == "local" else 343.0)
+    if fluid is not None:
+        rho, mu, a = float(fluid["rho"]), float(fluid["mu"]), float(fluid["a"])
+        t, p = fluid.get("T"), fluid.get("p")
+        k = sutherland(t, K0, S_K) if t is not None and fluid.get("air") else None
+        u = mach * a
+    else:
+        atm = air(altitude)
+        t, p = atm["T"], atm["p"]
+        rho = p / (R_GAS * t)
+        mu = sutherland(t)
+        k = sutherland(t, K0, S_K)
+        a = float(np.sqrt(GAMMA * R_GAS * t))
+        u = mach * (a if speed == "local" else 343.0)
     re = rho * u * length / mu if mu > 0 else 0.0
     out = {"T": t, "p": p, "rho": rho, "mu": mu, "k": k, "a": a, "U": u, "Re": re,
            "turbulent": re > TURBULENT_RE, "supersonic": mach > 1,
@@ -244,7 +255,7 @@ def inflation(yplus=1.0, mach=0.3, length=1.0, altitude=0.0, y_min=None, layers=
     # Boundary-layer thickness (flat plate); supersonic: divided by rc^(1/9)
     d_sub = 0.38 * length / re ** 0.2 if out["turbulent"] else 4.91 * length / np.sqrt(re)
     d99 = d_sub / out["rc"] ** (1 / 9) if mach > 1 else d_sub
-    y_des = y_des if y_des else 2 * heights[-1]
+    y_des = y_des if y_des else (y_des_factor or 2.0) * heights[-1]
     return {**out, "ok": True, "target": yplus, "Cf": cf, "Cf_inc": cf_inc, "tau": tau, "u_star": u_star,
             "y_calc": y_calc,
             "y_min": y_min, "N": n, "G": g, "heights": heights, "total": total,

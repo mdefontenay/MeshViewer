@@ -2,27 +2,34 @@
 of the inflation layer calculator. Inputs are in the sidebar (CFD mode).
 
     Inflation layers                          Turbulent · Supersonic
-    [Reynolds] [y_min for y+] [Estimated y+] [δ99] [Total height] [Largest cell]
-    ┌ Height vs layer # ───────────────────────────────┐ ┌ Near the wall ┐
-    │ blue: total height · red: cell height · stack     │ │ cells to scale │
-    │ green: boundary layer δ99 · red dots: y_des       │ │                │
-    └──────────────────────────────────────────────────┘ └────────────────┘
-    ✓ / ⚠ checks
-    U, T, p, ρ, μ, Cf, τw, u*
+    [Reynolds] [First layer for y+] [Estimated y+] [Boundary layer] [Total] [Max layer]
+    ┌ [ Layer size plot | Cross section ]         ■ Layer height  — Total so far ┐
+    │ bars: each layer's height · line: total thickness so far                  │
+    │ dashed: boundary layer · dotted: next cell size (labels on the right)     │
+    └───────────────────────────────────────────────────────────────────────────┘
+    ✓ / ⚠ checks            (v2.13.2: every number is in the sidebar's Values pop-ups)
 
+v2.12.2: the plot takes the full width, under tabs; drawn like the rest of the app.
+v2.13: second tab "Cross section" (section_view.py): the section plane's cut, in 2D,
+with the inflation layers estimated on the walls.
 Everything is drawn with QPainter in the app's colours (light and dark).
 """
 from __future__ import annotations
 
 import numpy as np
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPalette, QPen
+from PySide6.QtGui import (
+    QAction, QActionGroup, QColor, QFont, QPainter, QPainterPath, QPalette, QPen,
+)
 from PySide6.QtWidgets import (
-    QFrame, QGridLayout, QHBoxLayout, QLabel, QScrollArea, QSizePolicy, QToolTip, QVBoxLayout,
-    QWidget,
+    QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSizePolicy,
+    QStackedWidget, QToolTip, QVBoxLayout, QWidget,
 )
 
-BLUE, RED, GREEN, PURPLE = "#0a84ff", "#ff453a", "#30b350", "#9b59d0"
+from .section_view import SectionLegend, SectionView
+from .widgets import Capsule
+
+RED, GREEN = "#ff453a", "#30b350"                  # status colours (tiles, checks)
 
 
 def length_unit(m):
@@ -83,14 +90,30 @@ class _Tile(QFrame):
         self.value.setStyleSheet(f"color: {color};" if color else "")
 
 
-# ---- the plot ---------------------------------------------------------------------------
+# ---- the plot (v2.12.2: drawn like the rest of the app) ----------------------------------
+# Series colours: the reference palette's first two slots (light / dark), validated
+# for colour-blind separation; labels stay in the text colours.
+SERIES = {"total": ("#2a78d6", "#3987e5"), "layer": ("#eb6834", "#d95926")}
+
+
+def _dark(widget):
+    return widget.palette().color(QPalette.Window).lightness() < 128
+
+
+def series_color(widget, key):
+    return QColor(SERIES[key][1 if _dark(widget) else 0])
+
+
 class InflationPlot(QWidget):
-    """Height against layer number, like the original calculator's graph."""
-    PAD_L, PAD_R, PAD_T, PAD_B = 64, 18, 16, 40
+    """Layer size plot: one bar per layer (its height), a line for the total
+    thickness of the layers so far, and two reference lines — the boundary
+    layer thickness and the next cell size. Hover a layer for its numbers."""
+    PAD_L, PAD_R, PAD_T, PAD_B = 56, 132, 26, 34
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.r = None
+        self.hover = None                      # layer number under the mouse
         self.setMinimumHeight(320)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.setMouseTracking(True)
@@ -102,8 +125,8 @@ class InflationPlot(QWidget):
     # data -> pixels
     def _ranges(self):
         r = self.r
-        top = max(r["y_tot"], r["d99"], r["y_des"]) * 1.15
-        return (-1.0, r["N"] + 1.0), (-0.06 * top, top)
+        top = max(r["y_tot"], r["d99"], r["y_des"]) * 1.08
+        return (0.0, r["N"] + 0.5), (0.0, top)
 
     def _px(self, x, y):
         (x0, x1), (y0, y1) = self._ranges()
@@ -117,210 +140,169 @@ class InflationPlot(QWidget):
         p.setRenderHint(QPainter.Antialiasing)
         pal = self.palette()
         text = pal.color(QPalette.WindowText)
+        muted = pal.color(QPalette.PlaceholderText)
         grid = QColor(text)
-        grid.setAlphaF(0.08)
-        axis = QColor(text)
-        axis.setAlphaF(0.35)
-        frame = QColor(text)
-        frame.setAlphaF(0.04)
-        p.setPen(Qt.NoPen)
-        p.setBrush(frame)
-        p.drawRoundedRect(QRectF(0, 0, self.width(), self.height()), 10, 10)
+        grid.setAlphaF(0.07)
+        font = QFont(p.font())
+        font.setPixelSize(11)
+        p.setFont(font)
         if self.r is None:
-            p.setPen(pal.color(QPalette.PlaceholderText))
+            p.setPen(muted)
             p.drawText(self.rect(), Qt.AlignCenter, "Fill in the CFD mode inputs in the sidebar")
             return
         r = self.r
         (x0, x1), (y0, y1) = self._ranges()
         f, unit = length_unit(y1)
-        font = QFont(p.font())
-        font.setPixelSize(11)
-        p.setFont(font)
+        left, right = self.PAD_L, self.width() - self.PAD_R
+        base = self._px(0, 0).y()
 
-        # grid + tick labels
-        ystep = nice_step(y1 - y0)
-        xstep = max(1, int(nice_step(x1 - x0, 12)))
-        for gx in range(0, int(x1) + 1, xstep):
-            a, b = self._px(gx, y0), self._px(gx, y1)
+        # horizontal grid + height labels (no vertical grid)
+        ystep = nice_step(y1 - y0, 5)
+        gy = 0.0
+        while gy <= y1 + 1e-12:
+            y = self._px(0, gy).y()
             p.setPen(QPen(grid, 1))
-            p.drawLine(a, b)
-            p.setPen(axis)
-            p.drawText(QRectF(a.x() - 20, self.height() - self.PAD_B + 4, 40, 14),
-                       Qt.AlignHCenter, str(gx))
-        gy = np.ceil(y0 / ystep) * ystep
-        while gy <= y1:
-            gy = 0.0 if abs(gy) < ystep * 1e-6 else gy            # no "−0"
-            a, b = self._px(x0, gy), self._px(x1, gy)
-            p.setPen(QPen(axis if abs(gy) < ystep * 1e-6 else grid, 1))
-            p.drawLine(a, b)
-            p.setPen(axis)
-            p.drawText(QRectF(0, a.y() - 7, self.PAD_L - 8, 14), Qt.AlignRight | Qt.AlignVCenter,
+            p.drawLine(QPointF(left, y), QPointF(right, y))
+            p.setPen(muted)
+            p.drawText(QRectF(0, y - 7, left - 10, 14), Qt.AlignRight | Qt.AlignVCenter,
                        f"{gy * f:.3g}")
             gy += ystep
-        p.setPen(QPen(axis, 1))
-        a = self._px(0, y0)
-        p.drawLine(a, self._px(0, y1))
-        p.setPen(pal.color(QPalette.WindowText))
-        p.drawText(QRectF(self.PAD_L, self.height() - 18, self.width() - self.PAD_L - self.PAD_R,
-                          14), Qt.AlignRight, "Layer #")
-        p.save()
-        p.translate(14, self.PAD_T + (self.height() - self.PAD_T - self.PAD_B) / 2)
-        p.rotate(-90)
-        p.drawText(QRectF(-80, -8, 160, 16), Qt.AlignCenter, f"Height ({unit})")
-        p.restore()
+        p.setPen(muted)
+        p.drawText(QRectF(0, 2, left + 120, 14), Qt.AlignLeft | Qt.AlignVCenter,
+                   f"Height ({unit})")
+        n = r["N"]
+        xstep = max(1, int(nice_step(n, 10)))
+        for k in [1] + list(range(xstep, n + 1, xstep)):
+            x = self._px(k, 0).x()
+            p.drawText(QRectF(x - 20, base + 6, 40, 14), Qt.AlignHCenter, str(k))
+        p.drawText(QRectF(left, self.height() - 15, right - left, 14), Qt.AlignHCenter,
+                   "Layer number (1 = at the wall)")
 
-        n, ymin, g = r["N"], r["y_min"], r["G"]
-        # total height (blue curve): y_min (1 − G^x) / (1 − G), 0 ≤ x ≤ N
-        xs = np.linspace(0, n, 400)
-        ys = ymin * xs if abs(g - 1) < 1e-12 else ymin * (1 - g ** xs) / (1 - g)
-        path = QPainterPath(self._px(xs[0], ys[0]))
-        for x, y in zip(xs[1:], ys[1:]):
-            path.lineTo(self._px(x, y))
-        p.setPen(QPen(QColor(BLUE), 2.2))
-        p.setBrush(Qt.NoBrush)
-        p.drawPath(path)
-        # cell height (red steps): y_min G^floor(x − ½), ½ ≤ x < N + ½
-        p.setPen(QPen(QColor(RED), 2))
+        # one bar per layer: its height (4 px rounded top, 2 px gap)
+        slot = (self._px(1, 0).x() - self._px(0, 0).x())
+        bw = max(1.0, slot - 2.0)
+        layer_c = series_color(self, "layer")
         for i, h in enumerate(r["heights"], start=1):
-            p.drawLine(self._px(i - 0.5, h), self._px(i + 0.5, h))
-        # inflation look: each layer's top as a short line at layer 1
-        for i, t in enumerate(r["total"][1:], start=1):
-            c = QColor(PURPLE if i % 2 else text.name())
-            c.setAlphaF(0.9)
-            p.setPen(QPen(c, 1.2))
-            p.drawLine(self._px(0.5, t), self._px(1.5, t))
-        # boundary layer δ99 (green) and desired cell size (red, dotted)
-        mid = n / 2
-        for y, color, style, label in (
-                (r["d99"], GREEN, Qt.SolidLine, f"Boundary layer: δ99 = {show_length(r['d99'])}"),
-                (r["y_des"], RED, Qt.DotLine,
-                 f"Desired surface cell size = {show_length(r['y_des'])}")):
-            pen = QPen(QColor(color), 1.6)
+            c = QColor(layer_c)
+            if self.hover is not None and i != self.hover:
+                c.setAlphaF(0.45)
+            top = self._px(i, h).y()
+            rect = QRectF(self._px(i, 0).x() - bw / 2, top, bw, max(base - top, 0.5))
+            path = QPainterPath()
+            rad = min(4.0, bw / 2, rect.height())
+            path.addRoundedRect(rect.adjusted(0, 0, 0, rad), rad, rad)   # flat at the base
+            p.save()
+            p.setClipRect(QRectF(rect.left() - 1, rect.top() - 1, rect.width() + 2,
+                                 rect.height() + 1))
+            p.fillPath(path, c)
+            p.restore()
+
+        # total thickness of the layers so far (line + soft area)
+        total_c = series_color(self, "total")
+        pts = [self._px(i, t) for i, t in enumerate(r["total"])]
+        line = QPainterPath(pts[0])
+        for q in pts[1:]:
+            line.lineTo(q)
+        area = QPainterPath(line)
+        area.lineTo(pts[-1].x(), base)
+        area.lineTo(pts[0].x(), base)
+        area.closeSubpath()
+        fill = QColor(total_c)
+        fill.setAlphaF(0.10)
+        p.fillPath(area, fill)
+        p.setPen(QPen(total_c, 2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        p.setBrush(Qt.NoBrush)
+        p.drawPath(line)
+
+        # reference lines, labelled at the right end (text colour, not series colour)
+        for y, style, title in ((r["d99"], Qt.DashLine, "Boundary layer"),
+                                (r["y_des"], Qt.DotLine, "Next cell size")):
+            yy = self._px(0, y).y()
+            pen = QPen(muted, 1.2)
             pen.setStyle(style)
             p.setPen(pen)
-            p.drawLine(self._px(x0, y), self._px(x1, y))
-            pos = self._px(mid, y)
-            p.setPen(QColor(color))
-            p.drawText(QRectF(pos.x() - 160, pos.y() - 18, 320, 14), Qt.AlignCenter, label)
-        p.setPen(Qt.NoPen)
-        halo = QColor(RED)
-        halo.setAlphaF(0.25)
-        p.setBrush(halo)
-        p.drawEllipse(self._px(mid, r["y_des"]), 8, 8)
-        p.setBrush(QColor(RED))
-        p.drawEllipse(self._px(mid, r["y_des"]), 3.5, 3.5)
-        # legend
-        lx, ly = self.PAD_L + 12, self.PAD_T + 10
-        for color, label in ((BLUE, "Total height"), (RED, "Cell height"),
-                             (PURPLE, "Layers (to scale)")):
-            p.setPen(QPen(QColor(color), 2.4))
-            p.drawLine(QPointF(lx, ly + 6), QPointF(lx + 16, ly + 6))
-            p.setPen(pal.color(QPalette.WindowText))
-            p.drawText(QRectF(lx + 22, ly, 150, 14), Qt.AlignVCenter, label)
-            ly += 17
+            p.drawLine(QPointF(left, yy), QPointF(right, yy))
+            p.setPen(text)
+            p.drawText(QRectF(right + 8, yy - 15, self.PAD_R - 8, 14),
+                       Qt.AlignLeft | Qt.AlignBottom, title)
+            p.setPen(muted)
+            p.drawText(QRectF(right + 8, yy - 1, self.PAD_R - 8, 14),
+                       Qt.AlignLeft | Qt.AlignTop, show_length(y))
+        # end label of the total line
+        p.setPen(text)
+        end = pts[-1]
+        p.drawText(QRectF(right + 8, end.y() - 7, self.PAD_R - 8, 14),
+                   Qt.AlignLeft | Qt.AlignVCenter, f"Total {show_length(r['y_tot'])}")
 
-    def mouseMoveEvent(self, e):
+        # hover: crosshair + point on the line
+        if self.hover is not None:
+            i = self.hover
+            x = self._px(i, 0).x()
+            cross = QColor(text)
+            cross.setAlphaF(0.25)
+            p.setPen(QPen(cross, 1))
+            p.drawLine(QPointF(x, self.PAD_T), QPointF(x, base))
+            q = pts[i]
+            ring = pal.color(QPalette.Window)
+            p.setPen(QPen(ring, 2))
+            p.setBrush(total_c)
+            p.drawEllipse(q, 4.5, 4.5)
+
+    def _layer_at(self, e):
         if self.r is None:
-            return
+            return None
         (x0, x1), _ = self._ranges()
         w = self.width() - self.PAD_L - self.PAD_R
         x = x0 + (e.position().x() - self.PAD_L) / max(w, 1) * (x1 - x0)
         i = int(round(x))
-        if 1 <= i <= self.r["N"]:
-            QToolTip.showText(e.globalPosition().toPoint(),
-                              f"Layer {i}\ncell height {show_length(self.r['heights'][i - 1])}"
-                              f"\ntotal height {show_length(self.r['total'][i])}", self)
-        else:
+        return i if 1 <= i <= self.r["N"] else None
+
+    def mouseMoveEvent(self, e):
+        i = self._layer_at(e)
+        if i != self.hover:
+            self.hover = i
+            self.update()
+        if i is None:
             QToolTip.hideText()
+            return
+        r = self.r
+        QToolTip.showText(e.globalPosition().toPoint(),
+                          f"Layer {i}\nLayer height {show_length(r['heights'][i - 1])}\n"
+                          f"Total so far {show_length(r['total'][i])}", self)
 
-
-# ---- near-wall cells, to scale -------------------------------------------------------------
-class LayerStack(QWidget):
-    """The inflation layers drawn as cells on a wall, with the first ordinary
-    cell (y_des) on top and the boundary-layer edge."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.r = None
-        self.setMinimumWidth(190)
-        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
-
-    def set_result(self, r):
-        self.r = r if r and r.get("ok") else None
+    def leaveEvent(self, _):
+        self.hover = None
+        QToolTip.hideText()
         self.update()
+
+
+class _Legend(QWidget):
+    """Two series: a swatch + name each, in the text colour."""
+
+    def __init__(self, items, parent=None):
+        super().__init__(parent)
+        self.items = items                     # [(series key, "bar" | "line", label)]
+        self.setFixedHeight(20)
+        fm = self.fontMetrics()
+        self.setMinimumWidth(sum(fm.horizontalAdvance(t) + 40 for *_, t in items))
 
     def paintEvent(self, _):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        pal = self.palette()
-        text = pal.color(QPalette.WindowText)
-        frame = QColor(text)
-        frame.setAlphaF(0.04)
-        p.setPen(Qt.NoPen)
-        p.setBrush(frame)
-        p.drawRoundedRect(QRectF(0, 0, self.width(), self.height()), 10, 10)
-        font = QFont(p.font())
-        font.setPixelSize(11)
-        p.setFont(font)
-        p.setPen(text)
-        p.drawText(QRectF(12, 8, self.width() - 24, 16), Qt.AlignLeft, "Near the wall (to scale)")
-        if self.r is None:
-            return
-        r = self.r
-        left, right = 16.0, self.width() - 16.0
-        bottom, top = self.height() - 30.0, 34.0
-        y_top = max(r["y_tot"] + r["y_des"], r["d99"]) * 1.08
-        to_px = lambda y: bottom - y / y_top * (bottom - top)       # noqa: E731
-        cols = 7
-        cw = (right - left) / cols
-        line = QColor(text)
-        line.setAlphaF(0.55)
-        fill = QColor(BLUE)
-        fill.setAlphaF(0.10 if not _dark(self) else 0.18)
-        # inflation cells; the ones thinner than a pixel merge into one solid band
-        tops = r["total"]
-        k = 0
-        while k < r["N"] and to_px(tops[k]) - to_px(tops[k + 1]) < 0.8:
-            k += 1
-        p.setPen(QPen(line, 0.8))
-        if k:
-            band = QColor(BLUE)
-            band.setAlphaF(0.55)
-            p.setBrush(band)
-            p.drawRect(QRectF(left, to_px(tops[k]), right - left, to_px(0) - to_px(tops[k])))
-        p.setBrush(fill)
-        for i in range(k, r["N"]):
-            y_a, y_b = to_px(tops[i]), to_px(tops[i + 1])
-            for c in range(cols):
-                p.drawRect(QRectF(left + c * cw, y_b, cw, y_a - y_b))
-        # first ordinary cell (y_des) on top, dotted red
-        pen = QPen(QColor(RED), 1.4)
-        pen.setStyle(Qt.DotLine)
-        p.setPen(pen)
-        p.setBrush(Qt.NoBrush)
-        y_a, y_b = to_px(r["y_tot"]), to_px(r["y_tot"] + r["y_des"])
-        for c in range(0, cols, 2):
-            p.drawRect(QRectF(left + c * cw, y_b, 2 * cw, y_a - y_b))
-        # boundary layer edge
-        pen = QPen(QColor(GREEN), 1.6)
-        pen.setStyle(Qt.DashLine)
-        p.setPen(pen)
-        y = to_px(r["d99"])
-        p.drawLine(QPointF(left, y), QPointF(right, y))
-        p.setPen(QColor(GREEN))
-        p.drawText(QRectF(left, y - 16, right - left, 14), Qt.AlignRight, "δ99")
-        # wall
-        p.setPen(QPen(text, 2))
-        p.drawLine(QPointF(left - 4, bottom), QPointF(right + 4, bottom))
-        hatch = QColor(text)
-        hatch.setAlphaF(0.35)
-        p.setPen(QPen(hatch, 1))
-        x = left
-        while x < right:
-            p.drawLine(QPointF(x, bottom + 8), QPointF(x + 8, bottom))
-            x += 8
-        p.setPen(pal.color(QPalette.PlaceholderText))
-        p.drawText(QRectF(left, bottom + 10, right - left, 14), Qt.AlignCenter, "wall")
+        x = 0.0
+        fm = p.fontMetrics()
+        for key, kind, label in self.items:
+            c = series_color(self, key)
+            if kind == "bar":
+                p.setPen(Qt.NoPen)
+                p.setBrush(c)
+                p.drawRoundedRect(QRectF(x, 5, 10, 10), 2, 2)
+            else:
+                p.setPen(QPen(c, 2, Qt.SolidLine, Qt.RoundCap))
+                p.drawLine(QPointF(x, 10), QPointF(x + 12, 10))
+            p.setPen(self.palette().color(QPalette.WindowText))
+            p.drawText(QRectF(x + 17, 0, 400, 20), Qt.AlignVCenter | Qt.AlignLeft, label)
+            x += 17 + fm.horizontalAdvance(label) + 20
 
 
 # ---- the page --------------------------------------------------------------------------------
@@ -353,48 +335,95 @@ class InflationView(QScrollArea):
         self.tiles = {}
         for i, (key, caption, tip) in enumerate((
                 ("re", "Reynolds number", "Re = ρ U L / μ  (laminar below 5·10⁵)"),
-                ("y_calc", "First cell for target y+", "y_min = y+ μ / (ρ u*)"),
-                ("yplus", "Estimated y+", "y+ = y_min u* ρ / μ  (tends to be a bit high)"),
-                ("d99", "Boundary layer δ99", "Flat plate: 0.38 L / Re^⅕ (turbulent) or "
-                                              "4.91 L / √Re (laminar); supersonic ÷ rc^⅑"),
-                ("y_tot", "Total inflation height", "Σ y_min Gⁿ, n = 0 … N − 1  (should be > δ99)"),
-                ("y_max", "Largest layer", "y_max = y_min G^(N−1)  (aim for y_des ≈ 2 y_max)"))):
+                ("y_calc", "First layer height for target y+", "y_min = y+ μ / (ρ u*)"),
+                ("yplus", "Estimated y+", "y+ of the first layer used: y_min u* ρ / μ"),
+                ("d99", "Boundary layer thickness", "δ99, flat plate: 0.38 L / Re^⅕ (turbulent) "
+                                                    "or 4.91 L / √Re (laminar); supersonic ÷ rc^⅑"),
+                ("y_tot", "Total thickness of the layers",
+                 "Σ y_min Gⁿ, n = 0 … N − 1  (should be more than the boundary layer)"),
+                ("y_max", "Max layer height",
+                 "y_max = y_min G^(N−1)  (the next cell should be about 2 × this)"))):
             t = _Tile(caption, tip)
             tiles.addWidget(t, i // 3, i % 3)
             self.tiles[key] = t
         lay.addLayout(tiles)
 
-        row = QHBoxLayout()
-        row.setSpacing(10)
+        # v2.12.2: a card with tabs; the plot takes the whole width
+        card = QFrame()
+        card.setObjectName("ResultCard")
+        cl = QVBoxLayout(card)
+        cl.setContentsMargins(14, 10, 14, 12)
+        cl.setSpacing(8)
+        bar = QHBoxLayout()
+        group = QActionGroup(self)
+        group.setExclusive(True)
+        self.tabs = {}
+        for key, text in (("plot", "Layer size plot"), ("section", "Cross section")):
+            a = QAction(text, self)
+            a.setCheckable(True)
+            a.triggered.connect(lambda _=False, k=key: self.show_tab(k))
+            group.addAction(a)
+            self.tabs[key] = a
+        bar.addWidget(Capsule(list(self.tabs.values()), name="Segmented"))
+        bar.addStretch(1)
+        self.legend = _Legend([("layer", "bar", "Layer height"),
+                               ("total", "line", "Total thickness so far")])
+        bar.addWidget(self.legend)
+        self.section_legend = SectionLegend()          # v2.13.1 (flow arrow toggle)
+        bar.addWidget(self.section_legend)
+        # v2.13.2: Cross section — Flip side + Fit view, capsule buttons like the tabs
+        self.section_bar = QWidget()
+        sb = QHBoxLayout(self.section_bar)
+        sb.setContentsMargins(12, 0, 0, 0)
+        sb.setSpacing(8)
+        self.flip_action = QAction("Flip side", self)
+        self.flip_action.setCheckable(True)
+        self.flip_action.setToolTip("Put the layers on the other side of the walls\n"
+                                    "(e.g. internal flow in a duct, or a wall facing the wrong way)")
+        self.fit_action = QAction("Fit view", self)
+        self.fit_action.setToolTip("Show the whole cut again (or double-click the view)")
+        sb.addWidget(Capsule([self.flip_action], name="Segmented"))
+        sb.addWidget(Capsule([self.fit_action], name="Segmented"))
+        bar.addWidget(self.section_bar)
+        cl.addLayout(bar)
+        self.views = QStackedWidget()
         self.plot = InflationPlot()
-        row.addWidget(self.plot, 1)
-        self.stack = LayerStack()
-        row.addWidget(self.stack)
-        lay.addLayout(row, 1)
+        self.views.addWidget(self.plot)
+        self.section = SectionView()                   # v2.13: follows the section plane
+        self.views.addWidget(self.section)
+        self.flip_action.toggled.connect(self.section.set_flip)
+        self.fit_action.triggered.connect(self.section.fit)
+        self.section_legend.toggled.connect(self.section.set_show)
+        cl.addWidget(self.views, 1)
+        lay.addWidget(card, 1)
+        self.show_tab("plot")
 
         self.checks = QLabel("")
         self.checks.setObjectName("ValueLabel")
         self.checks.setWordWrap(True)
         self.checks.setTextFormat(Qt.RichText)
         lay.addWidget(self.checks)
-        self.numbers = QLabel("")
-        self.numbers.setObjectName("InfoLine")
-        self.numbers.setWordWrap(True)
-        self.numbers.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        lay.addWidget(self.numbers)
+
+    def show_tab(self, key):
+        self.tabs[key].setChecked(True)
+        self.views.setCurrentWidget(self.plot if key == "plot" else self.section)
+        self.legend.setVisible(key == "plot")
+        self.section_legend.setVisible(key == "section")
+        self.section_bar.setVisible(key == "section")
 
     def set_result(self, r):
         self.plot.set_result(r)
-        self.stack.set_result(r)
+        self.section.set_result(r)
         if not r or not r.get("ok"):
             for t in self.tiles.values():
                 t.set("—")
             self.regime.setText("")
             self.checks.setText("Fill in the inputs in the sidebar (CFD mode).")
-            self.numbers.setText("")
             return
         self.regime.setText(("Turbulent" if r["turbulent"] else "Laminar") + " · " +
                             ("Supersonic" if r["supersonic"] else "Subsonic"))
+        if r.get("walls"):                       # v2.12: which walls, which length
+            self.regime.setText(self.regime.text() + f" · {r['walls']} · L {r['L']:.4g} m")
         self.tiles["re"].set(f"{r['Re']:.3g}", "turbulent" if r["turbulent"] else "laminar")
         self.tiles["y_calc"].set(show_length(r["y_calc"]), f"{r['y_calc']:.3g} m")
         off = abs(r["yplus_est"] - r["target"]) / max(r["target"], 1e-12)
@@ -404,21 +433,18 @@ class InflationView(QScrollArea):
         self.tiles["y_tot"].set(show_length(r["y_tot"]), f"{r['N']} layers × G {r['G']:g}",
                                 "ok" if r["covers_bl"] else "bad")
         self.tiles["y_max"].set(show_length(r["y_max"]),
-                                f"desired cell {show_length(r['y_des'])}",
+                                f"next cell {show_length(r['y_des'])}",
                                 "ok" if r["smooth"] else "warn")
         ok, warn = f"<span style='color:{GREEN}'>✓</span>", "<span style='color:#ff9f0a'>⚠</span>"
-        covers = "covers" if r["covers_bl"] else "is thinner than"
         lines = [
-            f"{ok if r['covers_bl'] else warn} Inflation {covers}"
-            f" the boundary layer: total {show_length(r['y_tot'])} vs δ99 {show_length(r['d99'])}",
-            f"{ok if r['smooth'] else warn} Transition to the mesh: desired cell "
-            f"{show_length(r['y_des'])} = {r['y_des'] / r['y_max']:.2g} × the largest layer "
-            f"(about 2× is smooth)",
+            f"{ok if r['covers_bl'] else warn} The layers ({show_length(r['y_tot'])} in total) "
+            f"{'are thicker than' if r['covers_bl'] else 'are thinner than'} the boundary layer "
+            f"({show_length(r['d99'])})",
+            f"{ok if r['smooth'] else warn} Step to the mesh: the next cell "
+            f"({show_length(r['y_des'])}) is {r['y_des'] / r['y_max']:.2g} × the max layer "
+            f"height (about 2 × is smooth)",
             f"{ok if off < 0.2 else warn} Estimated y+ {r['yplus_est']:.3g} for a target of "
             f"{r['target']:g}",
         ]
         self.checks.setText("<br>".join(lines))
-        self.numbers.setText(
-            f"U {r['U']:.4g} m/s · T {r['T']:.4g} K · p {r['p']:.5g} Pa · ρ {r['rho']:.4g} kg/m³"
-            f" · μ {r['mu']:.4g} Pa·s · k {r['k']:.3g} W/(m·K) · Cf {r['Cf']:.3g}"
-            f" · τw {r['tau']:.4g} Pa · u* {r['u_star']:.4g} m/s · rc {r['rc']:.3g}")
+

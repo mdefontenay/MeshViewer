@@ -52,6 +52,51 @@ the old numbers:
 
 </details>
 
+## 2.13.2 — Simpler cross section; every number in Values
+
+| File | |
+|---|---|
+| `gui/section_view.py`, `gui/inflation_view.py` | Cross section: only the **inflation layers** are drawn (boundary-layer and next-cell lines removed, layers always shown); the legend's only toggle is the **flow direction** arrow. **Flip side** button replaces External / Internal flow: by default the layers go on the outside of each closed cut of the model (tested against the cut itself, so CAD normals facing inward no longer matter; open surfaces follow their normals); Flip side puts them on the other side (internal flow). **Fit view** is a button like the others, in the header row. Smooth curves removed (it made the view lag) |
+| `gui/inflation_view.py`, `gui/inflation_panel.py` | the line of small numbers under the page is gone; they're all in the **Values** pop-up (recovery factor added there for supersonic flow) |
+| `README.md`, `docs/screenshots/` | new **CFD tools** section with three screenshots (CFD mode in 3D, layer size plot, cross section); features and *Using it* updated for CFD mode (walls, pick faces, cross section, Flip side), Colour by y+, Formulas / Values, right-click ▸ Hide Surface |
+
+## 2.13.1 — Cross section: flow side, toggles, smooth curves, flow arrow
+
+| File | |
+|---|---|
+| `gui/section_view.py`, `gui/inflation_view.py` | Cross section tab: **External flow / Internal flow** (which side of the walls gets the layers; replaces "Layers on the other side"); the legend sits top right like the plot's and each entry **shows / hides** what it names — inflation layers, boundary layer, top of the next cell, **flow direction** (an arrow of Flow ▸ Direction seen on the plane, or a dot / cross when it goes through the plane); **Smooth curves**: a smooth curve through the cut (centripetal Catmull-Rom through the surface points, points in the middle of flat facets dropped), sharp corners (> 30°) kept; a **Fit view** button |
+
+## 2.13 — Cross section of the inflation layers
+
+| File | |
+|---|---|
+| `gui/section_view.py` (new), `gui/inflation_view.py`, `gui/window.py` | Inflation page ▸ **Cross section** tab (replaces the "Near the wall" placeholder): it follows the section plane (sidebar ▸ Section) and draws its cut in 2D, facing the plane — the model in light grey, the walls in a dark line — with an **estimate of the inflation layers** on the walls: each layer is the wall outline pushed out along the wall's normal by the total thickness so far (mitred corners); layers closer than 2 px merge into a solid band; dashed = boundary layer, dotted = top of the next cell. Scroll to zoom, drag to pan, double-click or *Fit* to fit; *Layers on the other side* for open surfaces facing the other way; scale bar and legend. Messages when Section is off or the plane misses the walls |
+
+
+## 2.12.2 — Inflation page: tabs, full-width plot, plain names
+
+| File | |
+|---|---|
+| `gui/inflation_view.py` | the plot sits in a card with tabs — **Layer size plot** and **Near the wall** (a placeholder for the next view) — and takes the full width. Redrawn like the rest of the app: a bar per layer (its height), a line + soft area for the total thickness so far, light horizontal grid, the boundary layer (dashed) and next cell size (dotted) labelled on the right, a legend above, hover crosshair with the layer's numbers. Colour-blind-safe series colours for light and dark. *Near the wall* restyled to match |
+| `gui/inflation_panel.py`, `gui/inflation_view.py` | plain names: First layer, Layers, Growth rate, **Next cell (× max layer height)**; tiles and checks say "boundary layer thickness", "total thickness of the layers", "max layer height" |
+
+## 2.12.1 — CFD mode: Flow like the CFD section, growth 1–2, desired cell factor
+
+| File | |
+|---|---|
+| `gui/inflation_panel.py`, `cfd.py` | CFD mode's **Flow** group is the same as the mesh CFD section: Fluid (air at an altitude, fresh / sea water at a depth, custom), density / viscosity / sound speed locked unless Custom, Mach and speed U, direction. The calculator takes these properties (`inflation(fluid=…)`); the 343 m/s option is gone (type U, or use Custom) |
+| `gui/inflation_panel.py`, `gui/widgets.py` | **Growth rate** kept between 1 and 2 (`NumberField.setRange`: typed values snap in) |
+| `gui/inflation_panel.py`, `cfd.py` | **Desired cell** is now a factor of the largest layer (× y_max, default 2, 1–10) |
+| `gui/inflation_view.py` | plot: the purple "layers" lines removed; the numbers line leaves out T, p, k when they aren't known (water, custom) |
+
+## 2.12 — CFD mode: walls, Formulas / Values, units; Hide Surface
+
+| File | |
+|---|---|
+| `gui/inflation_panel.py`, `gui/inflation_view.py`, `gui/window.py` | **CFD mode** laid out like the mesh CFD section: **Flow** and **Inflation layers** fold, each with **Formulas** and **Values**; unit menus (altitude, speed U, length L, first / desired cell); **Speed U** can be typed (Mach follows); "?" right after *Altitude*; flow **direction** and **Show flow vectors**. **Walls**: the whole model, a part (with its colour dot), or **faces of one part** — *Pick faces…*, click / ⇧-click faces in the 3D view, **Apply**. The walls are tinted in the 3D view and give the **auto length L** (longest distance along the flow) and the wall area; *Back to auto length* after typing L. The Inflation page names the walls and L |
+| `gui/scene.py`, `gui/sidebar.py`, `gui/memory.py` | right-click in the 3D view: **Hide Part** and **Hide Surface** (one CAD face); *Show Hidden Surfaces (n)*, and *Show All* brings them back; hidden surfaces are remembered per file |
+| `gui/cfd_view.py` | `WallView`: the walls tint |
+
 ## 2.11.4 — CFD: unit menus, boundary colours, back to auto length
 
 | File | |
