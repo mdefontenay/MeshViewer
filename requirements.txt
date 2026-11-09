@@ -6,3 +6,6 @@ matplotlib      # CFD formulas (also needed by PyVista)
 PySide6
 h5py            # CGNS
 cadquery-ocp    # STEP (OpenCASCADE)
+meshio          # Gmsh .msh
+ezdxf           # DXF drawings
+pyobjc-framework-Cocoa ; sys_platform == "darwin"   # SF Symbols icons, drawn by macOS

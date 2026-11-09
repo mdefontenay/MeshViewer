@@ -14,10 +14,10 @@ from PySide6.QtCore import QEvent, QPoint, QSettings, Qt, QTimer
 from PySide6.QtGui import QAction, QIcon, QKeySequence
 from PySide6.QtWidgets import QApplication, QFileDialog, QMenuBar
 
-from .about_dialog import AboutDialog
-from .scene import AXIS_FONT_DEFAULT
-from .style import stylesheet
-from .window import FILE_FILTER, ViewerWindow
+from meshviewer.gui.dialogs.about import AboutDialog
+from meshviewer.render.scene import AXIS_FONT_DEFAULT
+from meshviewer.gui.style import stylesheet
+from meshviewer.gui.window import FILE_FILTER, ViewerWindow
 
 ICON = Path(__file__).resolve().parents[2] / "resources" / "mesh_icon.icns"
 
@@ -56,12 +56,12 @@ class MeshViewerApp(QApplication):
             "bg_image": st.value("appearance/bg_image", ""),
             "density": st.value("appearance/density", "compact"),     # parts list rows
             "axis_font": _axis_font(st.value("appearance/axis_font", AXIS_FONT_DEFAULT)),
-            # NEW (v2.5.3): edge lines
+            # edge lines
             "edge_width": st.value("appearance/edge_width", "thin"),
             "hide_edges_moving": st.value("appearance/hide_edges_moving", True, type=bool),
-            # v2.8.4: light and shadow on the model (was a Display switch in 2.25)
+            # light and shadow on the model (was a Display switch in 2.25)
             "shading": st.value("appearance/shading", True, type=bool),
-            # v2.7.2: Display ▸ Axes (off / axes / grid / both) replaces the Grid switch
+            # Display ▸ Axes (off / axes / grid / both) replaces the Grid switch
             # and Appearance's Grid lines / Axis lines switches
             "axes": st.value("appearance/axes", _old_axes_setting(st)),
         }
@@ -80,11 +80,11 @@ class MeshViewerApp(QApplication):
             a = m.addAction("Open…")
             a.setShortcut(QKeySequence.Open)
             a.triggered.connect(self.open_dialog)
-            self.add_recent_menu(m)                            # v2.9
-            m.addAction(self.about_action(m))                  # NEW (v2.5.4)
+            self.add_recent_menu(m)
+            m.addAction(self.about_action(m))
         self.aboutToQuit.connect(self._remember_all)
 
-    # ---- NEW (v2.9): File ▸ Open Recent ---------------------------------------------
+    # --- File ▸ Open Recent ---------------------------------------------
     RECENT_MAX = 12
 
     def recent_files(self):
@@ -123,7 +123,7 @@ class MeshViewerApp(QApplication):
         for w in list(self.windows):
             w.remember_view()
 
-    # ---- NEW (v2.5.4): About Mesh Viewer ---------------------------------------------
+    # --- About Mesh Viewer ---------------------------------------------
     def about_action(self, parent):
         """'About Mesh Viewer' — macOS moves it to the app menu (left of File)."""
         a = QAction("About Mesh Viewer", parent)

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Mesh Viewer — entry point.
 
-    MESH  CGNS (.cgns), UGRID (.lb8/.b8/.lb4/.b4.ugrid)   -> meshviewer/mesh/
-    CAD   STEP, IGES, BREP, STL, OBJ, PLY, glTF, VRML    -> meshviewer/cad/
+    MESH  CGNS (.cgns), UGRID (.lb8/.b8/.lb4/.b4.ugrid)   -> meshviewer/core/mesh/
+    CAD   STEP, IGES, BREP, STL, OBJ, PLY, glTF, VRML    -> meshviewer/core/cad/
     UI    Qt window + side panel                         -> meshviewer/gui/
 
 Run from source:   .venv/bin/python mesh_viewer.py [file ...]
@@ -24,7 +24,8 @@ def selftest() -> int:
     # (py2app only bundles what's imported, so unused ones like sqlite3 aren't checked).
     for mod in ("lzma", "bz2", "zlib", "ssl", "hashlib", "decimal", "ctypes",
                 "numpy", "h5py", "PySide6.QtWidgets", "pyvista", "pyvistaqt", "OCP.STEPControl",
-                "meshviewer.gui.app", "meshviewer.cad.step", "meshviewer.mesh.cgns"):
+                "meshviewer.gui.app", "meshviewer.core.cad.step", "meshviewer.core.mesh.cgns",
+                "meshio", "ezdxf"):                # v2.18: .msh, DXF
         try:
             importlib.import_module(mod)
             print(f"ok    {mod}")

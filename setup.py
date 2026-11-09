@@ -1,4 +1,5 @@
 """py2app build description for Mesh Viewer.app — run through build_app.sh."""
+import importlib.util
 import re
 from pathlib import Path
 
@@ -22,6 +23,8 @@ DOC_TYPES = [
     (["ply"],          "PLY Model",             "Alternate", ["public.polygon-file-format", "local.ply"]),
     (["gltf", "glb"],  "glTF Model",            "Alternate", ["local.gltf"]),
     (["wrl", "vrml"],  "VRML Model",            "Alternate", ["local.vrml"]),
+    (["msh"],          "Gmsh / Fluent Mesh",    "Alternate", ["local.msh"]),
+    (["dxf"],          "DXF Drawing",           "Alternate", ["com.autodesk.dxf", "local.dxf"]),
 ]
 
 
@@ -55,6 +58,8 @@ PLIST = {
     "UTImportedTypeDeclarations": [
         _uti("local.step", "STEP CAD File", ["step", "stp"]),
         _uti("local.iges", "IGES CAD File", ["iges", "igs"]),
+        _uti("local.msh", "Gmsh / Fluent Mesh", ["msh"]),
+        _uti("local.dxf", "DXF Drawing", ["dxf"]),
         _uti("local.brep", "BREP CAD File", ["brep", "brp"]),
         _uti("local.obj", "OBJ Model", ["obj"]),
         _uti("local.ply", "PLY Model", ["ply"]),
@@ -71,8 +76,12 @@ OPTIONS = {
     # many modules lazily, which py2app's import scanner would otherwise miss).
     "packages": ["meshviewer", "pyvista", "pyvistaqt", "vtkmodules", "qtpy",
                  "numpy", "h5py", "OCP", "scooby", "pooch",
-                 "matplotlib"],          # v2.11.3: draws the CFD formulas (mathtext)
-    "includes": ["vtk"],
+                 "matplotlib"]           # v2.11.3: draws the CFD formulas (mathtext)
+                + [m for m in ("meshio", "ezdxf")    # v2.18: Gmsh .msh, DXF
+                   if importlib.util.find_spec(m)],
+    # AppKit (PyObjC): the SF Symbols icons, asked from macOS when the app runs
+    "includes": ["vtk"] + [m for m in ("objc", "AppKit", "Foundation")
+                           if importlib.util.find_spec(m)],
     # Not used by the app (py2app would otherwise pull them in from the venv).
     "excludes": ["tkinter", "pip", "wheel"],
 }

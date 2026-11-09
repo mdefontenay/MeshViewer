@@ -1,17 +1,38 @@
-"""Toolbar / sidebar icons, drawn as vectors (SF Symbols–like line style).
+"""Toolbar / sidebar icons.
 
-They are painted on demand with the current text colour, so they follow
-light/dark mode automatically and stay sharp on Retina screens.
+On a Mac, the icons are SF Symbols asked from macOS itself when they are drawn (SF
+below: icon name -> symbol name; browse the names in Apple's SF Symbols app). Nothing
+of Apple's is stored in this project. Elsewhere, or if a symbol is missing (older
+macOS, no PyObjC), the icon is drawn here as vectors in the same line style.
+
+Both are painted on demand in the current text colour, so they follow light / dark
+mode and stay sharp on Retina screens.
 """
 from __future__ import annotations
 
+import sys
+
 from PySide6.QtCore import QPointF, QRect, QRectF, QSize, Qt
 from PySide6.QtGui import (
-    QColor, QGuiApplication, QIcon, QIconEngine, QPainter, QPainterPath, QPalette, QPen, QPixmap,
+    QColor, QGuiApplication, QIcon, QIconEngine, QImage, QPainter, QPainterPath, QPalette, QPen,
+    QPixmap,
 )
 
-GRID = 18.0          # icons are drawn on an 18 × 18 grid
+GRID = 18.0          # drawn icons use an 18 × 18 grid
 _engines = []        # keep Python engines alive while Qt uses them
+SF = {   # icon name -> SF Symbol
+    "sidebar": "sidebar.squares.left", "fit": "viewfinder", "iso": "cube",
+    "parallel": "perspective", "grid": "rectangle.split.3x3", "camera": "camera",
+    "export": "square.and.arrow.up", "appearance": "slider.horizontal.3",
+    "section": "square.3.layers.3d", "ruler": "ruler", "measure": "ruler",
+    "info": "info.circle", "edit": "move.3d", "cfd": "wind", "cell_quality": "skew",
+    "results": "waveform.path.ecg.text.page", "analysis": "wrench.adjustable", "search": "magnifyingglass",
+    "mesh_quality": "dial.medium", "mesh_edges": "square.split.diagonal.2x2",
+    "faces": "cube.fill", "plus": "plus.circle", "edit_unit": "square.and.pencil",
+    "plots": "chart.xyaxis.line", "eye": "eye", "eye_off": "eye.slash",
+    "advanced": "gearshape",
+}
+_sf_cache = {}
 
 
 def _line(p, *pts):
@@ -71,9 +92,43 @@ def _draw_ruler(p):
     p.restore()
 
 
-def _draw_nounit(p):
-    p.drawEllipse(QPointF(9, 9), 5.6, 5.6)
-    _line(p, (5, 13), (13, 5))                 # 45° line through the circle
+def _draw_plots(p):
+    """A curve on axes (like "chart.xyaxis.line")."""
+    _line(p, (2.5, 2.5), (2.5, 15.5), (15.5, 15.5))
+    path = QPainterPath(QPointF(4, 13.5))
+    path.cubicTo(QPointF(9, 13.5), QPointF(8, 4), QPointF(15, 4))
+    p.drawPath(path)
+
+
+def _draw_eye(p):
+    path = QPainterPath(QPointF(2, 9))
+    path.quadTo(QPointF(9, 2), QPointF(16, 9))
+    path.quadTo(QPointF(9, 16), QPointF(2, 9))
+    p.drawPath(path)
+    p.drawEllipse(QPointF(9, 9), 2.4, 2.4)
+
+
+def _draw_eye_off(p):
+    _draw_eye(p)
+    _line(p, (3.5, 15), (14.5, 3))
+
+
+def _draw_advanced(p):
+    """A gear: a ring with six teeth."""
+    import math
+    p.drawEllipse(QPointF(9, 9), 2.3, 2.3)
+    p.drawEllipse(QPointF(9, 9), 5.2, 5.2)
+    for k in range(6):
+        a = k * math.pi / 3
+        _line(p, (9 + 5.2 * math.cos(a), 9 + 5.2 * math.sin(a)),
+              (9 + 7.2 * math.cos(a), 9 + 7.2 * math.sin(a)))
+
+
+def _draw_edit_unit(p):
+    """A square with a pencil across its top-right corner (like "square.and.pencil")."""
+    _line(p, (9, 3.5), (4.5, 3.5), (2.5, 5.5), (2.5, 13.5), (4.5, 15.5), (12.5, 15.5),
+          (14.5, 13.5), (14.5, 9))
+    _line(p, (7.5, 10.5), (8, 8), (14, 2), (16, 4), (10, 10), (7.5, 10.5))
 
 
 def _draw_appearance(p):
@@ -87,7 +142,7 @@ def _draw_appearance(p):
 
 
 def _draw_parallel(p):
-    """NEW (v2.7.3): parallel projection — a box whose edges stay parallel
+    """parallel projection — a box whose edges stay parallel
     (front and back faces the same size)."""
     p.drawRect(QRectF(2.5, 6.0, 9.0, 9.0))
     _line(p, (6.5, 2.5), (15.5, 2.5), (15.5, 11.5))
@@ -96,13 +151,13 @@ def _draw_parallel(p):
 
 
 def _draw_export(p):
-    """NEW (v2.8): export — tray with an arrow going out (like macOS Share)."""
+    """export — tray with an arrow going out (like macOS Share)."""
     _line(p, (6.0, 7.5), (4.0, 7.5), (4.0, 16.0), (14.0, 16.0), (14.0, 7.5), (12.0, 7.5))
     _line(p, (9.0, 11.0), (9.0, 2.0))
     _line(p, (6.2, 4.8), (9.0, 2.0), (11.8, 4.8))
 
 
-# ---- NEW (v2.8.5): what-is-shown toggles in the toolbar -----------------------------
+# --- what-is-shown toggles in the toolbar -----------------------------
 def _draw_mesh_edges(p):
     """A small triangle mesh: square, 2 × 2 cells, one diagonal each."""
     p.drawRect(QRectF(2.5, 2.5, 13, 13))
@@ -125,7 +180,7 @@ def _draw_feature_edges(p):
 
 
 def _draw_faces(p):
-    """A cube with shaded faces (v2.8.6: Faces on / off, was "Edges only")."""
+    """A cube with shaded faces (Faces on / off, was "Edges only")."""
     c = QColor(p.pen().color())
     for alpha, pts in ((0.55, ((9, 2), (15.2, 5.5), (9, 9), (2.8, 5.5))),
                        (0.30, ((2.8, 5.5), (9, 9), (9, 16), (2.8, 12.5))),
@@ -137,6 +192,67 @@ def _draw_faces(p):
         c.setAlphaF(alpha)
         p.fillPath(path, c)
     _draw_cube(p)
+
+
+def _draw_mesh_quality(p):
+    """A dome split into triangles: how finely CAD faces are meshed."""
+    path = QPainterPath(QPointF(2, 14.5))
+    path.cubicTo(QPointF(2, 6), QPointF(16, 6), QPointF(16, 14.5))
+    path.closeSubpath()
+    p.drawPath(path)
+    for a, b in (((2, 14.5), (6.5, 8.2)), ((6.5, 8.2), (9, 14.5)), ((9, 14.5), (11.5, 8.2)),
+                 ((11.5, 8.2), (16, 14.5)), ((6.5, 8.2), (11.5, 8.2))):
+        _line(p, a, b)
+
+
+def _draw_plus(p):
+    p.drawEllipse(QPointF(9, 9), 7, 7)
+    _line(p, (9, 5.5), (9, 12.5))
+    _line(p, (5.5, 9), (12.5, 9))
+
+
+def _draw_info(p):
+    p.drawEllipse(QPointF(9, 9), 7, 7)
+    _line(p, (9, 8), (9, 12.5))
+    p.drawPoint(QPointF(9, 5.6))
+
+
+def _draw_edit(p):
+    """Three arrows out of a point (move / rotate / mirror)."""
+    for a, b, c, d in (((9, 9), (9, 2.5), (7, 4.5), (11, 4.5)),
+                       ((9, 9), (3.5, 13), (4, 10.3), (6.3, 13.8)),
+                       ((9, 9), (14.5, 13), (14, 10.3), (11.7, 13.8))):
+        _line(p, a, b)
+        _line(p, c, b, d)
+
+
+def _draw_cfd(p):
+    """Wind: three streamlines."""
+    for y, x1 in ((5.5, 13), (9, 15.5), (12.5, 11)):
+        path = QPainterPath(QPointF(2, y))
+        path.lineTo(QPointF(x1, y))
+        path.arcTo(QRectF(x1 - 1.6, y - 3.2, 3.2, 3.2), -90, 270)
+        p.drawPath(path)
+
+
+def _draw_cell_quality(p):
+    """A skewed cell with its corners."""
+    _line(p, (4, 4), (14, 3), (15, 14), (3, 15), (4, 4))
+    for x, y in ((4, 4), (14, 3), (15, 14), (3, 15)):
+        p.drawEllipse(QPointF(x, y), 1.2, 1.2)
+
+
+def _draw_results(p):
+    """A page with a pulse line (like "waveform.path.ecg.text.page")."""
+    p.drawRoundedRect(QRectF(3.5, 2, 11, 14), 2, 2)
+    _line(p, (5, 9), (7, 9), (8, 6), (9.5, 12), (11, 9), (13, 9))
+
+
+def _draw_analysis(p):
+    """A wrench."""
+    _line(p, (4, 14), (10, 8))
+    p.drawEllipse(QPointF(12, 6), 3.4, 3.4)
+    p.drawEllipse(QPointF(3.8, 14.2), 1.3, 1.3)
 
 
 def _draw_axes(p):
@@ -193,7 +309,11 @@ DRAWINGS = {
     "export": _draw_export,
     "parallel": _draw_parallel,
     "appearance": _draw_appearance,
-    "nounit": _draw_nounit,
+    "edit_unit": _draw_edit_unit,
+    "plots": _draw_plots,
+    "eye": _draw_eye,
+    "eye_off": _draw_eye_off,
+    "advanced": _draw_advanced,
     "ruler": _draw_ruler,
     "sidebar": _draw_sidebar,
     "fit": _draw_fit,
@@ -201,21 +321,42 @@ DRAWINGS = {
     "section": _draw_section,
     "camera": _draw_camera,
     "search": _draw_search,
+    "mesh_quality": _draw_mesh_quality,
+    "info": _draw_info,
+    "plus": _draw_plus,
+    "edit": _draw_edit,
+    "measure": _draw_ruler,
+    "cfd": _draw_cfd,
+    "cell_quality": _draw_cell_quality,
+    "results": _draw_results,
+    "analysis": _draw_analysis,
 }
 
 
 class _Engine(QIconEngine):
-    def __init__(self, draw, role=QPalette.WindowText):
+    def __init__(self, draw, role=QPalette.WindowText, on_accent=False, symbol=None):
         super().__init__()
         self.draw = draw
         self.role = role
+        self.on_accent = on_accent      # checked: accent-coloured (icon bar), else white
+        self.symbol = symbol            # SF Symbol name (macOS), else drawn
 
     def paint(self, p, rect, mode, state):
         pal = QGuiApplication.palette()
         group = QPalette.Disabled if mode == QIcon.Disabled else QPalette.Active
         color = pal.color(group, self.role)
         if state == QIcon.On and mode != QIcon.Disabled:
-            color = QColor("white")      # v2.8.5: checked toggles sit on the accent colour
+            # checked toolbar toggles sit on the accent colour; icon bar ones are accent
+            color = pal.color(QPalette.Highlight) if self.on_accent else QColor("white")
+        if self.symbol:
+            dpr = p.device().devicePixelRatioF() if p.device() is not None else 1.0
+            px = max(8, round(min(rect.width(), rect.height()) * dpr))
+            img = _sf_image(self.symbol, px, color)
+            if img is not None:
+                side = min(rect.width(), rect.height())
+                p.drawImage(QRectF(rect.x() + (rect.width() - side) / 2,
+                                   rect.y() + (rect.height() - side) / 2, side, side), img)
+                return
         p.save()
         p.setRenderHint(QPainter.Antialiasing)
         p.translate(rect.x(), rect.y())
@@ -241,12 +382,62 @@ class _Engine(QIconEngine):
         return self.scaledPixmap(size, mode, state, 1.0)
 
     def clone(self):
-        e = _Engine(self.draw, self.role)
+        e = _Engine(self.draw, self.role, self.on_accent, self.symbol)
         _engines.append(e)
         return e
 
 
-def icon(name, role=QPalette.WindowText) -> QIcon:
-    e = _Engine(DRAWINGS[name], role)
+def _sf_image(symbol, px, color):
+    """SF Symbol `symbol` drawn by macOS in `color`, px × px pixels (QImage), or None."""
+    key = (symbol, px, color.name(QColor.HexArgb))
+    if key in _sf_cache:
+        return _sf_cache[key]
+    img = None
+    if sys.platform == "darwin":
+        try:
+            img = _sf_render(symbol, px, color)
+        except Exception:                                # noqa: BLE001 no PyObjC / symbol
+            img = None
+    _sf_cache[key] = img
+    return img
+
+
+def _sf_render(symbol, px, color):
+    from AppKit import (
+        NSBitmapImageFileTypePNG, NSBitmapImageRep, NSColor, NSCompositingOperationSourceAtop,
+        NSDeviceRGBColorSpace, NSGraphicsContext, NSImage, NSImageSymbolConfiguration,
+        NSRectFillUsingOperation,
+    )
+    from Foundation import NSMakeRect
+    sym = NSImage.imageWithSystemSymbolName_accessibilityDescription_(symbol, None)
+    if sym is None:
+        return None
+    cfg = NSImageSymbolConfiguration.configurationWithPointSize_weight_(px * 0.75, 0.0)
+    sym = sym.imageWithSymbolConfiguration_(cfg) or sym
+    w, h = sym.size().width, sym.size().height
+    k = min(px / w, px / h, 1.0)
+    init = getattr(NSBitmapImageRep.alloc(), "initWithBitmapDataPlanes_pixelsWide_pixelsHigh_"
+                   "bitsPerSample_samplesPerPixel_hasAlpha_isPlanar_colorSpaceName_"
+                   "bytesPerRow_bitsPerPixel_")
+    rep = init(
+        None, px, px, 8, 4, True, False, NSDeviceRGBColorSpace, 0, 0)
+    ctx = NSGraphicsContext.graphicsContextWithBitmapImageRep_(rep)
+    NSGraphicsContext.saveGraphicsState()
+    try:
+        NSGraphicsContext.setCurrentContext_(ctx)
+        sym.drawInRect_(NSMakeRect((px - w * k) / 2, (px - h * k) / 2, w * k, h * k))
+        NSColor.colorWithSRGBRed_green_blue_alpha_(color.redF(), color.greenF(), color.blueF(),
+                                                    color.alphaF()).set()
+        NSRectFillUsingOperation(NSMakeRect(0, 0, px, px), NSCompositingOperationSourceAtop)
+        ctx.flushGraphics()
+    finally:
+        NSGraphicsContext.restoreGraphicsState()
+    data = rep.representationUsingType_properties_(NSBitmapImageFileTypePNG, {})
+    img = QImage.fromData(bytes(data))
+    return None if img.isNull() else img
+
+
+def icon(name, role=QPalette.WindowText, on_accent=False) -> QIcon:
+    e = _Engine(DRAWINGS[name], role, on_accent, SF.get(name))
     _engines.append(e)
     return QIcon(e)

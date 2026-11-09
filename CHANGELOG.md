@@ -52,6 +52,99 @@ the old numbers:
 
 </details>
 
+## 2.20.1 — Plot tabs scroll; right-click a tab
+
+| File | |
+|---|---|
+| `gui/window.py`, `gui/style.py` | The tabs under the view scroll sideways when there are too many plots (thin bar; the wheel or trackpad scrolls them; the open tab stays in view) |
+| `gui/window.py` | Right-click a plot's tab: **Open**, **Rename…**, **Delete** |
+
+## 2.20 — Units for results, any plane for a cross section, eye on each cut
+
+| File | |
+|---|---|
+| `core/units.py`, `gui/panels/results.py`, `gui/pages/plots.py`, `core/plots.py`, `gui/window.py` | **Results ▸ Values in / Shown in** for fields with a unit (p, ρ, u v w, speed, T, μ): the unit of the file's numbers (— : as they are) and the one shown; the scale, Min / Max (with the unit beside them), the plots and their CSV follow. Remembered per field. cp, Mach, y+: no unit, the rows hide |
+| `gui/panels/results.py` | The max · mean · min line and the *Values* button are gone |
+| `core/plots.py`, `gui/panels/plots.py` | **Advanced plane** (gear on the *Plane* row): origin and normal in any direction; X / Y / Z light only when the plane is normal to one; Position = along the normal |
+| `gui/panels/section.py` | The same gear: Origin / Normal are under it now |
+| `gui/panels/plots.py`, `gui/window.py`, `render/overlays.py`, `gui/icons.py`, `gui/widgets.py` (`IconToggle`) | **Eye** next to each measurement's name: its cut in the 3D view or not (several at once), while Plots is in the sidebar |
+| `gui/panels/plots.py` | *New Measurement…* without the card or the text under it |
+| `gui/sidebar.py` | A grey line above the first analysis tool in the icon bar, like the one above + |
+| `gui/style.py` | Every text box and menu 22 px high, 12 px text (they were tall on macOS) |
+
+## 2.19.2 — Every section on a card; Section and Plots alike
+
+| File | |
+|---|---|
+| `gui/sidebar.py`, `gui/style.py`, `gui/window.py` | **Every sidebar section on a grey card** (the Plots look), with cards and segmented controls inside a shade lighter; the sidebar opens a little wider so CFD fits on its card |
+| `gui/panels/section.py` | **Section laid out like a Plots cross section**: *Plane* — Normal to [X Y Z] (lit when the plane is along one) and Flip; Position slider and Center; Origin / Normal; then *Show* — Fill cut faces, Show plane |
+| `gui/panels/plots.py` | *Plane* / *Position* as in Section; **Normalize** instead of x/c; Along made of fixed X / Y / Z buttons (the plane's own axis hidden): Y now lights up when chosen (rebuilt buttons stayed unlit on macOS); New Measurement… on its card |
+| `gui/icons.py` | Results: `waveform.path.ecg.text.page`; Plots: `chart.xyaxis.line` |
+
+## 2.19.1 — Plots: no more crash when sliding, tidier controls
+
+| File | |
+|---|---|
+| `core/polys.py` (`bare`), `core/plots.py`, `core/fields.py`, `core/export.py`, `core/cfd.py`, `render/overlays.py`, `render/quality_overlay.py`, `render/scene.py`, `gui/pages/section_cut.py` | **Crash fixed** (moving a cross section quickly): new surfaces were built from NumPy views of a part's points and faces, and VTK could keep pointers into memory NumPy freed. They now share the part's structure inside VTK (`bare`). The same pattern elsewhere (y+ and results colours, cell quality, export, CFD walls) fixed too |
+| `gui/panels/plots.py` | The slider plots once it rests (40 ms), not on every pixel |
+| `gui/panels/plots.py` | **Tidier measurement controls**: one card per measurement in three groups — *Cut* (normal to, at, slider), *Plot* (values, along + an x/c toggle, negative up), *Points* (Import… · Export…); *Rename… · Delete* under the card instead of the ⋯ button; the point count is gone (only problems are shown) |
+| `gui/panels/results.py`, `render/overlays.py`, `core/fields.py` | *Highlight sharp changes* and *Jump over* removed (Gradient stays) |
+
+## 2.19 — Plots (cross sections in tabs), gradients and sharp changes
+
+| File | |
+|---|---|
+| `core/plots.py` (new), `gui/panels/plots.py` (new), `gui/pages/plots.py` (new), `gui/sections.py`, `gui/sidebar.py`, `gui/window.py`, `gui/memory.py`, `gui/icons.py`, `gui/widgets.py` | **Plots** (F13): *New Measurement…* (name + type) adds a sub-section in the sidebar and a tab under the 3D view (3D model · Inflation layers · one per measurement). Built to take more kinds; the first is the **cross section**: the visible boundaries cut by a plane normal to X / Y / Z (position typed or slid; the cut drawn in 3D while Plots is open), a field or the shape plotted along the cut, x/c, negative up (cp by default), hover for the numbers, reference points from a CSV, the points to a CSV. ⋯ menu: Show Plot, Rename…, Delete. Remembered per file, with the open tab. Not for 2D files yet |
+| `core/fields.py`, `gui/panels/results.py`, `render/overlays.py` | **Results ▸ Show ▸ Gradient** (F15): |∇f| along the surface. **Highlight sharp changes**: faces where the field changes by more than *Jump over* % of its range, in pink over the colours, with their count |
+| `render/scene.py`, `gui/panels/results.py` | Several listeners can follow shown / hidden boundaries (Results, Plots) |
+
+## 2.18 — Gmsh / Fluent .msh, DXF drawings, colour maps
+
+| File | |
+|---|---|
+| `core/mesh/msh.py` (new), `core/formats.py`, `requirements.txt`, `setup.py` | **`.msh` files**: Gmsh (through meshio; physical groups become parts) and Fluent (own reader, text and binary sections), 2D or 3D found from the file. 3D: boundaries + volume cells (Section cut, Cell quality, y+); 2D: the zones as faces and their boundary lines |
+| `core/cad/dxf.py` (new), `core/formats.py`, `requirements.txt`, `setup.py` | **DXF drawings** (ezdxf): lines, polylines, arcs, circles, ellipses, splines and blocks, one part per layer, unit from `$INSUNITS`; shown flat, seen from above, measurable |
+| `core/model.py`, `gui/sections.py`, `render/scene.py`, `gui/sidebar.py` | **Four kinds of file**: 3D mesh, 3D CAD, 2D mesh, drawing. Every section is listed for each; one that doesn't fit says why (Section and CFD: 3D only; Cell quality: meshes, 2D too). First-open sections: 2D meshes Edit · Measure · Cell quality, drawings Measure. Line-only parts are drawn without shading; 2D boundary lines drawn thick over the zones; "segments" for drawings, "Layers" for their parts |
+| `core/fields.py`, `gui/panels/results.py`, `gui/widgets.py`, `render/scene.py` | **Results ▸ Colours**: the menu shows the colour maps themselves, no names: rainbow (new default), blue–white–red, thermal, grey, blue (blue–grey–red removed). The auto min / max is the shown boundaries' and follows when one is hidden or shown. Remembered per file |
+| `render/scene.py`, `gui/window.py`, `gui/panels/edit.py`, `gui/memory.py`, `gui/widgets.py` | **2D files locked to +Z**: left / middle drag pans, right drag and the wheel zoom, the trackpad rotate is ignored; the view is squared to Z after every move and when a saved view is restored; no Iso / X / Y / Z or Perspective buttons (always parallel); Edit turns about Z only, mirrors X or Y, moves in X and Y |
+| `render/scene.py`, `gui/window.py`, `gui/sidebar.py` | **DXF drawings, lines only**: no mesh edges / feature edges / faces, bounding box or origin buttons; no layer list; every line white on a dark background, black on a light one; black background in dark mode (Appearance can still change it) |
+| `gui/widgets.py` | macOS: two menus in a row (Results ▸ Field and Colours) no longer overlap |
+| `render/measure.py`, `gui/panels/measure.py` | **Distance ▸ From origin** switch: on, each click is one point (X / Y / Z, from the origin, to the section plane: the old Point tool); off (default), two clicks give the distance, with no origin line in between |
+| `render/measure.py` | **Angle on 2D files**: click two lines (or cell edges): the angle between them in XY; the markers lie along the lines |
+| `gui/panels/parts.py`, `gui/sidebar.py`, `core/model.py` | **2D list in two groups**: Faces (the cells) and Boundaries (the lines); right-click: Hide / Isolate Face or Boundary |
+| `render/scene.py` | 2D files: lines stay while moving (Appearance's "hide lines" doesn't apply); the corner axes show X and Y only |
+| `gui/window.py`, `gui/dialogs/units.py`, `gui/icons.py`, `core/model.py` | **✎ File unit** button (square.and.pencil) where the "no unit" button was: opens the file-unit sheet again; it still says what the file itself states |
+| `render/scene.py` | 2D meshes: **Feature edges** draws the zones' outline, thick and over the mesh edges, so hidden or unnamed boundaries show. **Right-click** menu and clicks (Measure) work on 2D files: the 2D style held the mouse, so the release never reached them |
+| `gui/sidebar.py`, `gui/style.py` | A narrow sidebar scrolls sideways too, with a thin horizontal scrollbar at the bottom |
+| `core/quality.py` | Cell quality: no error when every cell has the same value (histogram) |
+| `setup.py` | Finder: `.msh` and `.dxf` can open with Mesh Viewer |
+
+## 2.17 — File unit, one Distance tool, formula links
+
+| File | |
+|---|---|
+| `gui/dialogs/units.py` (new), `gui/window.py`, `gui/panels/info.py`, `gui/memory.py`, `render/measure.py` | **File unit**: the first time a file is opened, a sheet asks what unit its numbers are in (STEP / IGES: their own, mm, preselected; meshes: m; other CAD: mm). Remembered per file; **Info ▸ File unit** changes it. The toolbar's "no unit" button is gone: the toolbar unit is the one shown, converted from the file's |
+| `render/measure.py`, `gui/panels/measure.py`, `render/section.py` | **Distance and Point are one tool**: click a point — its X / Y / Z, distance from the origin and to the section plane; click a second — the distance and ΔX, ΔY, ΔZ between them |
+| `gui/widgets.py`, `gui/panels/cfd.py`, `gui/panels/inflation.py` | Formulas pop-ups open next to the sidebar, by the link that opened them. The y+ formula links to CFD Online, and a CFD Online link closes the y+ formulas (meshes and CFD mode) |
+| `gui/panels/inflation.py` | **Next cell**: hover it — about 2 × the largest layer is a smooth step into the volume mesh; use about that size for the surface cells too (low aspect ratio) |
+| `gui/pages/inflation.py`, `gui/panels/inflation.py`, `core/cfd.py`, `core/cfd_export.py`, `gui/dialogs/wall_help.py` | **y+ along the flow removed** (tab, curve, Values rows, export line). The y+ tile shows the estimated y+ |
+
+## 2.16 — Icon bar sidebar, code reorganised, fixes
+
+| File | |
+|---|---|
+| `gui/sidebar.py`, `gui/sections.py` (new), `gui/window.py`, `gui/memory.py`, `gui/style.py` | **Icon bar** left of the sidebar: one toggle per section (Info, Mesh quality, Section, Edit, Measure, CFD, Cell quality, Results); a section shows up closed. Every section is listed for every file; one that doesn't apply shows a grey note. Each file remembers which are on; first open: CAD = Mesh quality, Section, Measure · mesh = Section, Edit, Measure (+ Results for results files). CFD is one toggle: the y+ estimate on meshes, CFD mode on CAD. Hiding Section switches the plane off; showing it again puts the plane back as it was. Hiding CFD switches CFD mode (or the flow vectors and y+ colours) off, and back on when shown again; the inputs stay. The parts list is always shown, at the bottom: drag the line above it to make it taller or shorter (remembered); closed, only its header stays at the bottom. The sections scroll only when the window is too short (no scrollbar flashing while sections open), and the sidebar can be made narrow again. **+** under the icons (Analysis Tools): which of CFD, Cell quality and Results have an icon in the bar. The sections reach the sidebar's right edge (scrollbar at the edge). **View ▸ Sidebar Sections** |
+| `gui/icons.py`, `gui/window.py`, `requirements.txt`, `setup.py` | **SF Symbols icons**, asked from macOS when the app runs (PyObjC), so none of Apple's files are in the project; drawn icons elsewhere. Hover: just the name and the shortcut. A line under the toolbar; toolbar groups, segmented buttons, fields, cards and the "?" buttons in solid colours (no light dots where they meet); thin sidebar scrollbars (no wide grey track). The y+ estimator's web link moved into the Target y+ "?" card |
+| `gui/sidebar.py`, `gui/window.py` | Fix: the sidebar's scrollbar showed when everything fitted. The sections now scroll on their own, only when the window is too short; the parts list keeps the rest |
+| `gui/window.py` | The projection toggle is now **Perspective** (on = perspective, off = parallel), ⌘5 |
+| `render/overlays.py`, `render/scene.py` | Fix: a boundary selected while Results colours are shown is now visible (lighter, blue outline on top) |
+| `gui/window.py` | Fix: in full screen, the Export save panel (UGRID) and the screenshot one opened as a separate window on the desktop; they now wait for the sheet to close, and UGRID uses a one-dot file type |
+| `core/cad/remesh.py` (new), `core/cad/occt.py` | Fix: STEP / IGES / BREP faces with fans of thin triangles (a symmetry plane around a wing root) are redone: points added inside, graded from the edges, then Delaunay flips. Edges kept exactly, so faces still join; a face is only changed when its fans clearly drop; big open areas get points too (finer levels); computed once per face, at most 3 s per meshing |
+| `core/mesh/polyhedra.py` (new), `core/mesh/cgns.py`, `core/mesh/volume.py`, `core/cfd.py` | Fix: CGNS meshes stored as **polyhedra (NGON_n / NFACE_n)** had no volume cells — no cut cells on the section, no y+, cell quality on the surface only. Their tetra, pyramids, prisms and hexa are now read. First cell height: wall normals made consistent |
+| `core/mesh/cgns.py` | Fix: CGNS files whose MIXED sections carry a broken ElementStartOffset (filled with the element type, as some exporters write it — e.g. the ONERA M6 mesh) had no volume cells: no cut cells, no y+, cell quality of the surface. The offsets are now checked and, if wrong, found from the connectivity (10 M cells in a fraction of a second) |
+| `core/fields.py`, `gui/panels/results.py` | Fix: STEP files showed a Results section (an internal id array was taken for a field). Only floating-point arrays count |
+| whole package | **Code reorganised**: `core/` (no Qt), `render/` (VTK), `gui/` (Qt; `panels/`, `dialogs/`, `pages/`), absolute imports, shared `core/units.py`, `core/fields.py`, `core/geometry2d.py`, `gui/forms.py`; version notes removed from the code. `ARCHITECTURE.md` (new): the map. `tests/` (new): headless tests and test files |
+
 ## 2.15 — Simulation results on the boundaries (FUN3D / Tecplot)
 
 | File | |

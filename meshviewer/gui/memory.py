@@ -1,8 +1,8 @@
-"""NEW (v2.9): each file reopens the way you left it.
+"""Each file reopens the way you left it.
 
 Saved when its window closes (and when the app quits), restored when it opens:
 camera, projection, display toggles, unit, part colours, renamed and hidden
-parts, and the section plane. CFD inputs (v2.10 / v2.11); v2.14: the Inflation page —
+parts, and the section plane. CFD inputs; Plots (the measurements); the Inflation page —
 which page and tab, Flip side, the flow arrow, the cross-section zoom. Edits (moves, rotations) are not: they belong to
 an export. Stored in the app's settings, for the last 200 files.
 
@@ -60,15 +60,20 @@ def capture(scene):
         "parallel": scene.state["parallel"],
         "toggles": {k: bool(scene.state.get(k)) for k in TOGGLES},
         "unit": scene.measure.display_unit,
+        "file_unit": scene.model.units or None,
         "renames": dict(alias),
         "colors": {orig.get(n, n): scene.colors[n] for n in scene.names},
         "hidden": [orig.get(n, n) for n in scene.names if not scene.visible[n]],
-        "cfd": scene.cfd_settings,                                # v2.10
-        "inflation": scene.inflation_settings,                    # v2.11: CFD mode
-        "inflation_page": getattr(scene, "inflation_page", None),  # v2.14: tab, zoom…
-        "results": getattr(scene, "results_settings", None),      # v2.15: field, range
+        "cfd": scene.cfd_settings,
+        "inflation": scene.inflation_settings,                    # CFD mode
+        "inflation_page": getattr(scene, "inflation_page", None),  # tab, zoom…
+        "results": getattr(scene, "results_settings", None),      # field, range
+        "plots": list(getattr(scene, "plots", None) or []),      # measurements (Plots)
+        "sections": getattr(scene, "sidebar_sections", None),     # sidebar sections shown
+        "section_restore": bool(getattr(scene, "section_restore", False)),
+        "cfd_restore": list(getattr(scene, "cfd_restore", None) or []),
         "hidden_faces": {orig.get(n, n): sorted(v) for n, v in scene.hidden_faces.items()
-                         if v},                                   # v2.12
+                         if v},
         "section": {"enabled": sec.enabled, "origin": list(map(float, sec.origin)),
                     "normal": list(map(float, sec.normal_raw)), "fill": sec.fill,
                     "handle": sec.show_handle},
@@ -99,16 +104,24 @@ def restore(scene, state):
         scene.set_parallel(bool(state["parallel"]), render=False)
     if "unit" in state:
         scene.measure.display_unit = state["unit"]
+    if state.get("file_unit"):
+        scene.model.units = state["file_unit"]
     if state.get("cfd"):
         scene.cfd_settings = state["cfd"]
     if state.get("inflation"):
         scene.inflation_settings = state["inflation"]
-    if state.get("inflation_page"):                                 # v2.14
+    if state.get("inflation_page"):
         scene.inflation_page = state["inflation_page"]
-    if state.get("results"):                                        # v2.15
+    if state.get("results"):
         scene.results_settings = state["results"]
+    if isinstance(state.get("plots"), list):
+        scene.plots = [dict(m) for m in state["plots"] if isinstance(m, dict) and "id" in m]
+    if isinstance(state.get("sections"), list):
+        scene.sidebar_sections = state["sections"]
+    scene.section_restore = bool(state.get("section_restore", False))
+    scene.cfd_restore = [k for k in state.get("cfd_restore") or [] if isinstance(k, str)]
     hidden = {current(n): set(v) for n, v in (state.get("hidden_faces") or {}).items()
-              if current(n) in scene.model.parts}                # v2.12: hidden surfaces
+              if current(n) in scene.model.parts}                # hidden surfaces
     if hidden:
         scene.hidden_faces = hidden
         scene._rebuild_surfaces()
@@ -132,3 +145,5 @@ def restore_camera(scene, state):
         scene.p.renderer.ResetCameraClippingRange()
     except (TypeError, ValueError, KeyError):
         pass
+    if scene.model.dim == 2:                         # 2D: square to Z whatever was saved
+        scene.snap_to_z()

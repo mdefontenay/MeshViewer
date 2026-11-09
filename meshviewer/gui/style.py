@@ -26,13 +26,24 @@ DARK = dict(
 
 TEMPLATE = """
 /* ---- sidebar column ---- */
-#SideScroll, #SideScroll > QWidget, #Sidebar {{ background: {sidebar}; border: none; }}
+#SideScroll, #SideScroll > QWidget, #SideTools, #Sidebar, #SideMain, #SideTop, #SideBottom {{ background: {sidebar}; border: none; }}
+#SideMain::handle {{ background: transparent; }}
+#IconBar {{ background: {sidebar}; border: none; border-right: 1px solid {divider}; }}
+#IconBar QToolButton {{ border: none; border-radius: 7px; padding: 0; }}
+#IconBar QToolButton:hover {{ background: {hover}; }}
+#IconBar QToolButton:pressed {{ background: {pressed}; }}
+#IconBar QToolButton:checked {{ background: {capsule}; }}
+#UnavailableNote {{ color: {secondary}; font-size: 11px; padding: 0 2px 2px 2px; }}
 #SectionHeader {{ color: {secondary}; font-size: 12px; font-weight: 600; }}
 #SmallLabel {{ color: {text}; font-size: 11px; }}
 #AxisLabel {{ color: {secondary}; font-size: 11px; }}
 #ValueLabel {{ color: {text}; font-size: 12px; }}
 #InfoLine {{ color: {secondary}; font-size: 11px; padding: 2px 2px 0 2px; }}
 #ResultCard {{ background: {capsule}; border: 1px solid {capsule_border}; border-radius: 9px; }}
+/* every sidebar section sits on a card like this one; inside it, cards and segmented
+   controls are a shade lighter so they still stand out */
+#SectionCard {{ background: {capsule}; border: 1px solid {capsule_border}; border-radius: 9px; }}
+#SectionCard #ResultCard {{ background: {field}; }}
 #GroupTitle {{ color: {secondary}; font-size: 11px; font-weight: 600; padding-top: 4px; }}
 #SelectionCount {{ color: {accent}; font-size: 12px; font-weight: 600; }}
 #SelectionCount[empty="true"] {{ color: {secondary}; font-weight: 500; }}
@@ -56,10 +67,12 @@ QSplitter::handle {{ background: {divider}; }}
 /* Rows (rounded selection, hover) and fold-out arrows are painted by part_tree.py. */
 
 /* ---- text fields ---- */
+/* one height for every box and menu (22 px), like macOS's small controls */
 QLineEdit, QDoubleSpinBox {{
     background: {field}; color: {text};
     border: 1px solid {field_border}; border-radius: 6px;
-    padding: 3px 6px; selection-background-color: {accent};
+    padding: 1px 6px; min-height: 18px; max-height: 18px; font-size: 12px;
+    selection-background-color: {accent};
 }}
 QLineEdit:focus, QDoubleSpinBox:focus {{ border: 1px solid {accent}; }}
 /* No arrow buttons: without this, styled spin boxes give the text no room. */
@@ -68,12 +81,18 @@ QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
 }}
 
 /* ---- capsules: toolbar groups and segmented controls ---- */
-#Capsule, #Segmented {{
-    background: {capsule}; border: 1px solid {capsule_border};
-}}
+#Capsule {{ background: {capsule_solid}; border: 1px solid {capsule_border_solid}; }}
+#Segmented {{ background: {capsule_side}; border: 1px solid {capsule_border_side}; }}
+#SectionCard #Segmented, #ResultCard #Segmented {{ background: {field}; }}
+/* small icon buttons in headers and cards (Plots: show the cut, Advanced) */
+#IconToggle {{ border: none; border-radius: 5px; padding: 2px; background: transparent; }}
+#IconToggle:hover {{ background: {hover}; }}
+#IconToggle:checked {{ background: {pressed}; }}
+#IconToggle[eye="true"]:checked {{ background: transparent; }}
+#IconToggle[eye="true"]:checked:hover {{ background: {hover}; }}
 #Capsule {{ border-radius: 15px; }}
 #Segmented {{ border-radius: 7px; }}
-#CapsuleDivider {{ background: {capsule_border}; border: none; }}
+#CapsuleDivider {{ background: {capsule_border_solid}; border: none; }}
 #Capsule QToolButton, #Segmented QToolButton {{
     color: {text}; background: transparent; border: none;
 }}
@@ -86,34 +105,50 @@ QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
 #Capsule QToolButton:checked, #Segmented QToolButton:checked {{ background: {accent}; color: white; }}
 #Capsule QToolButton:disabled, #Segmented QToolButton:disabled {{ color: {secondary}; }}
 
-QToolBar {{ spacing: 8px; padding: 3px 8px; border: none; }}
+/* thin scrollbars on the sidebar: just the handle, no wide grey track */
+#Sidebar QScrollBar:vertical {{ background: transparent; width: 8px; margin: 2px 1px; border: none; }}
+#Sidebar QScrollBar::handle:vertical {{ background: {scroll}; border-radius: 3px; min-height: 28px; }}
+#Sidebar QScrollBar::add-line:vertical, #Sidebar QScrollBar::sub-line:vertical {{ height: 0; border: none; }}
+#Sidebar QScrollBar::add-page:vertical, #Sidebar QScrollBar::sub-page:vertical {{ background: transparent; }}
+#Sidebar QScrollBar:horizontal {{ background: transparent; height: 8px; margin: 1px 2px; border: none; }}
+#Sidebar QScrollBar::handle:horizontal {{ background: {scroll}; border-radius: 3px; min-width: 28px; }}
+#Sidebar QScrollBar::add-line:horizontal, #Sidebar QScrollBar::sub-line:horizontal {{ width: 0; border: none; }}
+#Sidebar QScrollBar::add-page:horizontal, #Sidebar QScrollBar::sub-page:horizontal {{ background: transparent; }}
+
+QToolBar {{ spacing: 8px; padding: 3px 8px; border: none; border-bottom: 1px solid {divider_solid}; }}
 
 /* ---- right-click menu: roomy and rounded, like macOS ---- */
-/* v2.8.2: choice button that opens the right-click-style menu (widgets.MenuSelect) */
+/* choice button that opens the right-click-style menu (widgets.MenuSelect) */
 #MenuSelect {{
     background: {field}; border: 1px solid {field_border}; border-radius: 6px;
-    padding: 3px 28px 3px 10px; text-align: left; color: {text}; min-height: 18px;
+    padding: 1px 28px 1px 10px; text-align: left; color: {text}; min-height: 18px;
+    max-height: 18px; font-size: 12px;
 }}
 #MenuSelect:hover {{ border-color: {accent}; }}
-/* v2.8.4: Edit ▸ Apply, the list of changes, renaming a part in the list (an
+/* Edit ▸ Apply, the list of changes, renaming a part in the list (an
    opaque field: a see-through one showed the old name under the new one) */
 #ApplyButton {{ background: {accent}; color: white; border: none; border-radius: 6px;
     padding: 4px 10px; min-height: 18px; font-weight: 600; }}
 #ApplyButton:hover {{ background: {accent}; border: 1px solid rgba(255,255,255,0.35); }}
 #ApplyButton:pressed {{ background: {pressed}; }}
 #HistoryLine {{ color: {text}; font-size: 12px; }}
-/* v2.10: "?" links to a web page, number boxes with a typo */
+/* "?" links to a web page, number boxes with a typo */
 #HelpButton {{ color: {secondary}; background: transparent; border: 1px solid {field_border};
     border-radius: 8px; font-size: 10px; font-weight: 600; padding: 0; }}
 #HelpButton:hover {{ color: {accent}; border-color: {accent}; }}
 QLineEdit[invalid="true"] {{ border: 1px solid #ff453a; }}
 QLineEdit:disabled {{ color: {secondary}; background: {capsule}; border-color: {capsule_border}; }}
-/* v2.11: CFD mode — the Inflation page and the bar under the 3D view */
+/* CFD mode — the Inflation page and the bar under the 3D view */
 #InflationView, #InflationPage {{ background: {page}; border: none; }}
 #PageTitle {{ color: {text}; font-size: 17px; font-weight: 700; }}
 #TileValue {{ color: {text}; font-size: 17px; font-weight: 600; }}
 #ViewBar {{ background: {page}; border-top: 1px solid {divider}; }}
-/* v2.11.1: sub-groups in a section, the "Values" pop-up */
+#TabScroll, #TabScroll > QWidget {{ background: transparent; border: none; }}
+#TabScroll QScrollBar:horizontal {{ background: transparent; height: 6px; margin: 0 2px; border: none; }}
+#TabScroll QScrollBar::handle:horizontal {{ background: {scroll}; border-radius: 3px; min-width: 28px; }}
+#TabScroll QScrollBar::add-line:horizontal, #TabScroll QScrollBar::sub-line:horizontal {{ width: 0; border: none; }}
+#TabScroll QScrollBar::add-page:horizontal, #TabScroll QScrollBar::sub-page:horizontal {{ background: transparent; }}
+/* sub-groups in a section, the "Values" pop-up */
 #SubHeader {{ color: {text}; font-size: 12px; font-weight: 600; }}
 #ValuesBody {{ background: {menu}; border: 1px solid {menu_border}; border-radius: 10px; }}
 #ValuesBody QLabel {{ background: transparent; }}
@@ -182,9 +217,30 @@ def accent(dark=None) -> str:
     return _vivid(c).name()
 
 
+def _solid(rgba, base: QColor) -> str:
+    """'rgba(r,g,b,a)' painted over base, as one solid colour (no see-through edges
+    where shapes overlap)."""
+    if not rgba.startswith("rgba"):
+        return rgba
+    r, g, b, a = (float(v) for v in rgba[5:-1].split(","))
+    mix = [round(base.red() * (1 - a) + r * a), round(base.green() * (1 - a) + g * a),
+           round(base.blue() * (1 - a) + b * a)]
+    return QColor(*mix).name()
+
+
 def colors(dark=None) -> dict:
-    c = dict(DARK if (is_dark() if dark is None else dark) else LIGHT)
+    d = is_dark() if dark is None else dark
+    c = dict(DARK if d else LIGHT)
     c["accent"] = accent(dark)
+    base = QGuiApplication.palette().window().color()
+    side = QColor(c["sidebar"])
+    for k in ("capsule", "capsule_border", "divider"):
+        c[k + "_solid"] = _solid(c[k], base)                 # on the window (toolbar)
+        c[k + "_side"] = _solid(c[k], side)                  # on the sidebar
+    # fields, cards, "?" and lines: solid too (see-through edges show where they overlap)
+    for k in ("field", "field_border", "capsule", "capsule_border", "divider"):
+        c[k] = _solid(c[k], side)
+    c["scroll"] = _solid("rgba(%s,0.32)" % ("255,255,255" if d else "0,0,0"), side)
     return c
 
 
