@@ -23,7 +23,7 @@ ICON = Path(__file__).resolve().parents[2] / "resources" / "mesh_icon.icns"
 
 
 def _axis_font(v) -> int:
-    """Points; also reads the old Small / Medium / Large setting (v2.4.3–2.13)."""
+    """Points; also reads the old Small / Medium / Large setting (v2.1.11–2.3.10)."""
     v = {"small": 16, "medium": 20, "large": 24}.get(str(v), v)
     try:
         return max(10, min(28, int(v)))

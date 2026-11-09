@@ -76,8 +76,8 @@ OPTIONS = {
     # many modules lazily, which py2app's import scanner would otherwise miss).
     "packages": ["meshviewer", "pyvista", "pyvistaqt", "vtkmodules", "qtpy",
                  "numpy", "h5py", "OCP", "scooby", "pooch",
-                 "matplotlib"]           # v2.11.3: draws the CFD formulas (mathtext)
-                + [m for m in ("meshio", "ezdxf")    # v2.18: Gmsh .msh, DXF
+                 "matplotlib"]           # v2.3.5: draws the CFD formulas (mathtext)
+                + [m for m in ("meshio", "ezdxf")    # v2.4.3: Gmsh .msh, DXF
                    if importlib.util.find_spec(m)],
     # AppKit (PyObjC): the SF Symbols icons, asked from macOS when the app runs
     "includes": ["vtk"] + [m for m in ("objc", "AppKit", "Foundation")

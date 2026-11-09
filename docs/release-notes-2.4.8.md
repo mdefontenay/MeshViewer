@@ -1,9 +1,9 @@
-## What's new in 2.20.1
+## What's new in 2.4.8
 
 - Many plots: the tabs under the view scroll sideways.
 - Right-click a plot's tab to open, rename or delete it.
 
-## In 2.20
+## In 2.4.7
 
 - **Results ▸ Values in / Shown in**: units for pressure, density, velocity,
   temperature… — the scale, Min / Max and the plots follow.
@@ -11,20 +11,20 @@
   normal (any direction). Section has the same gear.
 - Smaller text boxes and menus; a line above the analysis tools in the icon bar.
 
-## In 2.19.2
+## In 2.4.6
 
 - Every sidebar section sits on a card; Section and Plots cross sections are laid out
   the same way (Plane · Position · …).
 - Plots: *Normalize* (x/c), and the Along buttons light up properly.
 - New icons for Results and Plots.
 
-## In 2.19.1
+## In 2.4.5
 
 - Fixed a crash when moving a cross section quickly.
 - Tidier measurement controls: Cut · Plot · Points, with Rename and Delete under them.
 - *Highlight sharp changes* is gone; *Show ▸ Gradient* stays.
 
-## In 2.19
+## In 2.4.4
 
 - **Plots**: *New Measurement…* adds a named plot with its own tab under the 3D view.
   First kind: the **cross section** — cut the boundaries with a plane and plot cp, Mach…
@@ -33,7 +33,7 @@
 - **Results ▸ Show ▸ Gradient**: colour by how fast the field changes (|∇f|) — shocks
   and leading edges stand out.
 
-## In 2.18
+## In 2.4.3
 
 - **Gmsh and Fluent `.msh` files**, 2D or 3D (found from the file): the boundaries,
   and for 3D the volume cells (section cut, cell quality, y+).
@@ -50,7 +50,7 @@
 - 2D meshes: the list is split into Faces and Boundaries.
 - A narrow sidebar gets a horizontal scrollbar.
 
-## In 2.17
+## In 2.4.2
 
 - **File unit**: the first time you open a file, pick the unit its numbers are in
   (STEP / IGES preselect theirs). Change it any time in Info.
@@ -60,7 +60,7 @@
 - Hover *Next cell* in CFD mode for what it means.
 - "y+ along the flow" is gone; the y+ tile shows the estimate.
 
-## In 2.16
+## In 2.4.1
 
 - **New sidebar**: an icon bar on the left shows or hides each section. Every file
   remembers its sections; the + under the icons chooses which analysis tools
@@ -73,14 +73,14 @@
 - Fixes: sidebar scrollbar when everything fits, selection hidden under Results
   colours, Export save panel leaving full screen, Results shown for STEP files.
 
-## In 2.15
+## In 2.4
 
 - **Simulation results**: open the Tecplot `.dat` that FUN3D writes
   (`project_tec_boundary.dat`, File ▸ Open) and colour the boundaries by any of its
   variables — cp, Mach, pressure, y+, speed… — in the new **Results** section, with
   the scale, your own min / max, and max · mean · min.
 
-## In 2.14.2
+## In 2.3.15
 
 - **Internal flow** (pipe or duct): Reynolds number on the hydraulic diameter, developed
   pipe-flow friction, y+ along the pipe from the inlet.
@@ -88,14 +88,14 @@
 - Cleaner flow arrows in the cross section.
 - The y+ colours on the walls are gone (the y+ along the flow tab stays).
 
-## In 2.14.1
+## In 2.3.14
 
 - The y+ tile shows the **max** on the walls, with min and mean beside it.
 - Layer size and y+ plots now look alike, with y-axis titles; the y+ plot always shows
   where the viscous sublayer ends.
 - Temperature is greyed out for air at an altitude (standard atmosphere).
 
-## In 2.14
+## In 2.3.13
 
 - **Export ▸ CFD settings** (CAD files): the inflation layers for OpenFOAM
   (snappyHexMesh), Fluent Meshing, STAR-CCM+ or Pointwise, or a CSV of every input
@@ -107,38 +107,38 @@
 - Every file also remembers its Inflation page, Flip side and zoom.
 - **Check for Updates** tells you whether a newer version is out.
 
-## In 2.13.2
+## In 2.3.12
 
 - Cross section, simpler: only the inflation layers, a **Flip side** button (layers
   outside the model by default, inside for internal flow) and a **Fit view** button.
   No more lag from smoothing.
 - All the computed numbers are in the **Values** pop-up.
 
-## In 2.13.1
+## In 2.3.11
 
 - Cross section: choose **external or internal flow**, show or hide each element from
   the legend, and a **flow direction** arrow.
 
-## In 2.13
+## In 2.3.10
 
 - **Cross section** tab on the Inflation page: turn on the section plane and it shows
   the cut in 2D, with an estimate of the inflation layers on the walls (scroll to zoom
   in on the wall, drag to pan). Follows the plane as you move it.
 
-## In 2.12.2
+## In 2.3.9
 
 - Inflation page: the layer size plot takes the full width under tabs, redrawn to
   match the app (bars per layer, total-thickness line, labelled reference lines, hover).
 - Plain names in CFD mode: First layer, Layers, Growth rate, Next cell (× max layer height).
 
-## In 2.12.1
+## In 2.3.8
 
 - CFD mode's **Flow** inputs now match the mesh CFD section (fluid, altitude or depth,
   locked properties unless Custom, Mach / speed U, direction).
 - Growth rate limited to 1–2; **Desired cell** is a factor of the largest layer.
 - Cleaner inflation plot.
 
-## In 2.12
+## In 2.3.7
 
 - **CFD mode** (CAD) reworked like the mesh CFD section: folding Flow / Inflation
   layers groups with **Formulas** and **Values**, unit menus, a typed speed U, flow
@@ -148,13 +148,13 @@
   the auto length L.
 - Right-click a surface: **Hide Part** or **Hide Surface**; *Show All* brings them back.
 
-## In 2.11.4
+## In 2.3.6
 
 - CFD: a **unit menu** on every input (altitude, density, viscosity, speeds, length).
 - Boundary menu with each part's colour; **Back to auto length** after typing L.
 - Colour by y+ hides its mesh edges while the view moves, like the model.
 
-## In 2.11.3
+## In 2.3.5
 
 - **Colour by y+**: the boundary painted by its y+ at each wall node, relative to
   the target. The max y+ turns green, orange or red.
@@ -163,14 +163,14 @@
 - Speed U in m/s, km/h, kt, ft/s or mph.
 - **Formulas** buttons: every equation used, shown like LaTeX.
 
-## In 2.11.2
+## In 2.3.4
 
 - CFD: type the **speed U** or the Mach number, the other follows.
 - Density, viscosity and sound speed are locked for air and water (editable with *Custom*).
 - y+ card: max with *min · mean* beside it; the mesh's largest first cell next to
   the first cell height for the target y+.
 
-## In 2.11.1
+## In 2.3.3
 
 - CFD section: **Flow** and **y+ estimator** fold, and each has a **Values** pop-up
   with every computed number (Re, T, p, ν, q… / Cf, τw, u*, y+ max / mean / min…).
@@ -178,7 +178,7 @@
 - The auto length is the longest distance along the flow (root chord of a swept wing).
 - Flow direction: X / Y / Z labels, no more clipped numbers. Info starts closed.
 
-## In 2.11
+## In 2.3.2
 
 - **CFD mode** for CAD files: an inflation layer calculator in the sidebar (target
   y+, Mach, length, altitude; first cell, number of layers, growth rate, desired
@@ -188,7 +188,7 @@
   cell, the layer stack drawn to scale, and two checks (covers the boundary layer ·
   smooth transition to the mesh).
 
-## In 2.10
+## In 2.3.1
 
 - **CFD** section: y+ estimate on a boundary — air at an altitude (U.S. Standard
   Atmosphere), fresh or sea water at a depth, or your own density / viscosity;
@@ -198,7 +198,7 @@
 - Measure ▸ **Point** is measured from the origin, like a distance.
 - The section normal keeps the numbers you type.
 
-## In 2.9
+## In 2.3
 
 - **Cell quality** for meshes: skewness, aspect ratio, scaled Jacobian and volume
   of every cell as a histogram. Set the "bad" threshold, zoom to the bad cells,

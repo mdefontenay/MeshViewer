@@ -4,62 +4,91 @@ Every version of Mesh Viewer, newest first. Each table lists the files that
 changed and what changed in them. (The version number lives in
 `meshviewer/__init__.py`.)
 
-**Version numbers:** 2.X for a bigger update (a new feature or section), 2.X.Y for a
-smaller one (tweaks, fixes). Versions before 2.11.4 were renumbered to follow this;
-the old numbers:
+**Version numbers:** 2.X marks a new stage of the app — only five so far:
 
-<details><summary>Old → new numbers</summary>
-
-| Old | New |
+| | Stage |
 |---|---|
-| 2.2 | 2.1.1 |
-| 2.3 | 2.1.2 |
-| 2.4 | 2.1.3 |
-| 2.5 | 2.2 |
-| 2.6 | 2.3 |
-| 2.7 | 2.3.1 |
-| 2.8 | 2.3.2 |
-| 2.9 | 2.4 |
-| 2.9.1 | 2.4.1 |
-| 2.10 | 2.4.2 |
-| 2.11 | 2.4.3 |
-| 2.12 | 2.5 |
-| 2.12.1 | 2.5.1 |
-| 2.13 | 2.5.2 |
-| 2.14 | 2.5.3 |
-| 2.15 | 2.5.4 |
-| 2.16 | 2.5.5 |
-| 2.17 | 2.5.6 |
-| 2.18 | 2.6 |
-| 2.19 | 2.7 |
-| 2.20 | 2.7.1 |
-| 2.21 | 2.7.2 |
-| 2.22 | 2.7.3 |
-| 2.23 | 2.8 |
-| 2.24 | 2.8.1 |
-| 2.25 | 2.8.2 |
-| 2.26 | 2.8.3 |
-| 2.27 | 2.8.4 |
-| 2.28 | 2.8.5 |
-| 2.29 | 2.8.6 |
-| 2.30 | 2.9 |
-| 2.31 | 2.10 |
-| 2.32 | 2.11 |
-| 2.33 | 2.11.1 |
-| 2.34 | 2.11.2 |
-| 2.35 | 2.11.3 |
-| 2.36 | 2.11.4 |
+| 2.0 | from the AppleScript droplet to a real app |
+| 2.1 | viewing: selection, mesh quality, section, CAD formats, measure, appearance |
+| 2.2 | Edit and Export |
+| 2.3 | analysis: cell quality, Info, CFD (y+) and CFD mode (inflation layers) |
+| 2.4 | simulation results, the icon bar sidebar, more formats, plots |
+
+Everything inside a stage is 2.X.Y — new tools in a section, tweaks and fixes alike.
+The versions were renumbered to this (twice before, the last time harder):
+
+<details><summary>Now · was · before that</summary>
+
+| Now | Was | Before that |
+|---|---|---|
+| 2.4.8 | 2.18.4 | 2.20.1 |
+| 2.4.7 | 2.18.3 | 2.20 |
+| 2.4.6 | 2.18.2 | 2.19.2 |
+| 2.4.5 | 2.18.1 | 2.19.1 |
+| 2.4.4 | 2.18 | 2.19 |
+| 2.4.3 | 2.17 | 2.18 |
+| 2.4.2 | 2.16.1 | 2.17 |
+| 2.4.1 | 2.16 |  |
+| 2.4 | 2.15 |  |
+| 2.3.15 | 2.14.2 |  |
+| 2.3.14 | 2.14.1 |  |
+| 2.3.13 | 2.14 |  |
+| 2.3.12 | 2.13.2 |  |
+| 2.3.11 | 2.13.1 |  |
+| 2.3.10 | 2.13 |  |
+| 2.3.9 | 2.12.2 |  |
+| 2.3.8 | 2.12.1 |  |
+| 2.3.7 | 2.12 |  |
+| 2.3.6 | 2.11.4 | 2.36 |
+| 2.3.5 | 2.11.3 | 2.35 |
+| 2.3.4 | 2.11.2 | 2.34 |
+| 2.3.3 | 2.11.1 | 2.33 |
+| 2.3.2 | 2.11 | 2.32 |
+| 2.3.1 | 2.10 | 2.31 |
+| 2.3 | 2.9 | 2.30 |
+| 2.2.6 | 2.8.6 | 2.29 |
+| 2.2.5 | 2.8.5 | 2.28 |
+| 2.2.4 | 2.8.4 | 2.27 |
+| 2.2.3 | 2.8.3 | 2.26 |
+| 2.2.2 | 2.8.2 | 2.25 |
+| 2.2.1 | 2.8.1 | 2.24 |
+| 2.2 | 2.8 | 2.23 |
+| 2.1.23 | 2.7.3 | 2.22 |
+| 2.1.22 | 2.7.2 | 2.21 |
+| 2.1.21 | 2.7.1 | 2.20 |
+| 2.1.20 | 2.7 | 2.19 |
+| 2.1.19 | 2.6 | 2.18 |
+| 2.1.18 | 2.5.6 | 2.17 |
+| 2.1.17 | 2.5.5 | 2.16 |
+| 2.1.16 | 2.5.4 | 2.15 |
+| 2.1.15 | 2.5.3 | 2.14 |
+| 2.1.14 | 2.5.2 | 2.13 |
+| 2.1.13 | 2.5.1 | 2.12.1 |
+| 2.1.12 | 2.5 | 2.12 |
+| 2.1.11 | 2.4.3 | 2.11 |
+| 2.1.10 | 2.4.2 | 2.10 |
+| 2.1.9 | 2.4.1 | 2.9.1 |
+| 2.1.8 | 2.4 | 2.9 |
+| 2.1.7 | 2.3.2 | 2.8 |
+| 2.1.6 | 2.3.1 | 2.7 |
+| 2.1.5 | 2.3 | 2.6 |
+| 2.1.4 | 2.2 | 2.5 |
+| 2.1.3 | 2.1.3 | 2.4 |
+| 2.1.2 | 2.1.2 | 2.3 |
+| 2.1.1 | 2.1.1 | 2.2 |
+| 2.1 | 2.1 |  |
+| 2.0 | 2.0 |  |
 
 </details>
 
-## 2.20.1 — Plot tabs scroll; right-click a tab
+## 2.4.8 — Plot tabs scroll; right-click a tab
 
 | File | |
 |---|---|
 | `gui/window.py`, `gui/style.py` | The tabs under the view scroll sideways when there are too many plots (thin bar; the wheel or trackpad scrolls them; the open tab stays in view) |
 | `gui/window.py` | Right-click a plot's tab: **Open**, **Rename…**, **Delete** |
 
-## 2.20 — Units for results, any plane for a cross section, eye on each cut
+## 2.4.7 — Units for results, any plane for a cross section, eye on each cut
 
 | File | |
 |---|---|
@@ -72,7 +101,7 @@ the old numbers:
 | `gui/sidebar.py` | A grey line above the first analysis tool in the icon bar, like the one above + |
 | `gui/style.py` | Every text box and menu 22 px high, 12 px text (they were tall on macOS) |
 
-## 2.19.2 — Every section on a card; Section and Plots alike
+## 2.4.6 — Every section on a card; Section and Plots alike
 
 | File | |
 |---|---|
@@ -81,7 +110,7 @@ the old numbers:
 | `gui/panels/plots.py` | *Plane* / *Position* as in Section; **Normalize** instead of x/c; Along made of fixed X / Y / Z buttons (the plane's own axis hidden): Y now lights up when chosen (rebuilt buttons stayed unlit on macOS); New Measurement… on its card |
 | `gui/icons.py` | Results: `waveform.path.ecg.text.page`; Plots: `chart.xyaxis.line` |
 
-## 2.19.1 — Plots: no more crash when sliding, tidier controls
+## 2.4.5 — Plots: no more crash when sliding, tidier controls
 
 | File | |
 |---|---|
@@ -90,7 +119,7 @@ the old numbers:
 | `gui/panels/plots.py` | **Tidier measurement controls**: one card per measurement in three groups — *Cut* (normal to, at, slider), *Plot* (values, along + an x/c toggle, negative up), *Points* (Import… · Export…); *Rename… · Delete* under the card instead of the ⋯ button; the point count is gone (only problems are shown) |
 | `gui/panels/results.py`, `render/overlays.py`, `core/fields.py` | *Highlight sharp changes* and *Jump over* removed (Gradient stays) |
 
-## 2.19 — Plots (cross sections in tabs), gradients and sharp changes
+## 2.4.4 — Plots (cross sections in tabs), gradients and sharp changes
 
 | File | |
 |---|---|
@@ -98,7 +127,7 @@ the old numbers:
 | `core/fields.py`, `gui/panels/results.py`, `render/overlays.py` | **Results ▸ Show ▸ Gradient** (F15): |∇f| along the surface. **Highlight sharp changes**: faces where the field changes by more than *Jump over* % of its range, in pink over the colours, with their count |
 | `render/scene.py`, `gui/panels/results.py` | Several listeners can follow shown / hidden boundaries (Results, Plots) |
 
-## 2.18 — Gmsh / Fluent .msh, DXF drawings, colour maps
+## 2.4.3 — Gmsh / Fluent .msh, DXF drawings, colour maps
 
 | File | |
 |---|---|
@@ -119,7 +148,7 @@ the old numbers:
 | `core/quality.py` | Cell quality: no error when every cell has the same value (histogram) |
 | `setup.py` | Finder: `.msh` and `.dxf` can open with Mesh Viewer |
 
-## 2.17 — File unit, one Distance tool, formula links
+## 2.4.2 — File unit, one Distance tool, formula links
 
 | File | |
 |---|---|
@@ -129,7 +158,7 @@ the old numbers:
 | `gui/panels/inflation.py` | **Next cell**: hover it — about 2 × the largest layer is a smooth step into the volume mesh; use about that size for the surface cells too (low aspect ratio) |
 | `gui/pages/inflation.py`, `gui/panels/inflation.py`, `core/cfd.py`, `core/cfd_export.py`, `gui/dialogs/wall_help.py` | **y+ along the flow removed** (tab, curve, Values rows, export line). The y+ tile shows the estimated y+ |
 
-## 2.16 — Icon bar sidebar, code reorganised, fixes
+## 2.4.1 — Icon bar sidebar, code reorganised, fixes
 
 | File | |
 |---|---|
@@ -145,7 +174,7 @@ the old numbers:
 | `core/fields.py`, `gui/panels/results.py` | Fix: STEP files showed a Results section (an internal id array was taken for a field). Only floating-point arrays count |
 | whole package | **Code reorganised**: `core/` (no Qt), `render/` (VTK), `gui/` (Qt; `panels/`, `dialogs/`, `pages/`), absolute imports, shared `core/units.py`, `core/fields.py`, `core/geometry2d.py`, `gui/forms.py`; version notes removed from the code. `ARCHITECTURE.md` (new): the map. `tests/` (new): headless tests and test files |
 
-## 2.15 — Simulation results on the boundaries (FUN3D / Tecplot)
+## 2.4 — Simulation results on the boundaries (FUN3D / Tecplot)
 
 | File | |
 |---|---|
@@ -154,7 +183,7 @@ the old numbers:
 | `gui/cfd_view.py`, `gui/scene.py` | The colours are drawn over the visible parts: blue scale for fields of one sign, blue–grey–red centred on zero for signed ones (cp, u, v, w). Cut by the section plane, mesh edges follow the toolbar, hiding a part updates the colours and the numbers |
 | `gui/memory.py`, `gui/window.py` | The field, range and on / off are remembered per file |
 
-## 2.14.2 — Internal flow, exact CAD cross section; no y+ colours on the walls
+## 2.3.15 — Internal flow, exact CAD cross section; no y+ colours on the walls
 
 | File | |
 |---|---|
@@ -163,7 +192,7 @@ the old numbers:
 | `cad/occt.py`, `gui/section_view.py` | Cross section of STEP / IGES / BREP: the walls are cut from the **CAD curves** themselves (smooth at any zoom), once the plane stops moving — the triangles while it moves |
 | `gui/section_view.py` | Flow direction: three thin **inlet arrows** on the upstream edge of the view instead of the boxed arrow; a small dot / cross when the flow goes through the plane |
 
-## 2.14.1 — Even y+ colours on CAD, max y+ tile, plots alike
+## 2.3.14 — Even y+ colours on CAD, max y+ tile, plots alike
 
 | File | |
 |---|---|
@@ -172,7 +201,7 @@ the old numbers:
 | `gui/inflation_view.py` | the two plots share one look: a **y-axis title** along the axis (Height (mm) · y+ of the first layer), the x-axis title under it, reference lines named at the right with their value under the name, an end label moved off them; y+ along the flow **always shows the viscous sublayer** (y+ 5) and notes the first layer it uses |
 | `gui/cfd_panel.py`, `gui/inflation_panel.py` | **Temperature** greyed out for *Air — altitude*, like density, viscosity and sound speed (the altitude's standard temperature); typed for water |
 
-## 2.14 — CFD export, y+ along the flow, wall functions, temperature, update check
+## 2.3.13 — CFD export, y+ along the flow, wall functions, temperature, update check
 
 | File | |
 |---|---|
@@ -185,7 +214,7 @@ the old numbers:
 | `gui/about_dialog.py` | **Check for Updates** asks GitHub for the latest release: newer → "A new update is available" + Download; same → up to date; older → this app is a pre-release |
 | `cfd.py` | first cell layer: no crash on a mesh without volume cells |
 
-## 2.13.2 — Simpler cross section; every number in Values
+## 2.3.12 — Simpler cross section; every number in Values
 
 | File | |
 |---|---|
@@ -193,27 +222,27 @@ the old numbers:
 | `gui/inflation_view.py`, `gui/inflation_panel.py` | the line of small numbers under the page is gone; they're all in the **Values** pop-up (recovery factor added there for supersonic flow) |
 | `README.md`, `docs/screenshots/` | new **CFD tools** section with three screenshots (CFD mode in 3D, layer size plot, cross section); features and *Using it* updated for CFD mode (walls, pick faces, cross section, Flip side), Colour by y+, Formulas / Values, right-click ▸ Hide Surface |
 
-## 2.13.1 — Cross section: flow side, toggles, smooth curves, flow arrow
+## 2.3.11 — Cross section: flow side, toggles, smooth curves, flow arrow
 
 | File | |
 |---|---|
 | `gui/section_view.py`, `gui/inflation_view.py` | Cross section tab: **External flow / Internal flow** (which side of the walls gets the layers; replaces "Layers on the other side"); the legend sits top right like the plot's and each entry **shows / hides** what it names — inflation layers, boundary layer, top of the next cell, **flow direction** (an arrow of Flow ▸ Direction seen on the plane, or a dot / cross when it goes through the plane); **Smooth curves**: a smooth curve through the cut (centripetal Catmull-Rom through the surface points, points in the middle of flat facets dropped), sharp corners (> 30°) kept; a **Fit view** button |
 
-## 2.13 — Cross section of the inflation layers
+## 2.3.10 — Cross section of the inflation layers
 
 | File | |
 |---|---|
 | `gui/section_view.py` (new), `gui/inflation_view.py`, `gui/window.py` | Inflation page ▸ **Cross section** tab (replaces the "Near the wall" placeholder): it follows the section plane (sidebar ▸ Section) and draws its cut in 2D, facing the plane — the model in light grey, the walls in a dark line — with an **estimate of the inflation layers** on the walls: each layer is the wall outline pushed out along the wall's normal by the total thickness so far (mitred corners); layers closer than 2 px merge into a solid band; dashed = boundary layer, dotted = top of the next cell. Scroll to zoom, drag to pan, double-click or *Fit* to fit; *Layers on the other side* for open surfaces facing the other way; scale bar and legend. Messages when Section is off or the plane misses the walls |
 
 
-## 2.12.2 — Inflation page: tabs, full-width plot, plain names
+## 2.3.9 — Inflation page: tabs, full-width plot, plain names
 
 | File | |
 |---|---|
 | `gui/inflation_view.py` | the plot sits in a card with tabs — **Layer size plot** and **Near the wall** (a placeholder for the next view) — and takes the full width. Redrawn like the rest of the app: a bar per layer (its height), a line + soft area for the total thickness so far, light horizontal grid, the boundary layer (dashed) and next cell size (dotted) labelled on the right, a legend above, hover crosshair with the layer's numbers. Colour-blind-safe series colours for light and dark. *Near the wall* restyled to match |
 | `gui/inflation_panel.py`, `gui/inflation_view.py` | plain names: First layer, Layers, Growth rate, **Next cell (× max layer height)**; tiles and checks say "boundary layer thickness", "total thickness of the layers", "max layer height" |
 
-## 2.12.1 — CFD mode: Flow like the CFD section, growth 1–2, desired cell factor
+## 2.3.8 — CFD mode: Flow like the CFD section, growth 1–2, desired cell factor
 
 | File | |
 |---|---|
@@ -222,7 +251,7 @@ the old numbers:
 | `gui/inflation_panel.py`, `cfd.py` | **Desired cell** is now a factor of the largest layer (× y_max, default 2, 1–10) |
 | `gui/inflation_view.py` | plot: the purple "layers" lines removed; the numbers line leaves out T, p, k when they aren't known (water, custom) |
 
-## 2.12 — CFD mode: walls, Formulas / Values, units; Hide Surface
+## 2.3.7 — CFD mode: walls, Formulas / Values, units; Hide Surface
 
 | File | |
 |---|---|
@@ -230,7 +259,7 @@ the old numbers:
 | `gui/scene.py`, `gui/sidebar.py`, `gui/memory.py` | right-click in the 3D view: **Hide Part** and **Hide Surface** (one CAD face); *Show Hidden Surfaces (n)*, and *Show All* brings them back; hidden surfaces are remembered per file |
 | `gui/cfd_view.py` | `WallView`: the walls tint |
 
-## 2.11.4 — CFD: unit menus, boundary colours, back to auto length
+## 2.3.6 — CFD: unit menus, boundary colours, back to auto length
 
 | File | |
 |---|---|
@@ -238,7 +267,7 @@ the old numbers:
 | `gui/widgets.py`, `gui/cfd_panel.py`, `gui/sidebar.py` | the Boundary menu shows each part's **colour dot** (follows colour changes) |
 | `gui/cfd_view.py`, `gui/scene.py` | Colour by y+ follows the view: its mesh edges hide while moving, and it turns to a coloured wireframe with the faces off |
 
-## 2.11.3 — CFD: colour by y+, compressibility, speed units, Formulas
+## 2.3.5 — CFD: colour by y+, compressibility, speed units, Formulas
 
 | File | |
 |---|---|
@@ -248,13 +277,13 @@ the old numbers:
 | `gui/widgets.py`, `gui/style.py`, `gui/cfd_panel.py` | **Formulas** buttons beside *Values* (Flow, y+ estimator): a window in the middle of the app with every equation, drawn like LaTeX (matplotlib mathtext) |
 | `setup.py`, `requirements.txt` | matplotlib bundled (draws the formulas) |
 
-## 2.11.2 — CFD: speed U field, locked air / water values
+## 2.3.4 — CFD: speed U field, locked air / water values
 
 | File | |
 |---|---|
 | `gui/cfd_panel.py`, `gui/style.py` | **Speed U** is a field: type U and Mach follows (M = U / a), type Mach and U follows. Density, viscosity and sound speed are greyed out and locked unless the fluid is *Custom*. The y+ card shows *min · mean* beside the max, and the mesh's largest first cell beside the first cell height for the target y+ |
 
-## 2.11.1 — CFD section: folding groups, Values pop-ups, max y+
+## 2.3.3 — CFD section: folding groups, Values pop-ups, max y+
 
 | File | |
 |---|---|
@@ -262,7 +291,7 @@ the old numbers:
 | `cfd.py` | auto length = the **longest distance along the flow** across the boundary (`streamwise_length`): a swept wing gives its root chord, not root leading edge to tip trailing edge |
 | `gui/sidebar.py` | **Info** always starts closed |
 
-## 2.11 — CFD mode for CAD files (inflation layer calculator)
+## 2.3.2 — CFD mode for CAD files (inflation layer calculator)
 
 | File | |
 |---|---|
@@ -270,7 +299,7 @@ the old numbers:
 | `gui/inflation_view.py` (new), `gui/window.py` | with CFD mode on, a bar under the 3D view switches between **3D model** and **Inflation layers**: a page with the key numbers (Reynolds, first cell, estimated y+, δ99, total height, largest layer), the plot (total height and layer height vs layer #, boundary layer, desired cell; hover for values), the layer stack near the wall drawn to scale, and two checks (layers cover the boundary layer · smooth transition) |
 | `gui/sidebar.py`, `gui/scene.py`, `gui/memory.py`, `gui/style.py` | CFD mode shows for CAD files, the CFD (y+) section for meshes; page colours for light and dark |
 
-## 2.10 — CFD section (y+), clearer Info, Point from the origin
+## 2.3.1 — CFD section (y+), clearer Info, Point from the origin
 
 | File | |
 |---|---|
@@ -280,7 +309,7 @@ the old numbers:
 | `gui/section.py`, `gui/section_panel.py`, `gui/memory.py` | the section **normal is kept as typed** (no longer rescaled to length 1) |
 | `gui/widgets.py`, `gui/style.py` | `NumberField` (takes 1.8e-5 or 0,3), round "?" help buttons, `MenuSelect.clear()` |
 
-## 2.9 — Cell quality, Info, more measurements, files reopen as you left them
+## 2.3 — Cell quality, Info, more measurements, files reopen as you left them
 
 | File | |
 |---|---|
@@ -292,7 +321,7 @@ the old numbers:
 | `export.py`, `gui/export_dialog.py` | **OBJ** (with a .mtl) and **PLY** keep the part colours; VTU no longer carries extra arrays |
 | `gui/jobs.py` (new) | one helper for background work (loading, re-meshing, cell quality) |
 
-## 2.8.6 — part colours, Faces toggle, cleanup
+## 2.2.6 — part colours, Faces toggle, cleanup
 
 | File | |
 |---|---|
@@ -300,7 +329,7 @@ the old numbers:
 | `gui/window.py`, `gui/scene.py`, `gui/icons.py` | "Edges only" is now **Faces** (on = faces shown, off = edges only), with a shaded-cube icon |
 | cleanup | unused code removed (`n_triangles`, `last_edit`, `volume_cells`, `part_items`, pencil icon); tooltips and comments no longer point to the old Display section |
 
-## 2.8.5 — Display moves to the toolbar, Check for Updates
+## 2.2.5 — Display moves to the toolbar, Check for Updates
 
 | File | |
 |---|---|
@@ -308,7 +337,7 @@ the old numbers:
 | `gui/sidebar.py` | the **Display** section is removed (it's all in the toolbar now) |
 | `gui/about_dialog.py` | **Check for Updates…** opens the latest release on GitHub |
 
-## 2.8.4 — Edit like Onshape, Edges only, shading in Appearance
+## 2.2.4 — Edit like Onshape, Edges only, shading in Appearance
 
 | File | |
 |---|---|
@@ -318,7 +347,7 @@ the old numbers:
 | `gui/appearance_dialog.py`, `gui/app.py`, `gui/window.py` | **Shading** is now in Appearance ▸ Model (remembered, every window) |
 | `gui/part_tree.py`, `gui/style.py` | **Fix:** renaming a part in dark mode showed the old name through the new one (the rename field is now opaque) |
 
-## 2.8.3 — rename parts, McMaster numbers anywhere in a name, Edit as a table
+## 2.2.3 — rename parts, McMaster numbers anywhere in a name, Edit as a table
 
 | File | |
 |---|---|
@@ -327,7 +356,7 @@ the old numbers:
 | `gui/window.py`, `gui/export_dialog.py` | Export writes the new names (STL solids, OBJ groups, VTU part names, UGRID .mapbc); renames count as unsaved changes (dot, question on close, "_edited" file name) |
 | `gui/edit_panel.py`, `gui/style.py` | Edit section laid out as a small table: Pivot · rows X / Y / Z with Rotate [−90° \| +90° \| 180°] and Mirror [x → −x] · Move boxes + Move button in the same columns. Move boxes show "X 0" instead of "X 0.000". No line above "Show original edges" |
 
-## 2.8.2 — tidier Edit section, shading switch, .dmg background fixed
+## 2.2.2 — tidier Edit section, shading switch, .dmg background fixed
 
 | File | |
 |---|---|
@@ -338,7 +367,7 @@ the old numbers:
 | `gui/appearance_dialog.py`, `gui/window.py` | Appearance says what it is for ("how things look, saved for every window"; Display = what is shown) and is grouped by what it styles: Window · Background · Axes (label size) · Edges (line thickness, while moving) |
 | `make_dmg.sh` | the disk image window (background picture, icon places) is written by **dmgbuild** (installed in the build venv the first time) instead of asking Finder by AppleScript, which failed silently without the "control Finder" permission — the background now shows |
 
-## 2.8.1 — friendlier Edit section, Move, compare with the original
+## 2.2.1 — friendlier Edit section, Move, compare with the original
 
 | File | |
 |---|---|
@@ -349,7 +378,7 @@ the old numbers:
 | `gui/widgets.py`, `gui/style.py`, `gui/export_dialog.py`, `gui/screenshot_dialog.py` | `roomy_combo()`: drop-down lists with menu-like spacing and rounded rows, wide enough for their text (Export format, screenshot resolution) |
 | `export.py` | shorter format names |
 
-## 2.8 — Edit (rotate / mirror) and Export
+## 2.2 — Edit (rotate / mirror) and Export
 
 | File | |
 |---|---|
@@ -362,7 +391,7 @@ the old numbers:
 | `gui/window.py`, `gui/icons.py` | **Edit** (⌘E) opens the Edit section — STEP / IGES / BREP show "File type not supported for edits"; **Export…** (⇧⌘E, toolbar and File menu) shows the file in Finder when done; edited windows get the "unsaved" dot and ask before closing |
 | `gui/sidebar.py` | Bounding box moved right under Axes |
 
-## 2.7.3 — toolbar tidy-up
+## 2.1.23 — toolbar tidy-up
 
 | File | |
 |---|---|
@@ -370,7 +399,7 @@ the old numbers:
 | `gui/sidebar.py` | Display rows evenly spaced (the extra gaps between groups are gone); "Origin (0, 0, 0)" is just "Origin" (the coordinates are in its tooltip) |
 | `.gitignore` | ignores the `Claude outputs/` folder |
 
-## 2.7.2 — cleaner Display section, steadier section handles
+## 2.1.22 — cleaner Display section, steadier section handles
 
 | File | |
 |---|---|
@@ -379,14 +408,14 @@ the old numbers:
 | `gui/section.py`, `gui/section_panel.py` | cut volume mesh: edges black like the model's mesh edges and shown only when Display ▸ Mesh edges is on; the switch is "Fill cut faces" again. Plane handles (sphere, arrow tips) keep the same small size on screen at any zoom; shorter arrow |
 | `gui/scene.py` | `set_axes_mode()`; Mesh edges switch also drives the cut mesh; unused `set_grid()` removed |
 
-## 2.7.1
+## 2.1.21
 
 | File | |
 |---|---|
 | `build_app.sh`, `make_dmg.sh` | heavy files (Python environment, build, app, .dmg) go to `~/Downloads/MeshViewer-build` (or `$MESHVIEWER_WORK`), not the project folder; `.venv` is just a link |
 | `.gitignore` | ignores the `.venv` link |
 
-## 2.7
+## 2.1.20
 
 | File | |
 |---|---|
@@ -396,7 +425,7 @@ the old numbers:
 | `gui/section.py`, `gui/section_panel.py` | CGNS / UGRID: the section fills the cut with the volume cells it goes through, with their edges; surface-only files keep the solid fill |
 | `gui/scene.py` | cut-mesh colours for light / dark; its edges hide while moving |
 
-## 2.6
+## 2.1.19
 
 | File | |
 |---|---|
@@ -406,7 +435,7 @@ the old numbers:
 | `.gitignore` | **new** — keeps `.venv`, `build/`, `dist/`, `.dmg` and `__pycache__` out of git |
 | `README.md`, `CHANGELOG.md`, `LICENSE`, `docs/` | **new layout for GitHub**: README with screenshots, features, download and build steps; the version history moved to CHANGELOG.md; MIT licence; screenshots and a release-notes template in `docs/` |
 
-## 2.5.6
+## 2.1.18
 
 | File | |
 |---|---|
@@ -414,7 +443,7 @@ the old numbers:
 | `gui/scene.py` | **Axis lines** off now hides the numbers and axis titles too (grid lines stay); axis numbers follow the unit chosen in the toolbar (mm / cm / m / in / ft) and titles read "X Axis (mm)"; with ⊘ no unit is shown. Grid building moved into `refresh_grid()` / `_add_grid()` (view and screenshots share it) |
 | `gui/measure.py` | changing the unit rebuilds the axis labels |
 
-## 2.5.5
+## 2.1.17
 
 | File | |
 |---|---|
@@ -425,7 +454,7 @@ the old numbers:
 | `gui/measure.py` | distance points are fixed-size dots on screen (13 px) instead of spheres that grew when zooming in; X/Y/Z lines 2.5 px (was 1.5) |
 | `gui/app.py`, `gui/window.py` | axis-lines setting saved |
 
-## 2.5.4
+## 2.1.16
 
 | File | |
 |---|---|
@@ -435,7 +464,7 @@ the old numbers:
 | `gui/appearance_dialog.py` | "Grid lines" switch; "While moving" switch now says rotate, pan, zoom |
 | `meshviewer/__init__.py`, `setup.py`, `make_dmg.sh` | the version number lives in one place (`__version__`) |
 
-## 2.5.3 — smoother edges, more Appearance options
+## 2.1.15 — smoother edges, more Appearance options
 
 | File | |
 |---|---|
@@ -445,7 +474,7 @@ the old numbers:
 | `gui/icons.py` | Appearance icon is now three sliders (it holds more than light / dark) |
 | `gui/style.py` | group titles in the sheet |
 
-## 2.5.2 — smaller app
+## 2.1.14 — smaller app
 
 | File | |
 |---|---|
@@ -454,7 +483,7 @@ the old numbers:
 | `mesh_viewer.py` | self-test also opens Qt and a 3D view, so a missing Qt piece is caught before packing |
 | `setup.py` | leaves out tkinter / pip / wheel |
 
-## 2.5.1 — fix
+## 2.1.13 — fix
 
 | File | |
 |---|---|
@@ -463,7 +492,7 @@ the old numbers:
 | `make_dmg.sh` | `--reuse` re-repairs an existing build (no rebuild) |
 | `mesh_viewer.py` | self-test also checks lzma, bz2, zlib, ssl, hashlib, decimal, ctypes (not sqlite3: the app doesn't use it, so py2app leaves it out) |
 
-## 2.5
+## 2.1.12
 
 | File | |
 |---|---|
@@ -473,7 +502,7 @@ the old numbers:
 | `resources/dmg_background*.png` | **new** — background of the disk-image window |
 | `gui/scene.py` | axis labels bigger: Small 16 / Medium 20 / Large 24 pt (old Large is the new Small); XYZ corner widget a bit larger |
 
-## 2.4.3
+## 2.1.11
 
 | File | |
 |---|---|
@@ -481,7 +510,7 @@ the old numbers:
 | `gui/sidebar.py`, `gui/scene.py`, `gui/window.py` | "Search in McMaster" uses only the row / part you right-clicked, never the whole selection (Hide / Isolate still act on the selection when you right-click inside it) |
 | `gui/scene.py`, `gui/appearance_dialog.py`, `gui/app.py` | **new:** Axis labels Small (default) / Medium / Large in Appearance; also used for screenshots; the XYZ corner widget grows a little with it |
 
-## 2.4.2
+## 2.1.10
 
 | File | |
 |---|---|
@@ -490,7 +519,7 @@ the old numbers:
 | `gui/scene.py`, `gui/screenshot_dialog.py` | **new:** "Transparent" screenshot background (PNG with alpha; grid/labels drawn dark, for white pages) |
 | clean-up | screenshot sheet reuses the shared `ColorField` instead of its own copy; removed an unused `Scene.set_all_visible` and unused imports; old "NEW" markers removed (each version's changes are tagged `NEW (vX)` / `FIX (vX)`) |
 
-## 2.4.1 — fixes
+## 2.1.9 — fixes
 
 | File | |
 |---|---|
@@ -500,7 +529,7 @@ the old numbers:
 | `gui/appearance_dialog.py`, `gui/app.py`, `gui/window.py` | "Parts list" spacing option in Appearance, remembered |
 | `gui/style.py`, `gui/widgets.py` | light mode: the system accent is made vivid and dark enough to read (macOS gives Qt a pale version); dark mode unchanged |
 
-## 2.4 — appearance, McMaster, roomier menus
+## 2.1.8 — appearance, McMaster, roomier menus
 
 | File | |
 |---|---|
@@ -516,7 +545,7 @@ the old numbers:
 | `gui/screenshot_dialog.py` | background choice adds "As Shown" |
 | `gui/icons.py` | Appearance icon |
 
-## 2.3.2
+## 2.1.7
 
 | File | |
 |---|---|
@@ -528,7 +557,7 @@ the old numbers:
 | `gui/widgets.py` | closing a section always gives its space back |
 | `gui/icons.py` | ⊘ "no units" icon |
 
-## 2.3.1 — fixes
+## 2.1.6 — fixes
 
 | File | |
 |---|---|
@@ -540,7 +569,7 @@ the old numbers:
 | `gui/widgets.py` | sliders / number boxes ignore the scroll wheel; sections can start closed |
 | `gui/screenshot_dialog.py` | sheet shrinks back after leaving "Custom" |
 
-## 2.3 — measure, screenshot options, multi-select
+## 2.1.5 — measure, screenshot options, multi-select
 
 | File | |
 |---|---|
@@ -551,7 +580,7 @@ the old numbers:
 | `cad/occt.py` | triangles remember which CAD face they came from (`face_id`); exact area / volume from OpenCASCADE |
 | `model.py`, `formats.py` | model keeps the CAD source and units |
 
-## 2.2 — more CAD formats
+## 2.1.4 — more CAD formats
 
 | File | |
 |---|---|

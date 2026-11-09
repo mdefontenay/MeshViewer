@@ -84,7 +84,7 @@ def test(app, files):
     sb._visibility_changed(["SPHERE"], False)            # only the floor left
     check({c["part"] for c in pp.results[i]["curves"]} <= {"FLOOR"}, "hidden boundary not cut")
     sb._visibility_changed(["SPHERE"], True)
-    rng = np.random.default_rng(1)                      # slide fast (crashed in 2.19)
+    rng = np.random.default_rng(1)                      # slide fast (crashed in 2.4.4)
     for k in range(400):
         ed.slider.setValue(int(rng.integers(0, 1000)))
         if k % 5 == 0:

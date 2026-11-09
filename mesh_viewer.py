@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 
 def selftest() -> int:
-    """NEW (v2.5): `Mesh Viewer --selftest` — checks a bundled app has everything
+    """NEW (v2.1.12): `Mesh Viewer --selftest` — checks a bundled app has everything
     (used by make_dmg.sh before packaging). Prints one line per check."""
     import importlib
     failed = 0
@@ -25,7 +25,7 @@ def selftest() -> int:
     for mod in ("lzma", "bz2", "zlib", "ssl", "hashlib", "decimal", "ctypes",
                 "numpy", "h5py", "PySide6.QtWidgets", "pyvista", "pyvistaqt", "OCP.STEPControl",
                 "meshviewer.gui.app", "meshviewer.core.cad.step", "meshviewer.core.mesh.cgns",
-                "meshio", "ezdxf"):                # v2.18: .msh, DXF
+                "meshio", "ezdxf"):                # v2.4.3: .msh, DXF
         try:
             importlib.import_module(mod)
             print(f"ok    {mod}")
