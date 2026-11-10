@@ -1,4 +1,68 @@
-## What's new in 2.4.8
+## What's new in 2.5 beta 3
+
+- **Tools on the right**: the tools moved to an inspector right of the 3D view, in
+  three tabs — **View** (Mesh Quality, Section, Edit), **Measure** (Info, Measure,
+  Plots) and **Analyze** (CFD, Cell Quality, Results). ⌥⌘I shows or hides it, ⌥⌘1–3
+  pick a tab. Measure measures while its tab is shown.
+- **Parts on the left**: the sidebar is the parts list, the whole height of the window.
+- **A lighter toolbar**: views, **Show ▾**, the **unit ▾**, Export, Screenshot.
+  View ▸ **Customize Toolbar…** (or right-click the toolbar) picks what it shows.
+- **Fixed**: toolbar icons sometimes missing on the welcome screen.
+- **Fixed**: Settings and About no longer slide a full-screen window away.
+
+## In 2.5 beta 2
+
+- **Fixed**: *Check for Updates…* was twice in the app menu, and Settings was called
+  Preferences.
+- **Fixed**: Settings and About no longer slide a full-screen window away.
+- **Welcome screen**: an empty window offers Open…, your recent files and two samples
+  to try — the ONERA M6 wing (CGNS) and an avionics bay (STEP).
+- **File ▸ Revert to Original…** opens a file as the first time, after asking.
+- A small **spinner** in the toolbar while a file opens or is re-meshed; **errors** say
+  what to do next and offer **Report a Problem…** (also in the Help menu).
+- Save panels, Rename and Color… **slide down from the window** as sheets.
+- **VoiceOver** names every button and switch; **Increase contrast** is followed.
+
+## In 2.5 beta 1
+
+A first beta of 2.5: the app organized the way Mac apps are.
+
+- **Full menu bar**: Edit (Undo, Redo, Select All, Find…), Window, and Help with a
+  list of every keyboard shortcut. Everything in the toolbar is also in a menu.
+- **Undo anything** with ⌘Z: hiding and showing parts, colors, renames, hidden faces,
+  rotations and moves. ⇧⌘Z redoes.
+- **Settings… (⌘,)** replaces Appearance…: General, Appearance and Units tabs. New:
+  the mesh quality CAD files open at, the unit new files are shown in, and the unit
+  assumed for files that don't say theirs.
+- **Clearer names**: plots are *plots* (New Plot…), CFD mode is *Inflation Layers*,
+  *Hide Face* on CAD parts, American spelling everywhere.
+- The window title says **Edited** while rotations or moves aren't exported yet.
+- The sidebar's shortcut is now ⌃⌘S, as in other Mac apps.
+
+This is a beta: tell me what feels off.
+
+## In 2.4.11
+
+- **Faster STEP / IGES / BREP meshing, fewer triangles**: OpenCASCADE's own triangles
+  again (the even meshes of 2.4.10 are gone). Changing the Mesh quality is near
+  instant on most files.
+
+## In 2.4.10
+
+- **No more hole in the model** when zoomed in close and turning (parallel view).
+- **Axis numbers** are the same size on every axis and keep their size when zooming.
+
+## In 2.4.9
+
+Faster and smoother — nothing new to learn.
+
+- **Turning and zooming**: each frame is drawn once (it was drawn twice).
+- **Assemblies**: a part used many times is meshed once — opening and changing the mesh
+  quality are several times faster; *Select All* is instant (it took seconds).
+- **Everyday clicks** — hide, show, isolate, a unit change, moving a cross section —
+  draw one frame instead of several.
+
+## In 2.4.8
 
 - Many plots: the tabs under the view scroll sideways.
 - Right-click a plot's tab to open, rename or delete it.

@@ -18,13 +18,14 @@ from __future__ import annotations
 
 import numpy as np
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QAction, QActionGroup
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QAbstractSpinBox, QGridLayout, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout,
     QWidget,
 )
 
 from meshviewer.core import transform as xf
+from meshviewer.gui.forms import segmented
 from meshviewer.gui.widgets import Capsule, MenuSelect, NoWheelSpinBox, Switch
 
 KINDS = (("rotate", "Rotate"), ("mirror", "Mirror"), ("move", "Move by X, Y, Z"))
@@ -55,24 +56,6 @@ def _info(text=""):
     lab.setObjectName("InfoLine")
     lab.setWordWrap(True)
     return lab
-
-
-def _segmented(parent, items, tips):
-    group = QActionGroup(parent)
-    group.setExclusive(True)
-    acts = {}
-    for key, text in items:
-        a = QAction(text, parent)
-        a.setCheckable(True)
-        a.setToolTip(tips.get(key, ""))
-        group.addAction(a)
-        acts[key] = a
-    c = Capsule(list(acts.values()), name="Segmented")
-    c.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-    for b in c.buttons:
-        b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-    next(iter(acts.values())).setChecked(True)
-    return acts, c
 
 
 class EditPanel(QWidget):
@@ -118,7 +101,8 @@ class EditPanel(QWidget):
         self.kind.currentIndexChanged.connect(self._kind_changed)
         row("kind", "Transform", self.kind)
 
-        self.axis, w = _segmented(self, (("x", "X"), ("y", "Y"), ("z", "Z")), {})
+        self.axis, w = segmented(self, (("x", "X"), ("y", "Y"), ("z", "Z")), expand=True)
+        self.axis["x"].setChecked(True)
         for a in self.axis.values():
             a.toggled.connect(lambda _on: self._update_hint())
         row("axis", "Axis", w)
@@ -129,9 +113,10 @@ class EditPanel(QWidget):
                               "(thumb along +axis)")
         row("angle", "Angle", self.angle)
 
-        self.pivot, w = _segmented(self, (("origin", "Origin"), ("centre", "Centre")),
-                                   {"origin": "Turn / mirror about (0, 0, 0)",
-                                    "centre": "Turn / mirror about the model's centre"})
+        self.pivot, w = segmented(
+            self, (("origin", "Origin", "Turn / mirror about (0, 0, 0)"),
+                   ("centre", "Center", "Turn / mirror about the model's center")), expand=True)
+        self.pivot["origin"].setChecked(True)
         row("pivot", "Pivot", w)
 
         self.move = []
@@ -180,7 +165,7 @@ class EditPanel(QWidget):
         self._history_rows = []
 
         self.original = Switch()
-        self.original.setToolTip("Grey feature edges of the file as it was opened, to compare")
+        self.original.setToolTip("Gray feature edges of the file as it was opened, to compare")
         self.original.toggled.connect(self.original_toggled.emit)
         orow = QHBoxLayout()
         orow.setContentsMargins(2, 2, 2, 0)
@@ -300,7 +285,7 @@ class EditPanel(QWidget):
         if self.pivot["centre"].isChecked() and self.scene is not None:
             b = np.asarray(self.scene.model_bounds(), dtype=float).reshape(3, 2)
             r, t = xf.about(r, b.mean(axis=1))
-            label += " (centre)"
+            label += " (center)"
         self.edit_requested.emit(r, t, label)
 
     def _translate(self):

@@ -19,7 +19,6 @@ pipe flow.
 from __future__ import annotations
 
 import numpy as np
-import pyvista as pv
 
 from meshviewer.core.quality import _EDGES
 from meshviewer.core.polys import bare
@@ -142,23 +141,13 @@ def y_for(target, rho, mu, u_star):
     return target * mu / (rho * u_star)
 
 
-def length_along(points, direction):
-    """Extent of `points` along `direction` (any length; not changed)."""
-    d = np.asarray(direction, dtype=float)
-    n = np.linalg.norm(d)
-    if n == 0:
-        return 0.0
-    s = np.asarray(points, dtype=float) @ (d / n)
-    return float(s.max() - s.min()) if len(s) else 0.0
-
-
 def streamwise_length(points, direction, bins=60):
     """the longest distance along `direction` across `points`.
 
     The points are sorted into thin strips parallel to the flow (a grid on the
     plane across it); the length is the longest strip. A swept wing gives its
     root chord, not the distance from the root's leading edge to the tip's
-    trailing edge (that is length_along)."""
+    trailing edge."""
     p = np.asarray(points, dtype=float)
     d = np.asarray(direction, dtype=float)
     n = np.linalg.norm(d)
@@ -237,7 +226,7 @@ def first_layer(grid, wall):
     return out
 
 
-# --- inflation layer calculator ("CFD mode" for CAD files) --------------------
+# --- inflation layer calculator (Inflation Layers, CAD files) ------------------
 # Constants as in the original calculator (air)
 RU, M_AIR = 8.31446261815324, 0.0289647            # J/(mol K), kg/mol
 R_GAS = RU / M_AIR                                 # 287.055 J/(kg K)

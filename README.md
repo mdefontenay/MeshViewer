@@ -35,12 +35,12 @@ others could benefit from it.
   3D. The cut faces are filled in.
 - **CFD** (meshes): y+ estimate on a boundary from the flow (air at an altitude,
   water at a depth, or your own values) and the mesh's first cell layer; the
-  boundary **coloured by y+**; first cell height for a target y+; compressibility
+  boundary **colored by y+**; first cell height for a target y+; compressibility
   correction; a temperature input for water; a unit menu on every input; flow direction arrows.
-- **CFD mode** (CAD): an inflation layer calculator — choose the walls (a part, or
+- **Inflation Layers** (CAD, in the CFD tool): an inflation layer calculator — choose the walls (a part, or
   faces you pick), get the first layer height for a target y+, the layer heights
   for N layers and a growth rate, and compare them to the boundary layer. A page
-  under the 3D view shows a **layer size plot** and a **cross section** of the walls
+  under the 3D view shows the **layer sizes** and a **section** of the walls
   with the layers drawn on them (see [CFD tools](#cfd-tools)). External flow or **internal flow** (pipe or duct).
 - **CFD export**: the inflation layers as settings for OpenFOAM (snappyHexMesh),
   Fluent Meshing, STAR-CCM+ or Pointwise, or a CSV of every input and value.
@@ -49,7 +49,7 @@ others could benefit from it.
 - **Formulas** and **Values**: every equation used, shown like LaTeX, and every
   computed number (Re, Cf, δ99, u*…) in a pop-up.
 - **Cell quality** (meshes): skewness, aspect ratio, scaled Jacobian and volume of
-  every cell, as a histogram; show the bad cells, colour the cut by quality, find
+  every cell, as a histogram; show the bad cells, color the cut by quality, find
   inverted cells.
 - **Measure**:
   - point-to-point distance, with ΔX / ΔY / ΔZ drawn in 3D
@@ -59,12 +59,14 @@ others could benefit from it.
   - results in mm, cm, m, in or ft; the axis labels follow the same unit
 - **Screenshots** at up to 4× the window size, with the background as shown or
   transparent.
-- **Looks like a Mac app**: light and dark mode, your accent colour, a sidebar
-  with sections that fold, one window per file. A second file opens instantly,
-  without starting the app again.
-- **Appearance** settings: theme, 3D background (gradient, colour or a picture),
-  axis label size, edge thickness, and hiding edges while rotating for smoother
-  handling of large models.
+- **Works like a Mac app**: the full menu bar (Edit ▸ Undo for every change, Find,
+  Window, Help with every keyboard shortcut), light and dark mode, your accent color,
+  the parts list on the left and the tools on the right (View · Measure · Analyze
+  tabs), a light toolbar you can customize, one window per file with its name and "Edited" in
+  the title. A second file opens instantly, without starting the app again.
+- **Settings** (⌘,): theme, the mesh quality CAD files open at, 3D background
+  (gradient, color or a picture), axis label size, edge thickness, hiding edges while
+  rotating, and the units files are shown and assumed in.
 
 | Kind | Formats |
 |------|---------|
@@ -83,28 +85,28 @@ Two sections help set up a CFD mesh:
 
 - **CFD** (for meshes, CGNS / UGRID): checks the y+ of a mesh you already have,
   from its first cell layer, and can paint the boundary by y+.
-- **CFD mode** (for CAD files): plans the inflation layers before you mesh. Pick
-  the walls, set the flow and the layers, and switch to the **Inflation layers**
-  page under the 3D view.
+- **Inflation Layers** (in the CFD tool, for CAD files): plans the inflation layers
+  before you mesh. Pick the walls, set the flow and the layers, and switch to the
+  **Inflation Layers** page under the 3D view.
 
-![CFD mode: the flow and inflation layer inputs, with the walls tinted in 3D](docs/screenshots/cfd_mode_dark.png)
+![Inflation Layers: the flow and inflation layer inputs, with the walls tinted in 3D](docs/screenshots/cfd_mode_dark.png)
 
 <p align="center">
   <img src="docs/screenshots/inflation_plot_light.png" width="49%" alt="Layer size plot: each layer's height and the total thickness against the boundary layer">
-  <img src="docs/screenshots/cross_section_dark.png" width="49%" alt="Cross section: the inflation layers estimated around a wing section">
+  <img src="docs/screenshots/cross_section_dark.png" width="49%" alt="Section: the inflation layers estimated around a wing section">
 </p>
 
 The page shows the Reynolds number, the first layer height, the estimated y+,
 the boundary-layer thickness and the size of the layers, then two tabs:
 
-- **Layer size plot**: a bar per layer and the total thickness so far, against
+- **Layer Sizes**: a bar per layer and the total thickness so far, against
   the boundary layer and the size of the next cell of the mesh.
-- **Cross section**: turn on the section plane (sidebar ▸ Section) and the cut
+- **Section**: turn on the section plane (the Section tool) and the cut
   of the walls is drawn in 2D, with the layers on it. It follows the plane as you
   move it. Scroll to zoom, drag to pan. Layers stop where they would cross: in a
   narrow gap they meet half-way, and they stop at other parts.
 
-The settings can then go straight to your mesher: **Export… ▸ CFD settings**
+The settings can then go straight to your mesher: **Export… ▸ CFD Settings**
 writes them for OpenFOAM, Fluent Meshing, STAR-CCM+ or Pointwise, or as a CSV.
 
 Below, simple checks say whether the layers cover the boundary layer and step
@@ -114,25 +116,25 @@ smoothly into the mesh.
 
 Open the Tecplot file a solver writes for its boundaries — FUN3D's
 `project_tec_boundary.dat` — with File ▸ Open (⌘O). Each boundary becomes a part,
-and a **Results** section appears in the sidebar: pick a *Field* (any variable in
-the file, or *Speed*), switch on *Colour the boundaries*, and the walls are coloured
-with a scale underneath. *Colours* shows the colour maps themselves: pick one
-(rainbow by default; also blue–white–red, thermal, grey and blue). The range is the
+and the inspector opens on **Analyze ▸ Results**: pick a *Field* (any variable in
+the file, or *Speed*), switch on *Color the boundaries*, and the walls are colored
+with a scale underneath. *Colors* shows the color maps themselves: pick one
+(rainbow by default; also blue–white–red, thermal, gray and blue). The range is the
 min to max of the boundaries shown, and follows when you hide or show one; type a
 *Min* / *Max* to fix it. Hiding parts and the section plane work as usual, and the
 numbers (max · mean · min) are for the visible boundaries.
 
-*Show ▸ Gradient* colours by how fast the field changes along the surface (|∇f| per
+*Show ▸ Gradient* colors by how fast the field changes along the surface (|∇f| per
 unit length): shocks, leading edges and separation lines stand out.
 
-**Plots** (sidebar, from the + under the icons) turn measurements into plots, each in
-its own tab under the 3D view. *New Measurement…* asks for a name and a type — for now
-a **cross section**: the visible boundaries cut by a plane normal to X, Y or Z (type
-the position or drag the slider; the cut shows in 3D while Plots is open), with cp,
+**Plots** (inspector, Measure tab) draw plots, each in
+its own tab under the 3D view. *New Plot…* asks for a name and a type — for now
+a **section**: the visible boundaries cut by a plane normal to X, Y or Z (type
+the position or drag the slider; the cut shows in 3D while the Measure tab is shown), with cp,
 Mach… or the shape (X / Y / Z) plotted along the cut, optionally against x/c, negative
 up for cp. *Points ▸ Import…* adds reference points from a CSV (test data, another
 solver: the first two numbers of each row), *Export…* saves the plotted points. Each file
-remembers its measurements and the tab that was open.
+remembers its plots and the tab that was open.
 
 Only the ASCII format is read, not the binary `.plt` / `.szplt`: if the solver
 writes binary, switch its output to ASCII or re-save the file as ASCII in Tecplot 360.
@@ -214,44 +216,58 @@ Keep the MeshViewer folder where it is: this app runs the code from it.
 ## Using it
 
 - **Open** files by double-clicking them, dropping them on a window or the Dock
-  icon, or with ⌘O. Each file gets its own window.
+  icon, or with ⌘O. Each file gets its own window. An empty window shows the
+  **welcome screen**: Open…, your recent files, and two samples to try (the ONERA M6
+  wing as a CGNS mesh, an avionics bay as a STEP assembly; also File ▸ Open Sample).
+  While a file opens or the model is re-meshed, a small spinner turns in the toolbar.
+- **File ▸ Revert to Original…** forgets everything about the file (edits, colors,
+  names, hidden parts, the view, the tools, the plots) and opens it as the first time,
+  after asking.
 - **Views**: Fit ⌘0 · Iso ⌘1 · X ⌘2 · Y ⌘3 · Z ⌘4 · perspective on/off ⌘5.
   Press X, Y or Z again to look from the opposite side.
-- **Select**: click a part, or ⌘/⇧-click to add parts. Click empty space or press
-  Esc to clear.
+- **Select**: click a part, or ⌘/⇧-click to add parts; Edit ▸ Select All (⌘A).
+  Click empty space, press Esc or Edit ▸ Deselect All (⌥⌘A) to clear.
+- **Undo** (⌘Z) and **Redo** (⇧⌘Z), with what they undo in the Edit menu: showing and
+  hiding parts, isolating, colors, renames, hidden CAD faces and the Edit tool's
+  rotations, mirrors and moves. The camera and the selection are not undone.
+- **Find** (⌘F): the parts list's filter.
 - **Right-click** a part (in 3D or in the list):
-  - Hide Part, Isolate, Zoom To, Colour…, Show All
-  - Hide Surface (STEP / IGES / BREP): hides only the face under the cursor;
+  - Hide Part, Isolate, Zoom To, Color…, Show All (also in the Edit menu, for the
+    selection)
+  - Hide Face (STEP / IGES / BREP): hides only the face under the cursor;
     *Show All* brings it back
   - Rename… (also: select a part and press Return) — Export uses the new names
   - Search in McMaster (when a McMaster part number is anywhere in the name)
   - Right-clicking inside a multi-selection acts on the whole selection.
-- **Sidebar**: the icon bar on its left shows or hides each section (Info, Mesh
-  quality, Section, Edit, Measure, CFD, Cell quality, Results; also View ▸ Sidebar
-  Sections). A section shows up closed; click its title to open it. Hiding Section
-  switches the plane off, showing it again puts it back; the same for CFD and CFD mode. Every section is there for
-  every file; one that doesn't fit the file says why. Each file remembers which are
-  on; the first time, CAD files open with Mesh quality, Section and Measure, meshes
-  with Section, Edit and Measure (+ Results for results files), 2D meshes with Edit,
-  Measure and Cell quality, DXF drawings with Measure. 2D files are always seen from
+- **Sidebar** (⌃⌘S, the button at the left of the toolbar): the parts / boundaries
+  list, the whole height of the window — filter, selection, Show All / Hide All.
+- **Inspector** (⌥⌘I, the button at the right of the toolbar): the tools, in three tabs
+  — **View** (Mesh Quality, Section, Edit), **Measure** (Info, Measure, Plots),
+  **Analyze** (CFD, Cell Quality, Results); also View ▸ View / Measure / Analyze Tools
+  (⌥⌘1–3). A tool shows up closed; click its title to open it. A tool works while it
+  is in view: Measure measures, Plots draw their cuts in 3D, Cell Quality and CFD
+  compute only while their tab is shown. Every tool is there for every file; one that
+  doesn't fit the file says why. Each file remembers its tab and the tools open; the
+  first time, files open on View, results files on Analyze ▸ Results, DXF drawings on
+  Measure (measuring). 2D files are always seen from
   above (+Z): dragging pans, nothing turns, there are no view or Perspective buttons,
   and Edit only turns them about Z. Lines stay while moving, and the corner axes
   show X and Y only. The list of a 2D mesh has two groups: *Faces* (the cells) and
-  *Boundaries* (the lines); right-click says Hide Face / Hide Boundary. DXF drawings show lines only, all in one colour
-  (white on black in dark mode, black in light mode), without a layer list. The **+** under the
-  icons chooses whether CFD, Cell quality and Results have an icon in the bar. The
-  parts / boundaries list is always at the bottom: drag the line above it to
-  resize it; closed, only its header stays.
+  *Boundaries* (the lines); right-click says Hide Face / Hide Boundary. DXF drawings show lines only, all in one color
+  (white on black in dark mode, black in light mode), without a layer list.
+- **Toolbar**: Sidebar · Fit, Isometric, X, Y, Z, Perspective · Show ▾ · the unit ▾ ·
+  Export, Screenshot · Inspector. View ▸ Customize Toolbar… (or a right-click on the
+  toolbar) picks which groups it shows (Settings can be added); everything is in the
+  menus too.
   - **Info**: the file's unit (*File unit*), extent per axis, faces, points, edge
     lengths, volume cells.
-  - **Mesh quality** (STEP/IGES/BREP): five levels; the part is re-meshed in the
-    background. Faces that OpenCASCADE fills with fans of thin triangles get points
-    added inside, so the triangles stay reasonably shaped.
+  - **Mesh Quality** (STEP/IGES/BREP): five levels; the part is re-meshed in the
+    background (OpenCASCADE's own triangles: few of them, quickly).
   - **Section**: the plane controls. Switching it on opens them, off folds them.
     *Plane*: Normal to X / Y / Z, Flip, the Position slider, Center; the gear opens the
     exact Origin / Normal; *Show*: Fill cut faces, Show plane. For CGNS / UGRID meshes, *Fill cut faces*
     shows the volume cells the plane cuts.
-  - **Measure**: measuring is on while this section is open.
+  - **Measure**: measuring is on while this tool is open.
     - *Distance*: click two points — the distance and ΔX, ΔY, ΔZ between them.
       *From origin* on: each click is one point — its coordinates, its distance
       from the origin (0, 0, 0) and to the section plane.
@@ -259,29 +275,29 @@ Keep the MeshViewer folder where it is: this app runs the code from it.
       2D files: click two lines (or cell edges) — the angle between them, in XY.
     - *Area*: click parts, or switch to *CAD faces* to pick single faces; volume
       too when they close up. Clicking empty space clears the faces.
-  - **Cell quality** (meshes): pick a measure, set the "bad" threshold on the
-    histogram (click / drag), then Zoom, Show bad cells or Colour by quality.
+  - **Cell Quality** (meshes): pick a measure, set the "bad" threshold on the
+    histogram (click / drag), then Zoom, Show bad cells or Color by quality.
   - **CFD**: external or internal flow (pipe or duct: Reynolds number on the hydraulic
     diameter D); fluid (air at an altitude, fresh / sea water at a depth, or custom),
     Mach or speed U, and flow direction; y+ on a boundary (measured from the first
-    cell layer of volume meshes), *Colour by y+*, and the first cell height for a
+    cell layer of volume meshes), *Color by y+*, and the first cell height for a
     target y+; flow vectors. *Formulas* and *Values* next to each group. *Temperature*:
-    the standard one for air (greyed out, from the altitude), typed for water (empty =
+    the standard one for air (grayed out, from the altitude), typed for water (empty =
     15 °C); the **?** next to *Target y+* helps pick it (resolve the wall or wall
     functions) and can set it for you.
-  - **Results** (Tecplot `.dat` files): *Field*, *Colours* (the colour map), *Show*
+  - **Results** (Tecplot `.dat` files): *Field*, *Colors* (the color map), *Show*
     (value or gradient), *Values in* / *Shown in* (fields with a unit: p, ρ, u, T…),
-    *Colour the boundaries*, the colour scale, *Min* / *Max* (empty = auto).
-  - **Plots**: *New Measurement…* (name + type: cross section) → a sub-section here
+    *Color the boundaries*, the color scale, *Min* / *Max* (empty = auto).
+  - **Plots**: *New Plot…* (name + type: section) → a fold-out here
     (opening it shows its plot; the eye shows its cut in 3D) with a card: *Plane* (normal
     to X / Y / Z, position, slider; the gear: origin and normal in any direction), *Plot*
     (values, along, normalize = x/c, negative up), *Points* (import / export CSV), and
     *Rename… · Delete* under it; and a tab under the 3D view with the plot (hover a line
     for its numbers; right-click the tab to open, rename or delete it; many tabs scroll
-    sideways).
-  - **CFD mode** (CAD files): switch it on, fill in the **Flow** (same inputs as
-    the CFD section) and the **Inflation layers**:
-    - *Walls*: the whole model, one part, or *Pick faces…* — ⇧-click faces of one
+    sideways; ⌃⇥ / ⌃⇧⇥ go to the next / previous tab).
+  - **Inflation Layers** (CFD tool, CAD files): switch it on, fill in the **Flow** (same inputs as
+    for meshes) and the **Inflation layers**:
+    - *Walls*: the whole model, one part, or *Pick Faces…* — ⇧-click faces of one
       part in 3D, then *Apply*. The walls are tinted in 3D.
     - *Length L* (auto: the longest distance along the flow), *Target y+* (with its
       **?**), *Compressibility correction*.
@@ -293,40 +309,53 @@ Keep the MeshViewer folder where it is: this app runs the code from it.
       volume mesh; the surface cells there should be about that size too.
 
     The bar under the 3D view switches between the model and the *Inflation
-    layers* page. In its *Cross section* tab, *Flip side* puts the layers on the
-    other side of the walls (for internal flow), *Fit view* fits the cut, and the
+    Layers* page. In its *Section* tab, *Flip Side* puts the layers on the
+    other side of the walls (for internal flow), *Fit View* fits the cut, and the
     legend shows or hides the flow direction arrow.
   - **Parts**: list, filter, Show All / Hide All.
-- **Show** (toolbar, also View ▸ Show): mesh edges, feature edges, faces (off =
+- **Show ▾** (toolbar, also View ▸ Show): mesh edges, feature edges, faces (off =
   edges only) · axes, grid, bounding box, origin marker — each on / off.
 - **Units**: the first time a file opens, you say what unit it is in (STEP / IGES:
-  preselected); the ✎ button left of the toolbar units (or Info ▸ *File unit*)
-  changes it. The toolbar (mm · cm · m · in · ft) picks the unit measurements and
-  axis labels are shown in.
-- **Appearance** (⌘, or the sliders button) — how things look, the same in every
-  window: theme, parts list spacing, 3D background, shading, axis label size, edge
-  line thickness, and hide edges while moving.
+  preselected; Settings ▸ Units can skip the question); File Unit… (in the toolbar's
+  unit menu, File menu, or Info ▸ *File unit*) changes it. The unit ▾ in the toolbar
+  (mm · cm · m · in · ft, also View ▸ Units) picks the unit measurements and axis
+  labels are shown in.
+- **Settings** (⌘, in the app menu, or a toolbar button via Customize Toolbar…), the same in every window:
+  - *General*: theme, parts list spacing, the mesh quality STEP / IGES / BREP open at
+    (or the one used last time).
+  - *Appearance*: 3D background, shading, axis label size, edge line thickness, hide
+    edges while moving.
+  - *Units*: the unit lengths are shown in for a new file, the unit of meshes and
+    triangle CAD that don't say theirs, and whether to ask when a file opens.
 - **Screenshot** (⇧⌘S): 1×–4× resolution, background *As Shown* or *Transparent*.
-- **Edit** (sidebar section, like Onshape's Transform): choose Rotate (any angle
+- **Edit** (View tab, like Onshape's Transform): choose Rotate (any angle
   about X, Y or Z), Mirror or Move by X, Y, Z, fill it in and press Apply — turning
-  about the origin or the model's centre. The changes are listed below. *Show original edges* shows
-  the file's edges in grey to compare; *Undo* steps back, *Reset* returns to the
-  file. Works on meshes (CGNS, UGRID) and triangle CAD (STL, OBJ, PLY, glTF, VRML),
+  about the origin or the model's center. The changes are listed below. *Show original edges* shows
+  the file's edges in gray to compare; *Undo* steps back, *Reset* returns to the
+  file (both are undone with ⌘Z too). Until exported, the window's title says
+  "Edited". Works on meshes (CGNS, UGRID) and triangle CAD (STL, OBJ, PLY, glTF, VRML),
   not on STEP / IGES / BREP. Edits and renamed parts stay in memory until you
   export them.
 - **File ▸ Open Recent**; every file reopens the way you left it (camera, display
-  toggles, unit, colours, names, hidden parts, section, CFD inputs, the Inflation
+  toggles, unit, colors, names, hidden parts, section, CFD inputs, the Inflation
   page with its tab and zoom).
 - **Export…** (⇧⌘E): STL (binary or one named solid per part), OBJ and PLY (with
-  the part colours), VTU
+  the part colors), VTU
   (ParaView) and, for meshes, UGRID + .mapbc with the volume cells. Includes your
   edits; hidden parts can be left out. STEP / IGES / BREP export their current
-  triangle mesh (STL, OBJ, PLY). For CAD files, the **CFD settings** tab exports the
-  CFD mode's inflation layers for OpenFOAM, Fluent Meshing, STAR-CCM+ or Pointwise,
+  triangle mesh (STL, OBJ, PLY). For CAD files, the **CFD Settings** tab exports the
+  inflation layers (Inflation Layers) for OpenFOAM, Fluent Meshing, STAR-CCM+ or Pointwise,
   or everything as a CSV.
-- **About Mesh Viewer** is in the app menu, with *Check for Updates…*: it asks
+- **About Mesh Viewer** and **Check for Updates…** are in the app menu: it asks
   GitHub for the latest release and says whether a newer version is out (with a
-  Download button), you're up to date, or you have a pre-release.
+  Download button), you're up to date, or you have a pre-release (a beta).
+- **Help**: *Mesh Viewer Help* (this page), *Keyboard Shortcuts* (every shortcut of
+  the menus, in one window), *Release Notes*, *Report a Problem…* (a GitHub issue,
+  already filled with the versions; error messages offer it too).
+- **Mac manners**: questions (save, rename, colors, close with edits) slide down from
+  their window as sheets; Settings and About open where you are, also over a
+  full-screen window; VoiceOver reads every button and switch, and System Settings ▸
+  Accessibility ▸ Increase contrast makes lines and gray text stronger.
 
 ## Project layout
 
@@ -341,34 +370,48 @@ meshviewer/
     export.py, cfd_export.py   Export: STL, OBJ, PLY, VTU, UGRID · CFD settings for meshers
     quality.py            cell quality measures (skewness, aspect ratio, Jacobian, volume)
     cfd.py                y+ estimate, atmosphere, water, first cell layer, inflation layers
-    fields.py, units.py   solution fields, colour scales, gradients · units and number formatting
-    plots.py              Plots: the kinds of measurement (cross section), CSV in / out
+    fields.py, units.py   solution fields, color scales, gradients · units and number formatting
+    plots.py              Plots: the kinds of plot (section), CSV in / out
     geometry2d.py, polys.py   cross-section geometry · small surface helpers
     mesh/  cgns.py ugrid.py msh.py tecplot.py   mesh and results readers (msh: Gmsh / Fluent)
            volume.py polyhedra.py         volume cells (NGON/NFACE polyhedra too)
-    cad/   occt.py remesh.py              OpenCASCADE: read, mesh, exact area/volume; no sliver fans
+    cad/   occt.py                        OpenCASCADE: read, mesh, exact area/volume
            step.py iges.py brep.py stl.py tessellated.py dxf.py   CAD readers (dxf: 2D drawings)
   render/                 VTK: what the 3D view draws
-    scene.py              parts, edges, grid, views, picking
+    scene.py              the Scene: parts, colors, visibility, selection, Display toggles
+    picking.py, camera.py, editing.py, appearance.py, screenshot.py
+                          the rest of the Scene, one subject each · style.py colors, sizes
     section.py, measure.py    section plane, measurements
-    overlays.py, quality_overlay.py   flow arrows, y+, walls, results, plot cut · cell quality colours
+    overlays.py, quality_overlay.py   flow arrows, y+, walls, results, plot cut · cell quality colors
     background.py         picture behind the 3D view
   gui/                    Qt
-    app.py, window.py     application · window, toolbar, menus, loading, export
-    sidebar.py, sections.py   icon bar + sections + parts list · the list of sections
-    panels/               one file per sidebar section (info, section, edit, measure,
-                          cfd, inflation, quality, results, plots, parts)
-    dialogs/              about, appearance, export, screenshot, wall_help
-    pages/                Inflation layers page and its cross section · a measurement's plot
-    forms.py, widgets.py, style.py, memory.py, jobs.py
+    app.py, window.py     application (settings, app menu) · window: loading, units
+    undo.py, store.py     Edit ▸ Undo / Redo · where settings are saved
+    welcome.py, samples.py    the empty window's welcome screen · the bundled samples
+    sheets.py, feedback.py, report.py   questions as sheets · spinner, error sheets · Report a Problem
+    access.py, macos.py   VoiceOver names, Increase Contrast · macOS-only bits (PyObjC)
+    window_bars.py, window_pages.py, window_export.py
+                          actions, toolbar, menus · pages and tabs · export, screenshot
+    viewport.py           the 3D view widget: each frame drawn once
+    sidebar.py, sections.py   parts list + the tools (the inspector's tabs) · the list of tools
+    inspector.py          the panel right of the 3D view: View · Measure · Analyze tabs
+    sidebar_layout.py, sidebar_menu.py   layout pieces · a part's right-click menu
+    panels/               one file per tool (info, section, edit, measure,
+                          cfd, inflation, quality, results, plots, parts; fluid: the
+                          inputs the two CFD panels share)
+    dialogs/              about, settings, shortcuts, export, screenshot, units, wall_help
+    pages/                Inflation Layers page and its section · a plot's tab
+    widgets/              switches, menus, number boxes, folding section, formulas
+    forms.py, style.py, memory.py, jobs.py
     icons.py              SF Symbols (asked from macOS), drawn icons elsewhere
 tests/                    headless tests (python tests/run_all.py)
+tools/bench.py            how long things take on your machine (python tools/bench.py file)
 setup.py                  py2app settings: icon, file types
 build_app.sh              build (+ install)
 make_dmg.sh               self-contained app -> .dmg
 fix_bundle.py             repairs Homebrew libraries py2app damages when copying
 slim_bundle.py            removes unused Qt parts from the self-contained app
-resources/                app icon, .dmg window background
+resources/                app icon, .dmg window background, samples/ (the welcome screen's)
 docs/                     screenshots, release notes
 ```
 

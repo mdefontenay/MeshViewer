@@ -1,4 +1,4 @@
-"""Sidebar section "Info" — what's in the file, at a glance.
+"""The Info tool — what's in the file, at a glance.
 
     Extent                       mm         <- the unit, or "file units"
          from        to        size
@@ -124,7 +124,7 @@ class InfoPanel(QWidget):
         g.setColumnStretch(1, 1)
         lay.addLayout(g)
 
-        self.read = QPushButton("Count volume cells")
+        self.read = QPushButton("Count Volume Cells")
         self.read.setObjectName("LinkButton")
         self.read.setFlat(True)
         self.read.setCursor(Qt.PointingHandCursor)

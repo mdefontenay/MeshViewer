@@ -2,8 +2,8 @@
 
 Saved when its window closes (and when the app quits), restored when it opens:
 camera, projection, display toggles, unit, part colours, renamed and hidden
-parts, and the section plane. CFD inputs; Plots (the measurements); the Inflation page —
-which page and tab, Flip side, the flow arrow, the cross-section zoom. Edits (moves, rotations) are not: they belong to
+parts, and the section plane. CFD inputs; Plots; the Inflation Layers page —
+which page and tab, Flip Side, the flow arrow, the section zoom. Edits (moves, rotations) are not: they belong to
 an export. Stored in the app's settings, for the last 200 files.
 
     state = capture(scene)          ->  dict (JSON-friendly)
@@ -17,7 +17,8 @@ import json
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtCore import QSettings
+
+from meshviewer.gui.store import settings
 
 KEEP = 200
 TOGGLES = ("mesh_edges", "feature_edges", "faces", "bbox", "origin")
@@ -29,14 +30,26 @@ def _key(path):
 
 def load(path):
     try:
-        raw = QSettings("local", "Mesh Viewer").value(_key(path))
+        raw = settings().value(_key(path))
         return json.loads(raw) if raw else None
     except (TypeError, ValueError):
         return None
 
 
+def forget(path):
+    """File ▸ Revert to Original: nothing remembered about this file any more."""
+    st = settings()
+    key = _key(path)
+    st.remove(key)
+    try:
+        order = [k for k in json.loads(st.value("views/_order") or "[]") if k != key]
+        st.setValue("views/_order", json.dumps(order))
+    except ValueError:
+        pass
+
+
 def save(path, state):
-    st = QSettings("local", "Mesh Viewer")
+    st = settings()
     key = _key(path)
     st.setValue(key, json.dumps(state))
     try:
@@ -65,13 +78,11 @@ def capture(scene):
         "colors": {orig.get(n, n): scene.colors[n] for n in scene.names},
         "hidden": [orig.get(n, n) for n in scene.names if not scene.visible[n]],
         "cfd": scene.cfd_settings,
-        "inflation": scene.inflation_settings,                    # CFD mode
+        "inflation": scene.inflation_settings,                    # Inflation Layers
         "inflation_page": getattr(scene, "inflation_page", None),  # tab, zoom…
         "results": getattr(scene, "results_settings", None),      # field, range
-        "plots": list(getattr(scene, "plots", None) or []),      # measurements (Plots)
-        "sections": getattr(scene, "sidebar_sections", None),     # sidebar sections shown
-        "section_restore": bool(getattr(scene, "section_restore", False)),
-        "cfd_restore": list(getattr(scene, "cfd_restore", None) or []),
+        "plots": list(getattr(scene, "plots", None) or []),      # Plots
+        "inspector": getattr(scene, "inspector_state", None),     # its tab, the tools open
         "hidden_faces": {orig.get(n, n): sorted(v) for n, v in scene.hidden_faces.items()
                          if v},
         "section": {"enabled": sec.enabled, "origin": list(map(float, sec.origin)),
@@ -92,9 +103,8 @@ def restore(scene, state):
               if current(n) in scene.colors}
     for name, c in colors.items():
         scene.set_color([name], c, render=False)
-    for n in state.get("hidden", []):
-        if current(n) in scene.visible:
-            scene.set_visible(current(n), False, render=False)
+    hidden = [current(n) for n in state.get("hidden", []) if current(n) in scene.visible]
+    scene.set_visible(hidden, False, render=False)
     t = state.get("toggles", {})
     for key, method in (("mesh_edges", "set_mesh_edges"), ("feature_edges", "set_feature_edges"),
                         ("faces", "set_faces"), ("bbox", "set_bbox"), ("origin", "set_origin")):
@@ -116,10 +126,11 @@ def restore(scene, state):
         scene.results_settings = state["results"]
     if isinstance(state.get("plots"), list):
         scene.plots = [dict(m) for m in state["plots"] if isinstance(m, dict) and "id" in m]
-    if isinstance(state.get("sections"), list):
-        scene.sidebar_sections = state["sections"]
-    scene.section_restore = bool(state.get("section_restore", False))
-    scene.cfd_restore = [k for k in state.get("cfd_restore") or [] if isinstance(k, str)]
+    ins = state.get("inspector")                     # (2.5 beta 2 and before: ignored)
+    if isinstance(ins, dict):
+        scene.inspector_state = {
+            "tab": ins.get("tab") if isinstance(ins.get("tab"), str) else None,
+            "open": [k for k in ins.get("open") or [] if isinstance(k, str)]}
     hidden = {current(n): set(v) for n, v in (state.get("hidden_faces") or {}).items()
               if current(n) in scene.model.parts}                # hidden surfaces
     if hidden:

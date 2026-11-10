@@ -16,7 +16,7 @@ import re
 import numpy as np
 import pyvista as pv
 
-from meshviewer.core.model import MissingDependency
+from meshviewer.core.model import CAD_QUALITY_NAMES, MissingDependency
 
 try:
     from OCP.BRep import BRep_Tool
@@ -52,13 +52,13 @@ _as_edge = getattr(TopoDS, "Edge_s", None) or TopoDS.Edge
 
 # ---- Tessellation settings ------------------------------------------------
 # (label, max chord error as a fraction of model size, max angle between facets in rad)
-QUALITY_LEVELS = [
-    ("Very coarse", 5e-3, 0.80),
-    ("Coarse",      2e-3, 0.50),
-    ("Medium",      1e-3, 0.35),     # ~18 facets per full circle
-    ("Fine",        3e-4, 0.20),
-    ("Very fine",   1e-4, 0.10),     # ~63 facets per full circle
-]
+QUALITY_LEVELS = [(name, lin, ang) for name, (lin, ang) in zip(CAD_QUALITY_NAMES, (
+    (5e-3, 0.80),
+    (2e-3, 0.50),
+    (1e-3, 0.35),     # Medium: ~18 facets per full circle
+    (3e-4, 0.20),
+    (1e-4, 0.10),     # Very fine: ~63 facets per full circle
+))]
 DEFAULT_QUALITY = 2
 
 
@@ -143,11 +143,10 @@ def _faces_to_poly(shapes, outside_solids_only):
             tri = BRep_Tool.Triangulation_s(face, loc)
             if tri is None or tri.NbTriangles() == 0:
                 continue
-            p, idx = _refined(face, tri)                  # no fans of thin slivers
+            p, idx = _nodes_and_triangles(tri)
             n_nodes = len(p)
             if not loc.IsIdentity():
-                t = loc.Transformation()
-                m = np.array([[t.Value(r, c) for c in range(1, 5)] for r in range(1, 4)])
+                m = _matrix(loc)
                 p = p @ m[:, :3].T + m[:, 3]
             if face.Orientation() == TopAbs_REVERSED:
                 idx = idx[:, [0, 2, 1]]
@@ -165,39 +164,62 @@ def _faces_to_poly(shapes, outside_solids_only):
     return poly.clean(), faces_used
 
 
-_REFINED = {}       # face (shared by repeated instances) -> its nodes and triangles
-REFINE_BUDGET = 3.0     # seconds per meshing spent redoing faces; the rest keep OCCT's
-_budget = [0.0]         # time.monotonic() when the current meshing's budget runs out
+
+class _PerShape:
+    """One value per distinct shape. The instances of a shape (a bolt used 40 times: the
+    same geometry in other places) are "partners" and share the value."""
+
+    def __init__(self):
+        self._found = {}                              # hash -> [(shape, value)]
+
+    @staticmethod
+    def _key(shape):
+        return hash(shape.Located(TopLoc_Location()))     # the place left out
+
+    def get(self, shape):
+        for other, value in self._found.get(self._key(shape), ()):
+            if other.IsPartner(shape):
+                return value
+        return None
+
+    def put(self, shape, value):
+        self._found.setdefault(self._key(shape), []).append((shape, value))
+        return value
 
 
-def _refined(face, tri):
-    """Nodes (in the face's own frame) and triangles of a meshed face, through
-    remesh.refine (no fans of thin slivers). Computed once per face and triangulation,
-    so repeated instances of a part cost nothing more."""
+def _matrix(loc):
+    """A location as a 3×4 array: x -> m[:, :3] @ x + m[:, 3]."""
+    t = loc.Transformation()
+    return np.array([[t.Value(r, c) for c in range(1, 5)] for r in range(1, 4)])
+
+
+def _instance_poly(shape, free_only, done):
+    """_faces_to_poly of one shape, triangles gathered once for all its instances
+    (`done`: a _PerShape) and moved to this instance's place."""
+    hit = done.get(shape)
+    if hit is None:
+        poly, faces = _faces_to_poly([shape.Located(TopLoc_Location())], free_only)
+        hit = done.put(shape, [poly, faces, False])
+    poly, faces, used = hit
+    loc = shape.Location()
+    if poly is None:
+        return None, []
+    if loc.IsIdentity() and not used:
+        hit[2] = True                                 # the only copy so far: no need for another
+        return poly, faces
+    out = poly.copy()
+    if not loc.IsIdentity():
+        m = _matrix(loc)
+        out.points = np.asarray(poly.points) @ m[:, :3].T + m[:, 3]
+    return out, [f.Moved(loc) for f in faces]
+
+
+def _nodes_and_triangles(tri):
+    """A meshed face as OpenCASCADE made it: nodes (n, 3) in the face's own frame and
+    triangles (m, 3), counted from 0."""
     p = np.array([tri.Node(i).Coord() for i in range(1, tri.NbNodes() + 1)], dtype=np.float64)
     idx = np.array([tri.Triangle(i).Get() for i in range(1, tri.NbTriangles() + 1)],
                    dtype=np.int64) - 1
-    key = (hash(face.TShape()), hash(p.tobytes()), hash(idx.tobytes()))
-    hit = _REFINED.get(key)
-    if hit is not None:
-        return hit
-    import time
-    from meshviewer.core.cad.remesh import has_fans, refine
-    if tri.HasUVNodes() and time.monotonic() < _budget[0] and has_fans(p, idx):
-        uv = np.array([tri.UVNode(i).Coord() for i in range(1, tri.NbNodes() + 1)])
-        surf = BRep_Tool.Surface_s(face, TopLoc_Location())        # in the face's own frame
-
-        def evaluate(q):
-            return np.array([surf.Value(float(u), float(v)).Coord() for u, v in q])
-        try:
-            better = refine(p, uv, idx, evaluate)
-        except Exception:                                # noqa: BLE001 keep OCCT's triangles
-            better = None
-        if better is not None:
-            p, idx = better
-    if len(_REFINED) > 20000:
-        _REFINED.clear()
-    _REFINED[key] = (p, idx)
     return p, idx
 
 
@@ -251,6 +273,19 @@ def read_brep_shape(path):
 # Tessellation on demand
 # ---------------------------------------------------------------------------
 
+def _occt_mesh(shape, deflection, angle):
+    """OpenCASCADE's own mesh of a shape, on every core, with its faster triangulator
+    (Delabella) where this OCCT has it."""
+    try:
+        from OCP.IMeshTools import IMeshTools_MeshAlgoType, IMeshTools_Parameters
+        par = IMeshTools_Parameters()
+        par.Deflection, par.Angle, par.InParallel = float(deflection), float(angle), True
+        par.MeshAlgo = IMeshTools_MeshAlgoType.IMeshTools_MeshAlgoType_Delabella
+        BRepMesh_IncrementalMesh(shape, par)
+    except (ImportError, AttributeError, TypeError):
+        BRepMesh_IncrementalMesh(shape, deflection, False, angle, True)
+
+
 class CadFile:
     """B-rep shapes read once, tessellated at any quality level."""
 
@@ -261,6 +296,7 @@ class CadFile:
         self.leaves = leaves
         self._keepalive = keepalive         # e.g. the XCAF document owning the shapes
         self.debug = debug
+        self._areas = _PerShape()           # exact area of each face, as asked
         box = Bnd_Box()
         for _, s in leaves:
             BRepBndLib.Add_s(s, box)
@@ -277,13 +313,15 @@ class CadFile:
         """{part_name: PolyData} at QUALITY_LEVELS[level]."""
         label, lin, ang = QUALITY_LEVELS[max(0, min(level, len(QUALITY_LEVELS) - 1))]
         # Each distinct part is meshed once; repeated instances share it.
-        import time
-        _budget[0] = time.monotonic() + REFINE_BUDGET   # redoing fan faces: at most this long
+        meshed = _PerShape()
         for _, s in self.leaves:
-            BRepTools.Clean_s(s)            # drop the previous triangulation
-            BRepMesh_IncrementalMesh(s, self.diag * lin, False, ang, True)
+            if meshed.get(s) is None:
+                BRepTools.Clean_s(s)        # drop the previous triangulation
+                _occt_mesh(s, self.diag * lin, ang)
+                meshed.put(s, True)
 
         parts, loose = {}, []
+        whole, free = _PerShape(), _PerShape()         # triangles of each distinct shape
         self.part_faces, self.part_solids = {}, {}     # for exact area / volume
         single = len(self.leaves) == 1
         for i, (leaf_name, shape) in enumerate(self.leaves, 1):
@@ -296,10 +334,11 @@ class CadFile:
             bodies = [] if has_solid else _children_with_faces(shape)
             if len(bodies) > 1:             # surface bodies grouped in a compound (IGES)
                 for k, body in enumerate(bodies, 1):
-                    self._add(parts, f"{leaf_name} {k}", _faces_to_poly([body], False))
+                    self._add(parts, f"{leaf_name} {k}", _instance_poly(body, False, whole))
                 continue
             for name, shapes, free_only in _split_solids(leaf_name, shape):
-                self._add(parts, name, _faces_to_poly(shapes, free_only),
+                self._add(parts, name,
+                          _instance_poly(shapes[0], free_only, free if free_only else whole),
                           solids=None if free_only else shapes)
         if loose:                           # ...grouped into one part, not hundreds
             self._add(parts, "Surfaces", _faces_to_poly(loose, False))
@@ -321,9 +360,14 @@ class CadFile:
     def exact_area(self, name, face_ids=None):
         faces = self.part_faces.get(name, [])
         ids = range(len(faces)) if face_ids is None else face_ids
-        return sum(_props(faces[i], "area") for i in ids if 0 <= i < len(faces))
+        return sum(self._face_area(faces[i]) for i in ids if 0 <= i < len(faces))
 
-    # --- exact cut by a plane (the Cross section of CFD mode) ----------------
+    def _face_area(self, face):
+        """Computed once per distinct face: it never changes, and lists ask again and again."""
+        a = self._areas.get(face)
+        return self._areas.put(face, _props(face, "area")) if a is None else a
+
+    # --- exact cut by a plane (Inflation Layers ▸ Section) --------------------
     def section(self, name, face_ids, origin, normal, deflection):
         """The cut of a part's faces (all, or face_ids) by the plane, from the CAD curves
         themselves — not the triangles: a list of N×3 point arrays, one per cut edge,

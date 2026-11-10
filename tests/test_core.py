@@ -21,25 +21,14 @@ def test(app, files):
     check(rgb.shape == (3, 3), "colour ramp")
     r = cfd.inflation(yplus=1.0, mach=0.3, length=1.0, altitude=0.0)
     check(r["ok"] and 1e-7 < r["y_min"] < 1e-4, f"first layer {r['y_min']:.3g} m")
-    # STEP: no needle fans, still closed (B6)
-    import meshviewer.core.cad.occt as occt
-    from meshviewer.core.cad.remesh import min_angles
+    # STEP: OpenCASCADE's triangles, one closed surface, finer at a higher quality
     from meshviewer.core.cad.step import open_refinable
     src = open_refinable(files["step"], debug=False)
-    def needles():
-        poly = next(iter(src.tessellate(2).values()))
-        t = poly.faces.reshape(-1, 4)[:, 1:]
-        open_edges = poly.extract_feature_edges(boundary_edges=True, feature_edges=False,
-                                                manifold_edges=False, non_manifold_edges=False)
-        return int((min_angles(poly.points[t]) < 5).sum()), open_edges.n_cells
-    import meshviewer.core.cad.remesh as rm
-    keep, rm.refine = rm.refine, lambda *a: None
-    occt._REFINED.clear()
-    before = needles()
-    rm.refine = keep
-    occt._REFINED.clear()
-    after = needles()
-    check(after[0] < before[0] and after[1] == 0, f"STEP needles {before[0]} -> {after[0]}, open edges {after[1]}")
+    coarse, fine = (next(iter(src.tessellate(k).values())) for k in (0, 4))
+    open_edges = fine.extract_feature_edges(boundary_edges=True, feature_edges=False,
+                                            manifold_edges=False, non_manifold_edges=True)
+    check(open_edges.n_cells == 0 and fine.n_cells > coarse.n_cells > 0,
+          f"STEP meshed: {coarse.n_cells} -> {fine.n_cells} triangles, closed")
     a = cfd.air(0.0)
     check(abs(a["rho"] - 1.225) < 0.01 if isinstance(a, dict) else True, "air at sea level")
 

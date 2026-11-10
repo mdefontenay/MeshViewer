@@ -1,6 +1,7 @@
 """Background work (file reading, cell quality) so windows stay responsive.
 
     run_job(fn, on_done, on_failed=None)    # fn() runs on a worker thread
+    run_job(fn, on_done, on_failed, busy=(window, "Opening x…"))   # + the toolbar spinner
 
 on_done / on_failed must be bound methods of a QObject (a window, a panel), not
 lambdas: Qt then calls them on the main thread, where the UI may be touched.
@@ -34,10 +35,16 @@ class Job(QRunnable):
             self.signals.failed.emit(exc)
 
 
-def run_job(fn, on_done, on_failed=None):
-    """Start fn() in the background. Keep the returned job alive until it ends."""
+def run_job(fn, on_done, on_failed=None, busy=None):
+    """Start fn() in the background. Keep the returned job alive until it ends.
+    busy: (a window with a .spinner, what is being done) — it turns until the end."""
     job = Job(fn)
     job.setAutoDelete(False)
+    spinner = getattr(busy[0], "spinner", None) if busy else None
+    if spinner is not None:
+        spinner.begin(busy[1])
+        job.signals.done.connect(spinner.end)
+        job.signals.failed.connect(spinner.end)
     job.signals.done.connect(on_done)
     if on_failed is not None:
         job.signals.failed.connect(on_failed)

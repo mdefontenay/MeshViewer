@@ -1,4 +1,4 @@
-"""Sidebar section "Cell quality" (mesh files only).
+"""The Cell Quality tool (mesh files only).
 
     Measure            [ Skewness              ▾ ]
     ▁▂▅█▇▅▃▂▁ ▏         histogram, coloured like the 3D view; click / drag to
@@ -195,8 +195,8 @@ class QualityPanel(QWidget):
         self.switches = {}
         for key, text, tip in (
                 ("bad", "Show bad cells", "Bad cells in red; the model turns see-through"),
-                ("color", "Colour by quality", "Volume meshes: colours the section cut.\n"
-                                               "Surface meshes: colours the faces.")):
+                ("color", "Color by quality", "Volume meshes: colors the section cut.\n"
+                                               "Surface meshes: colors the faces.")):
             r = QHBoxLayout()
             lab = QLabel(text)
             lab.setToolTip(tip)
@@ -234,7 +234,7 @@ class QualityPanel(QWidget):
         self.hist.clear()
         self.count.setText("")
         self.inverted.setText("")
-        self.status.setText("Open this section to check the cells.")
+        self.status.setText("Open this tool to check the cells.")
         self._metric_changed()
         if self._active:
             self._compute()
@@ -269,7 +269,8 @@ class QualityPanel(QWidget):
             if "size" not in self._values and key != "size":
                 out["size"] = Q.compute(ds, "size")        # for the inverted-cell line
             return out
-        self._job = run_job(work, self._computed, self._failed)
+        self._job = run_job(work, self._computed, self._failed,
+                            busy=(self.window(), "Checking the cells…"))
 
     def _computed(self, values):
         self._job = None

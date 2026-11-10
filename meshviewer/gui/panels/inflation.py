@@ -1,4 +1,4 @@
-"""Sidebar section "CFD mode" (CAD files) — the inputs of the
+"""CFD tool ▸ "Inflation Layers" (CAD files) — the inputs of the
 inflation layer calculator. Its plots are on the Inflation page (the pill under
 the 3D view switches between the model and that page).
 laid out like the CFD section of meshes — "Flow" and "Inflation layers"
@@ -14,7 +14,7 @@ Temperature (empty = standard); "?" next to Target y+ (resolve the wall or wall
 functions, with the law of the wall); export_info() for Export ▸ CFD settings.
 Flow — external (length L) or internal, a pipe or duct (hydraulic diameter D).
 
-    CFD mode                                          (switch)
+    Inflation Layers                                  (switch)
     ⌄ Flow                                  Formulas   Values
       Fluid            [ Air — altitude          ▾ ]
       Altitude ?       [ 3000  ] [ m      ▾ ]
@@ -51,6 +51,7 @@ from meshviewer.core import cfd
 from meshviewer.gui.panels.cfd import ATMOSPHERE_URL, FLOW_FORMULAS as MESH_FLOW_FORMULAS, FLUIDS
 from meshviewer.core.units import (DENSITY_UNITS, LENGTH_UNITS, LEVEL_UNITS, SPEED_UNITS,
                                    VISCOSITY_UNITS, nice_length)
+from meshviewer.gui.panels.fluid import FluidInputs
 from meshviewer.gui.forms import _label, _grid, _row
 from meshviewer.core.units import show_length
 from meshviewer.core.units import UNITS
@@ -106,8 +107,8 @@ LAYER_FORMULAS = [
 ]
 
 
-class InflationPanel(QWidget):
-    mode_toggled = Signal(bool)                # CFD mode on / off
+class InflationPanel(FluidInputs, QWidget):
+    mode_toggled = Signal(bool)                # Inflation Layers on / off
     changed = Signal(object)                   # new result dict (cfd.inflation)
     wants_model = Signal()                     # picking faces -> show the 3D view
 
@@ -150,9 +151,9 @@ class InflationPanel(QWidget):
         self.fluid.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.fluid.currentIndexChanged.connect(self._fluid_changed)
         _row(g, 0, "Fluid", self.fluid, wide=True)
-        self.altitude = UnitField(LEVEL_UNITS, 0.0)
-        self.altitude.valueChanged.connect(self._fluid_changed)
-        _, self.level_unit = _row(g, 1, "", self.altitude)
+        self.level = UnitField(LEVEL_UNITS, 0.0)
+        self.level.valueChanged.connect(self._fluid_changed)
+        _, self.level_unit = _row(g, 1, "", self.level)
         self.level_label = QLabel("Altitude")
         self.level_help = help_button(ATMOSPHERE_URL, "U.S. Standard Atmosphere (1976)")
         self.level_head = QWidget()                      # "?" right after the name
@@ -248,7 +249,7 @@ class InflationPanel(QWidget):
         self.pick_info.setWordWrap(True)
         r.addWidget(self.pick_info, 1)
         r.addStretch(0)
-        self.pick_btn = _link("Pick faces…", "Click faces of one part in the 3D view\n"
+        self.pick_btn = _link("Pick Faces…", "Click faces of one part in the 3D view\n"
                               "(⇧-click to add more), then Apply", self._start_pick)
         self.apply_btn = QPushButton("Apply")
         self.apply_btn.clicked.connect(self._apply_pick)
@@ -281,7 +282,7 @@ class InflationPanel(QWidget):
         r = QHBoxLayout()
         r.setContentsMargins(0, 0, 0, 0)
         r.addStretch(1)
-        self.auto_length = _link("Back to auto length", "Forget the typed length: use the "
+        self.auto_length = _link("Back to Auto Length", "Forget the typed length: use the "
                                  "longest distance across the walls along the flow",
                                  self._auto_length)
         r.addWidget(self.auto_length)
@@ -338,7 +339,7 @@ class InflationPanel(QWidget):
                                 self.layer_values))
         d.addWidget(self.layer_section)
 
-        for box in (self.yplus, self.mach, self.length, self.altitude, self.y_min, self.layers,
+        for box in (self.yplus, self.mach, self.length, self.level, self.y_min, self.layers,
                     self.growth, self.y_des):
             box.valueChanged.connect(self._update)
         for box in self._unit_fields().values():
@@ -361,7 +362,7 @@ class InflationPanel(QWidget):
         return w
 
     def _unit_fields(self):
-        return {"altitude": self.altitude, "rho": self.rho, "mu": self.mu, "a": self.a,
+        return {"altitude": self.level, "rho": self.rho, "mu": self.mu, "a": self.a,
                 "u": self.u, "length": self.length, "y_min": self.y_min,
                 "temperature": self.temp}
 
@@ -377,7 +378,7 @@ class InflationPanel(QWidget):
             box.set_unit((st.get("units") or {}).get(key, next(iter(box.units))))
         self._temp_auto = False
         for box, key in ((self.yplus, "yplus"), (self.mach, "mach"), (self.length, "length"),
-                         (self.altitude, "altitude"), (self.y_min, "y_min"),
+                         (self.level, "altitude"), (self.y_min, "y_min"),
                          (self.temp, "temperature"),
                          (self.layers, "layers"), (self.growth, "growth"),
                          (self.y_des, "y_des_factor")):
@@ -411,7 +412,7 @@ class InflationPanel(QWidget):
         return {"on": self.enabled, "yplus": self.yplus.value(), "mach": self.mach.value(),
                 "fluid": self.fluid.currentData(), "rho": self.rho.value(),
                 "mu": self.mu.value(), "a": self.a.value(),
-                "length": self.length.value(), "altitude": self.altitude.value(),
+                "length": self.length.value(), "altitude": self.level.value(),
                 "temperature": None if self._temp_auto else self.temp.value(),
                 "kind": self.kind.currentData(),
                 "y_min": self.y_min.value(), "layers": self.layers.value(),
@@ -615,9 +616,6 @@ class InflationPanel(QWidget):
                 w = w.parentWidget()
 
     # ---- flow direction / arrows -------------------------------------------------------
-    def _dir(self):
-        return np.array([b.value() or 0.0 for b in self.direction], dtype=float)
-
     def _direction_changed(self, *_):
         self._update()
 
@@ -649,66 +647,9 @@ class InflationPanel(QWidget):
         self.mode_toggled.emit(on)
 
     # ---- fluid (the CFD section's) ---------------------------------------------
-    def _fluid_changed(self, *_):
-        self._fill_properties()
-        self._update()
-
-    def _fill_properties(self, custom=None):
-        kind = self.fluid.currentData()
-        for w in (self.altitude, self.level_head, self.level_unit, self.temp, self.temp_label,
-                  self.temp_unit):
-            w.setVisible(kind != "custom")
-        for box in (self.rho, self.mu, self.a):          # only typed for "Custom"
-            box.setEnabled(kind == "custom")
-        self.level_label.setText("Altitude" if kind == "air" else "Depth")
-        self.level_help.setVisible(kind == "air")
-        self.altitude.setToolTip("Geometric altitude above sea level (U.S. Standard Atmosphere"
-                                 " 1976)" if kind == "air" else "Depth below the surface "
-                                                               "(water at 15 °C)")
-        if kind == "custom":
-            self._props = None
-            if custom:
-                self.rho.setValue(custom.get("rho"))
-                self.mu.setValue(custom.get("mu"))
-                self.a.setValue(custom.get("a"))
-            return
-        h = self.altitude.value() or 0.0
-        t = self._temperature(kind)                      # None = standard
-        self._props = cfd.air(h, t) if kind == "air" else cfd.water(h, kind, t)
-        if kind == "air":
-            self.temp.setValue(self._props["T"])
-        self.temp.setPlaceholderText(f"auto: {self.temp.shown(self._props['T_std']):.4g}")
-        self.rho.setValue(self._props["rho"])
-        self.mu.setValue(self._props["mu"])
-        self.a.setValue(self._props["a"])
-
-    def _temperature(self, kind):
-        """air at an altitude — its standard temperature, greyed out like ρ, μ
-        and a; water — typed (empty = 15 °C). Returns the temperature to use, or None."""
-        air = kind == "air"
-        if not air and self._temp_auto:              # leaving air: forget its standard T
-            self.temp.setValue(None)
-        self._temp_auto = air
-        self.temp.setEnabled(not air)
-        return None if air else self.temp.value()
-
-    def _speed_typed(self, u):
-        a = self.a.value()
-        if u is not None and a:
-            self.mach.setValue(u / a)
-        self._update()
-
-    def _auto_length(self):
-        self.length.setValue(None)
-        self._update()
-
     def _set_target(self, v):
         """The "Use y+ = …" in the wall-function card."""
         self.yplus.setValue(v)
-        self._update()
-
-    def _kind_changed(self, *_):
-        self._kind_labels()
         self._update()
 
     def _kind_labels(self):
@@ -729,7 +670,7 @@ class InflationPanel(QWidget):
         unit = sc.model.units or sc.measure.display_unit
         if unit in UNITS:
             return UNITS[unit], ""
-        return 1.0, "No unit in this file: the model is taken to be in metres " \
+        return 1.0, "No unit in this file: the model is taken to be in meters " \
                     "(pick its unit in the toolbar)."
 
     def _save(self):
@@ -882,7 +823,7 @@ class InflationPanel(QWidget):
             if self.compressible.isChecked() and not r.get("internal"):
                 rows += [("Cf incompressible", g(r["Cf_inc"]), ""),
                          ("Compressibility factor", g(r["Cf"] / r["Cf_inc"]), "")]
-            if r.get("supersonic"):                         # was on the page
+            if r.get("supersonic"):
                 rows += [("Recovery factor rc (supersonic δ99)", g(r["rc"]), "")]
             rows += [("Wall shear τw", g(r["tau"]), "Pa"),
                      ("Friction velocity u*", g(r["u_star"]), "m/s"),

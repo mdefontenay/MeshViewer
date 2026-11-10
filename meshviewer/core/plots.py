@@ -1,20 +1,20 @@
-"""Measurements that become plots under the 3D view (F13). No Qt.
+"""Plots under the 3D view (F13). No Qt.
 
-A measurement is a plain dict (JSON-friendly, remembered per file):
+A plot is a plain dict (JSON-friendly, remembered per file):
 
     {"id": 2, "name": "Root", "kind": "section", ...the kind's own settings}
 
-KINDS lists the ways to measure; each has defaults() and compute(). Only the cross
+KINDS lists the kinds of plot; each has defaults() and compute(). Only the cross
 section for now — a new kind adds an entry here, an editor in gui/panels/plots.py and,
 if it draws differently, a plot in gui/pages/plots.py.
 
-Cross section ("section"):
+Section ("section"):
     the visible boundaries cut by a plane normal to X, Y or Z, at a position (None = the
     middle of the model); along the cut, a value — a solution field (cp, Mach…) or a
     position (X, Y, Z: the shape) — against a coordinate in the plane (auto: the longer
     way of the cut), optionally divided by the chord (x/c). One curve per cut loop.
 
-    m = new_measurement("section", "Root", ident=1, model=model)
+    m = new_plot("section", "Root", ident=1, model=model)
     r = compute(m, model.parts, visible_names)
     r["curves"]: [{"part", "x" (n,), "y" (n,), "xyz" (n, 3)}, …]
     to_csv(m, r, scale) / read_csv(text) -> reference points [(x, y), …]
@@ -45,7 +45,7 @@ def _bounds(parts, names):
 
 
 def values_of(parts):
-    """What a cross section can plot: the solution fields, then X / Y / Z."""
+    """What a section plot can show: the solution fields, then X / Y / Z."""
     return list(solution_fields(parts)) + [COORD + a for a in AXES]
 
 
@@ -57,7 +57,7 @@ def value_title(v):
     return {"cp": "cp", "mach": "Mach", "rho": "ρ", "yplus": "y+"}.get((v or "").lower(), v)
 
 
-# ---- cross section ----------------------------------------------------------------------
+# ---- section ----------------------------------------------------------------------------
 def _section_defaults(model):
     names = list(model.parts)
     b = _bounds(model.parts, names).reshape(3, 2)
@@ -224,17 +224,17 @@ def _section_compute(m, parts, names):
 
 
 KINDS = {
-    "section": {"title": "Cross section", "defaults": _section_defaults,
+    "section": {"title": "Section", "defaults": _section_defaults,
                 "compute": _section_compute},
 }
 
 
-def new_measurement(kind, name, ident, model):
+def new_plot(kind, name, ident, model):
     return {"id": int(ident), "name": name, "kind": kind, **KINDS[kind]["defaults"](model)}
 
 
 def compute(m, parts, names):
-    """The plot of one measurement over the boundaries `names` (the visible ones)."""
+    """One plot over the boundaries `names` (the visible ones)."""
     names = [n for n in names if n in parts]
     return KINDS[m["kind"]]["compute"](m, parts, names)
 

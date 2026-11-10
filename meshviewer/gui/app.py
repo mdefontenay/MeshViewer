@@ -7,17 +7,21 @@ Mac app); ⌘Q quits.
 """
 from __future__ import annotations
 
-import sys
 from pathlib import Path
+import sys
 
-from PySide6.QtCore import QEvent, QPoint, QSettings, Qt, QTimer
+from PySide6.QtCore import QEvent, QPoint, Qt, QTimer
 from PySide6.QtGui import QAction, QIcon, QKeySequence
 from PySide6.QtWidgets import QApplication, QFileDialog, QMenuBar
+import shiboken6
 
 from meshviewer.gui.dialogs.about import AboutDialog
-from meshviewer.render.scene import AXIS_FONT_DEFAULT
+from meshviewer.gui.macos import join_active_space
+from meshviewer.gui.store import settings
 from meshviewer.gui.style import stylesheet
+from meshviewer.gui.welcome import add_sample_menu
 from meshviewer.gui.window import FILE_FILTER, ViewerWindow
+from meshviewer.render.style import AXIS_FONT_DEFAULT
 
 ICON = Path(__file__).resolve().parents[2] / "resources" / "mesh_icon.icns"
 
@@ -29,6 +33,14 @@ def _axis_font(v) -> int:
         return max(10, min(28, int(v)))
     except (TypeError, ValueError):
         return AXIS_FONT_DEFAULT
+
+
+def _pref_quality(v):
+    """Settings ▸ CAD mesh quality: "last" or a level number."""
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return "last"
 
 
 def _old_axes_setting(st) -> str:
@@ -48,7 +60,7 @@ class MeshViewerApp(QApplication):
         if ICON.exists():                       # only matters when run from source
             self.setWindowIcon(QIcon(str(ICON)))
         # appearance (theme + 3D background), remembered between launches
-        st = QSettings("local", "Mesh Viewer")
+        st = settings()
         self.appearance = {
             "theme": st.value("appearance/theme", "system"),
             "bg": st.value("appearance/bg", "default"),
@@ -59,11 +71,19 @@ class MeshViewerApp(QApplication):
             # edge lines
             "edge_width": st.value("appearance/edge_width", "thin"),
             "hide_edges_moving": st.value("appearance/hide_edges_moving", True, type=bool),
-            # light and shadow on the model (was a Display switch in 2.25)
+            # light and shadow on the model
             "shading": st.value("appearance/shading", True, type=bool),
             # Display ▸ Axes (off / axes / grid / both) replaces the Grid switch
             # and Appearance's Grid lines / Axis lines switches
             "axes": st.value("appearance/axes", _old_axes_setting(st)),
+        }
+        # Settings ▸ General / Units
+        self.prefs = {
+            "cad_quality": _pref_quality(st.value("prefs/cad_quality", "last")),
+            "shown_unit": st.value("prefs/shown_unit", "file"),   # "file": the file's own
+            "unit_mesh": st.value("prefs/unit_mesh", "m"),         # files that don't say
+            "unit_cad": st.value("prefs/unit_cad", "mm"),
+            "ask_unit": st.value("prefs/ask_unit", True, type=bool),
         }
         self._apply_theme()
         self.setStyleSheet(stylesheet())
@@ -81,14 +101,16 @@ class MeshViewerApp(QApplication):
             a.setShortcut(QKeySequence.Open)
             a.triggered.connect(self.open_dialog)
             self.add_recent_menu(m)
-            m.addAction(self.about_action(m))
+            add_sample_menu(m, self.open_path)
+            for a in self.app_menu_actions():          # the app menu: only here, so once
+                m.addAction(a)
         self.aboutToQuit.connect(self._remember_all)
 
     # --- File ▸ Open Recent ---------------------------------------------
     RECENT_MAX = 12
 
     def recent_files(self):
-        st = QSettings("local", "Mesh Viewer")
+        st = settings()
         files = st.value("recent", []) or []
         files = [files] if isinstance(files, str) else list(files)
         return [f for f in files if Path(f).exists()]
@@ -96,7 +118,7 @@ class MeshViewerApp(QApplication):
     def add_recent(self, path):
         p = str(Path(path).resolve())
         files = [p] + [f for f in self.recent_files() if f != p]
-        QSettings("local", "Mesh Viewer").setValue("recent", files[: self.RECENT_MAX])
+        settings().setValue("recent", files[: self.RECENT_MAX])
 
     def add_recent_menu(self, menu):
         sub = menu.addMenu("Open Recent")
@@ -117,31 +139,90 @@ class MeshViewerApp(QApplication):
             sub.addSeparator()
         clear = sub.addAction("Clear Menu")
         clear.setEnabled(bool(files))
-        clear.triggered.connect(lambda: QSettings("local", "Mesh Viewer").setValue("recent", []))
+        clear.triggered.connect(lambda: settings().setValue("recent", []))
 
     def _remember_all(self):
         for w in list(self.windows):
             w.remember_view()
 
-    # --- About Mesh Viewer ---------------------------------------------
-    def about_action(self, parent):
-        """'About Mesh Viewer' — macOS moves it to the app menu (left of File)."""
-        a = QAction("About Mesh Viewer", parent)
-        a.setMenuRole(QAction.AboutRole)
-        a.triggered.connect(self.show_about)
-        return a
+    # --- the app menu: About, Check for Updates…, Settings… -----------------
+    def app_menu_actions(self):
+        """Made once for the whole app. On macOS they live in the app menu (left of File),
+        which every window shares: they are added to the no-window menu bar only — added
+        to each window's menu bar too, macOS showed them once per menu bar."""
+        if getattr(self, "_app_actions", None) is None:
+            about = QAction("About Mesh Viewer", self)
+            about.setMenuRole(QAction.AboutRole)
+            about.triggered.connect(self.show_about)
+            updates = QAction("Check for Updates…", self)
+            updates.setMenuRole(QAction.ApplicationSpecificRole)
+            updates.triggered.connect(lambda: (self.show_about(), self._about.check_updates()))
+            settings = QAction("Settings…", self)          # (PreferencesRole would rename it
+            settings.setMenuRole(QAction.ApplicationSpecificRole)   # "Preferences…")
+            settings.setShortcut(QKeySequence("Ctrl+,"))
+            settings.triggered.connect(self.show_settings)
+            self._app_actions = [about, updates, settings]
+        return self._app_actions
+
+    def _front(self):
+        """The file window in front (None with no window open)."""
+        win = self.activeWindow()
+        while win is not None and not isinstance(win, ViewerWindow):
+            win = win.parentWidget()
+        return win or next((w for w in reversed(self.windows) if w.isVisible()), None)
+
+    def _present(self, w):
+        """Show one of the app's own windows where you are, also over a full-screen
+        window. A window of its own went to the desktop Space, so macOS slid the full
+        screen away: it belongs to the front window now (as a dialog of it), and macOS
+        is asked to keep it on the active Space."""
+        front = self._front()
+        if front is not None and w.parentWidget() is not front:
+            geometry = w.geometry() if w.isVisible() else None
+            w.setParent(front, Qt.Dialog)              # (setParent hides it)
+            if geometry is not None:
+                w.setGeometry(geometry)
+        join_active_space(w)                           # before it shows…
+        w.show()
+        w.raise_()
+        w.activateWindow()
+        QTimer.singleShot(0, lambda: join_active_space(w))   # …and after (Qt may reset it)
+
+    def _alive(self, name):
+        """The window kept in self.<name>, unless it went with its front window."""
+        w = getattr(self, name, None)
+        return w if w is not None and shiboken6.isValid(w) else None
 
     def show_about(self):
-        if getattr(self, "_about", None) is None:
+        if self._alive("_about") is None:
             self._about = AboutDialog()
-        self._about.show()
-        self._about.raise_()
-        self._about.activateWindow()
+        self._present(self._about)
+
+    # ---- Settings (⌘,) -------------------------------------------------
+    def show_settings(self):
+        if self._alive("_settings") is None:
+            from meshviewer.gui.dialogs.settings import SettingsWindow
+            self._settings = SettingsWindow(self)
+        self._present(self._settings)
+
+    def set_pref(self, **changes):
+        self.prefs.update(changes)
+        st = settings()
+        for k, v in changes.items():
+            st.setValue(f"prefs/{k}", v)
+
+    def bring_all_to_front(self):
+        for w in self.windows:
+            if w.isVisible():
+                w.raise_()
+        active = self.activeWindow()
+        if active is not None:
+            active.raise_()
 
     # ---- appearance ---------------------------------------------------
     def set_appearance(self, **changes):
         self.appearance.update(changes)
-        st = QSettings("local", "Mesh Viewer")
+        st = settings()
         for k, v in changes.items():
             st.setValue(f"appearance/{k}", v)
         if "theme" in changes:

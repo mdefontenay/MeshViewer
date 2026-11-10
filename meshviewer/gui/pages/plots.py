@@ -1,13 +1,13 @@
-"""The tab of a measurement under the 3D view (F13): its plot, drawn like the CFD mode
+"""The tab of a plot under the 3D view (F13), drawn like the Inflation Layers
 plots (inflation.py: same grid, ticks, axis titles, hover).
 
     Root                                             ● wing  ● tip  ○ reference
-    Cross section · plane Y = 0.35 m · cp along x/c
+    Section · plane Y = 0.35 m · cp along x/c
     ┌───────────────────────────────────────────────────────────────────────┐
     │   -cp up (flipped) … one line per cut loop, in its boundary's colour  │
     └───────────────────────────────────────────────────────────────────────┘
 
-One page for every measurement: the window shows the one whose tab is chosen
+One page for every plot: the window shows the one whose tab is chosen
 (show(m, r, …)). Hover a line for the point under the cursor.
 """
 from __future__ import annotations
@@ -229,7 +229,7 @@ class PlotPage(QWidget):
         lay.addWidget(self.plot, 1)
 
     def show(self, m, r, colors, scale, unit, value_unit=None):
-        """m: the measurement, r: its compute() result, colors: part -> hex,
+        """m: the plot, r: its compute() result, colors: part -> hex,
         (scale, unit): file lengths -> shown; value_unit: (convert, label) of a field's
         values (Results ▸ Values in / Shown in), or None."""
         self.ident = m["id"]

@@ -1,4 +1,4 @@
-"""Sidebar section "Results" — a solution field from the solver painted on
+"""The Results tool — a solution field from the solver painted on
 the boundaries (files that carry one: FUN3D's Tecplot boundary output, .dat).
 
     Results
@@ -96,9 +96,9 @@ class ResultsPanel(QWidget):
         self.cmap.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         for key, stops in COLORMAPS.items():
             self.cmap.addItem(stops, key)
-        self.cmap.setToolTip("Colour map")
+        self.cmap.setToolTip("Color map")
         self.cmap.currentIndexChanged.connect(self._update)
-        _row(g, 1, "Colours", self.cmap, wide=True)
+        _row(g, 1, "Colors", self.cmap, wide=True)
         grp = QActionGroup(self)
         grp.setExclusive(True)
         self.show_acts = {}
@@ -130,7 +130,7 @@ class ResultsPanel(QWidget):
                            _row(g, 4, "Shown in", self.shown_unit, wide=True)[0]]
         lay.addLayout(g)
         r = QHBoxLayout()
-        r.addWidget(QLabel("Colour the boundaries"))
+        r.addWidget(QLabel("Color the boundaries"))
         r.addStretch(1)
         self.colour_on = Switch()
         self.colour_on.setToolTip("Paint the visible boundaries with this field")
@@ -141,9 +141,9 @@ class ResultsPanel(QWidget):
         lay.addWidget(self.bar)
         g = _grid()
         self.lo = NumberField()
-        self.lo.setToolTip("Bottom of the colour scale. Empty = the smallest value")
+        self.lo.setToolTip("Bottom of the color scale. Empty = the smallest value")
         self.hi = NumberField()
-        self.hi.setToolTip("Top of the colour scale. Empty = the largest value")
+        self.hi.setToolTip("Top of the color scale. Empty = the largest value")
         for b in (self.lo, self.hi):
             b.valueChanged.connect(self._update)
         _, self.lo_unit = _row(g, 0, "Min", self.lo, unit=" ")
@@ -190,10 +190,6 @@ class ResultsPanel(QWidget):
                        if isinstance(v, (list, tuple)) and len(v) == 2}
         self._sync_units()
         self._update(save=False)
-
-    @staticmethod
-    def has_results(model):
-        return bool(ResultsPanel.fields_of(model))
 
     @staticmethod
     def _label(f):

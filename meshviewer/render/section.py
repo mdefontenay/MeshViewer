@@ -1,4 +1,4 @@
-"""Cross-section: a plane that hides one half of the model and fills the cut.
+"""Section: a plane that hides one half of the model and fills the cut.
 
 Plane = origin (x, y, z) + normal (x, y, z). The half the normal points to is
 hidden. Clipping is done on the GPU (instant); the filled cut faces ("caps")
@@ -207,7 +207,9 @@ class Section:
         if self._caps is None:
             return
         rgb = np.array([_darker(self.scene.colors[n]) for n in self.scene.names]) * 255
-        mesh = pv.wrap(self._caps.GetMapper().GetInput())
+        m = self._caps.GetMapper()
+        m.Update()                                 # (its input exists once it has run)
+        mesh = pv.wrap(m.GetInput())
         mesh.cell_data["rgb"] = rgb[self._cap_part].astype(np.uint8)
         mesh.Modified()
 
@@ -405,6 +407,17 @@ class Section:
         self._cap_part = None
 
     def _sync_widget(self):
+        """The plane's handle, made at its first use and switched with the plane. VTK
+        draws a frame at each switch and setting of a widget: held back, one is asked."""
+        iren = self.p.iren.interactor
+        iren.EnableRenderOff()
+        try:
+            self._make_or_switch_widget()
+        finally:
+            iren.EnableRenderOn()
+        self.p.render()
+
+    def _make_or_switch_widget(self):
         want = self.enabled and self.show_handle
         if want and self._widget is None:
             before = self._renderer_actors()

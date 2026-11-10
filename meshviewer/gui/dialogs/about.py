@@ -20,7 +20,7 @@ from PySide6.QtCore import QProcess, Qt, QUrl
 from PySide6.QtGui import QDesktopServices, QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import QApplication, QDialog, QLabel, QPushButton, QVBoxLayout
 
-from meshviewer import __version__
+from meshviewer import __version__, version_label
 
 AUTHOR = "Matthieu de Fontenay"
 BUILT_WITH = "Claude Opus 5.5"
@@ -34,13 +34,23 @@ def version_tuple(text):
     return tuple(int(x) for x in m.group(0).split(".")) if m else None
 
 
+def _beta(text):
+    """'2.5b1' / 'v2.5-beta.1' / '2.5 beta 1' -> 1; a release -> None."""
+    m = re.search(r"(?:b|beta)[ .-]?(\d+)\s*$", text or "", re.I)
+    return int(m[1]) if m else None
+
+
 def compare_versions(mine, latest):
-    """-1: an update is available · 0: up to date · 1: this one is newer (pre-release)."""
+    """-1: an update is available · 0: up to date · 1: this one is newer (pre-release).
+    A beta comes before its release: 2.5b1 < 2.5b2 < 2.5."""
     a, b = version_tuple(mine), version_tuple(latest)
     if a is None or b is None:
         return None
     n = max(len(a), len(b))
     a, b = a + (0,) * (n - len(a)), b + (0,) * (n - len(b))
+    if a == b:                                   # same numbers: release > any beta
+        ba, bb = _beta(mine), _beta(latest)
+        a, b = (ba is None, ba or 0), (bb is None, bb or 0)
     return (a > b) - (a < b)
 
 
@@ -114,7 +124,7 @@ class AboutDialog(QDialog):
             return lab
 
         line("Mesh Viewer", "font-size: 17px; font-weight: 700;")
-        line(f"Version {__version__}", obj="InfoLine")
+        line(f"Version {version_label()}", obj="InfoLine")
         # the latest release on GitHub, to compare with the version above
         lay.addSpacing(6)
         self.check = check = QPushButton("Check for Updates…")
@@ -191,20 +201,20 @@ class AboutDialog(QDialog):
             self._page = data.get("html_url") or RELEASES
         except (ValueError, AttributeError):
             return self._failed()
-        latest = ".".join(map(str, version_tuple(tag) or ())) or tag
+        latest = version_label(tag.lstrip("v")) if tag else tag
         cmp = compare_versions(__version__, tag)
         if cmp is None:
             return self._failed()
         if cmp < 0:
             self._say(f"<b>A new update is available: {latest}</b><br>"
-                      f"You have {__version__}.")
+                      f"You have {version_label()}.")
             self.download.setText(f"Download {latest}")
             self.download.setVisible(True)
         elif cmp == 0:
             self._say(f"<span style='color:#30b350'>✓</span> You're up to date "
-                      f"({__version__} is the latest release).")
+                      f"({version_label()} is the latest release).")
         else:
-            self._say(f"This app is a pre-release: {__version__} is newer than the latest "
+            self._say(f"This app is a pre-release: {version_label()} is newer than the latest "
                       f"release ({latest}).")
 
     def _failed(self):

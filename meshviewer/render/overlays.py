@@ -2,9 +2,9 @@
 
     FlowView     "Show flow vectors": 5 × 5 arrows up- and downstream of a boundary
     YplusView    CFD ▸ Colour by y+ (per wall node, relative to the target)
-    WallView     CFD mode: the inflation walls tinted
+    WallView     Inflation Layers: the walls tinted
     ResultsView  Results: a solution field on the visible boundaries (or its gradient)
-    CutLineView  Plots: where the plane of a cross section cuts the boundaries
+    CutLineView  Plots: where the plane of a section plot cuts the boundaries
 
 Colour maths (ramps, scales) lives in core/fields.py.
 """
@@ -140,12 +140,12 @@ class YplusView:
         return [self._actor] if self._actor is not None else []
 
 
-# --- CFD mode (CAD) — the walls that get inflation layers -----------------
+# --- Inflation Layers (CAD) — the walls that get the layers ---------------
 WALL_COLOR = "#00b5ad"
 
 
 class WallView:
-    """The chosen walls tinted in the 3D view (CFD mode)."""
+    """The chosen walls tinted in the 3D view (Inflation Layers)."""
 
     def __init__(self, scene):
         self.scene = scene
@@ -230,6 +230,7 @@ class ResultsView(YplusView):
                                       pickable=False, reset_camera=False, lighting=True,
                                       smooth_shading=True, ambient=0.25, diffuse=0.8)
         m = self._actor.GetMapper()
+        m.Update()                             # (the copy exists once the mapper has run)
         self._surf = pv.wrap(m.GetInput())     # what is drawn (smooth shading copies it)
         m.SetResolveCoincidentTopologyToPolygonOffset()
         m.SetRelativeCoincidentTopologyPolygonOffsetParameters(-2, -2)
@@ -263,7 +264,7 @@ class ResultsView(YplusView):
 
 
 class CutLineView:
-    """The cuts of the Plots cross sections whose eye is open, drawn over the model."""
+    """The cuts of the section plots whose eye is open, drawn over the model."""
 
     def __init__(self, scene):
         self.scene = scene

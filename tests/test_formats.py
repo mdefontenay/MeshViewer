@@ -30,7 +30,8 @@ def test(app, files):
     # in the app: opens, the right sections, a distance on the drawing
     w = open_file(app, files["dxf"])
     sb = w.sidebar
-    check(sb.shown_sections() == ["measure"], f"drawing opens on Measure {sb.shown_sections()}")
+    check(sb.current_tab() == "measure" and sb.is_active("measure"),
+          f"drawing opens on Measure, measuring ({sb.current_tab()})")
     check(bool(sb._boxes["section"].parts[0][1].text()), "Section: not for 2D")
     # 2D: seen from +Z, never turned
     sc = w.scene
@@ -42,17 +43,17 @@ def test(app, files):
     check(sc.state["parallel"], "2D: parallel projection")
     gone = ("mesh_edges", "feature_edges", "faces", "bbox", "origin")
     check(not any(w.a_show[k].isVisible() for k in gone) and w.a_show["grid"].isVisible()
-          and not w._tb_slot[w.edges_capsule].isVisible(),
+          and w.a_show_menu.menu() is not None,
           "drawing: no edges / faces / bounding box / origin buttons")
     sc.set_bbox(True)
     sc.set_origin(True)
     check(not sc.state["bbox"] and not sc.state["origin"], "drawing: bbox, origin stay off")
     check(not sb.parts_section.isVisible(), "drawing: no layer list")
     import pyvista as pv
-    cols = {tuple(round(c, 3) for c in sc._surf_map.block_attr[sc._block(n)].color)
+    cols = {tuple(round(c, 3) for c in sc._attrs["surf"][sc._index[n]].color)
             for n in sc.names}
     sc.set_theme(True)
-    cols_dark = {tuple(round(c, 3) for c in sc._surf_map.block_attr[sc._block(n)].color)
+    cols_dark = {tuple(round(c, 3) for c in sc._attrs["surf"][sc._index[n]].color)
                  for n in sc.names}
     bg = tuple(round(c, 3) for c in sc.p.renderer.GetBackground())
     check({c[:3] for c in cols} == {(0, 0, 0)} and {c[:3] for c in cols_dark} == {(1, 1, 1)}
@@ -130,9 +131,9 @@ def test(app, files):
     m.set_mode("off")
     w.a_show["feature_edges"].trigger()
     sb._visibility_changed(["wall"], False)
-    e = sc._edges_map.block_attr
-    blk = sc._edges.GetMapper().GetInputDataObject(0, 0).GetBlock(sc._block("fluid") - 1)
-    check(sc.state["feature_edges"] and e[sc._block("fluid")].visible and blk.GetNumberOfCells()
+    e = sc._attrs["edges"]
+    blk = sc._edges.GetMapper().GetInputDataObject(0, 0).GetBlock(sc._index["fluid"])
+    check(sc.state["feature_edges"] and e[sc._index["fluid"]].visible and blk.GetNumberOfCells()
           and sc._edges.GetProperty().GetLineWidth() >= 2.5,
           "2D: Feature edges = the zone outline (shows the hidden wall)")
     w.close()

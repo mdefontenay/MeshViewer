@@ -1,4 +1,4 @@
-"""The "?" next to "Target y+" (CFD section and CFD mode) — which y+
+"""The "?" next to "Target y+" (CFD tool: meshes and Inflation Layers) — which y+
 to aim for: resolve the wall (y+ ≈ 1) or use wall functions (30 < y+ < 300), with
 a plot of the law of the wall.
 
@@ -282,7 +282,7 @@ class WallHelpCard(QFrame):
         note.setObjectName("Caption")
         note.setWordWrap(True)
         lay.addWidget(note)
-        more = QPushButton("More about y+ (CFD Online) ↗")              # was a "?" in the header
+        more = QPushButton("More About y+ (CFD Online) ↗")
         more.setObjectName("LinkButton")
         more.setFlat(True)
         more.setCursor(Qt.PointingHandCursor)

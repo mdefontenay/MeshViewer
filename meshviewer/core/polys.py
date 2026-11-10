@@ -1,8 +1,27 @@
 """Small NumPy helpers on surface meshes, shared by Export and the Info section."""
 from __future__ import annotations
 
+from contextlib import contextmanager
+
 import numpy as np
 from vtkmodules.util.numpy_support import vtk_to_numpy
+from vtkmodules.vtkCommonCore import vtkSMPTools
+
+vtkSMPTools.SetBackend("STDThread")     # VTK filters (normals, cuts…) on every CPU core
+SMALL_PART = 20_000                     # cells; below, threads cost more than they save
+
+
+@contextmanager
+def one_thread(small=True):
+    """Run VTK filters on one thread inside the block (when `small`). Starting the worker
+    threads costs ~1 ms per filter run: nothing on a big part, most of the time on
+    hundreds of small ones."""
+    if small:
+        vtkSMPTools.SetBackend("Sequential")
+    try:
+        yield
+    finally:
+        vtkSMPTools.SetBackend("STDThread")
 
 
 def faces_by_size(poly):
@@ -33,7 +52,7 @@ def bare(poly, points=None):
     VTK shares the structure itself (copy_structure), with no NumPy views in between:
     building it from views of another surface's arrays (PolyData(part.points,
     faces=part.faces)) let VTK keep pointers into NumPy memory that could be freed —
-    rare, random crashes (moving a Plots cross section quickly). `points`: new
+    rare, random crashes (moving a section plot quickly). `points`: new
     coordinates for the same faces (copied)."""
     import pyvista as pv
     out = pv.PolyData()

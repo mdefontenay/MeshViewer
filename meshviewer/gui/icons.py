@@ -21,7 +21,7 @@ from PySide6.QtGui import (
 GRID = 18.0          # drawn icons use an 18 × 18 grid
 _engines = []        # keep Python engines alive while Qt uses them
 SF = {   # icon name -> SF Symbol
-    "sidebar": "sidebar.squares.left", "fit": "viewfinder", "iso": "cube",
+    "sidebar": "sidebar.left", "inspector": "sidebar.right", "fit": "viewfinder", "iso": "cube",
     "parallel": "perspective", "grid": "rectangle.split.3x3", "camera": "camera",
     "export": "square.and.arrow.up", "appearance": "slider.horizontal.3",
     "section": "square.3.layers.3d", "ruler": "ruler", "measure": "ruler",
@@ -31,6 +31,8 @@ SF = {   # icon name -> SF Symbol
     "faces": "cube.fill", "plus": "plus.circle", "edit_unit": "square.and.pencil",
     "plots": "chart.xyaxis.line", "eye": "eye", "eye_off": "eye.slash",
     "advanced": "gearshape",
+    "settings_general": "gearshape", "settings_appearance": "paintpalette",
+    "settings_units": "ruler",
 }
 _sf_cache = {}
 
@@ -45,6 +47,11 @@ def _line(p, *pts):
 def _draw_sidebar(p):
     p.drawRoundedRect(QRectF(2, 3.5, 14, 11), 2.6, 2.6)
     _line(p, (7, 3.5), (7, 14.5))
+
+
+def _draw_inspector(p):
+    p.drawRoundedRect(QRectF(2, 3.5, 14, 11), 2.6, 2.6)
+    _line(p, (11, 3.5), (11, 14.5))
 
 
 def _draw_fit(p):
@@ -316,6 +323,7 @@ DRAWINGS = {
     "advanced": _draw_advanced,
     "ruler": _draw_ruler,
     "sidebar": _draw_sidebar,
+    "inspector": _draw_inspector,
     "fit": _draw_fit,
     "iso": _draw_cube,
     "section": _draw_section,
@@ -330,6 +338,9 @@ DRAWINGS = {
     "cell_quality": _draw_cell_quality,
     "results": _draw_results,
     "analysis": _draw_analysis,
+    "settings_general": _draw_advanced,
+    "settings_appearance": _draw_appearance,
+    "settings_units": _draw_ruler,
 }
 
 
@@ -395,7 +406,20 @@ def _sf_image(symbol, px, color):
     img = None
     if sys.platform == "darwin":
         try:
-            img = _sf_render(symbol, px, color)
+            solid = QColor(color)
+            solid.setAlphaF(1.0)
+            img = _sf_render(symbol, px, solid)
+            if img is not None and color.alphaF() < 1.0:
+                # see-through (a disabled button): fade the solid symbol here. Tinted in
+                # macOS with a see-through color, the symbol's own black showed through —
+                # invisible on a dark toolbar
+                faded = QImage(img.size(), QImage.Format_ARGB32_Premultiplied)
+                faded.fill(Qt.transparent)
+                p = QPainter(faded)
+                p.setOpacity(color.alphaF())
+                p.drawImage(0, 0, img)
+                p.end()
+                img = faded
         except Exception:                                # noqa: BLE001 no PyObjC / symbol
             img = None
     _sf_cache[key] = img

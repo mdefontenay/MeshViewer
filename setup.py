@@ -8,6 +8,8 @@ from setuptools import setup
 # Version lives in meshviewer/__init__.py (also shown in About Mesh Viewer).
 VERSION = re.search(r'__version__ = "([^"]+)"',
                     Path(__file__).with_name("meshviewer").joinpath("__init__.py").read_text())[1]
+# macOS wants numbers only in the bundle's version ("2.5b1" -> "2.5"); About shows the beta
+NUMBERS = re.match(r"[\d.]+", VERSION)[0].rstrip(".")
 
 DOC_TYPES = [
     # extensions, name, rank, UTIs
@@ -38,7 +40,7 @@ PLIST = {
     "CFBundleName": "Mesh Viewer",
     "CFBundleDisplayName": "Mesh Viewer",
     "CFBundleIdentifier": "local.meshviewer",          # same id as the old app
-    "CFBundleShortVersionString": VERSION,
+    "CFBundleShortVersionString": NUMBERS,
     "CFBundleVersion": VERSION,
     "LSMinimumSystemVersion": "13.0",
     "LSApplicationCategoryType": "public.app-category.developer-tools",
@@ -71,6 +73,7 @@ PLIST = {
 OPTIONS = {
     "iconfile": "resources/mesh_icon.icns",
     "plist": PLIST,
+    "resources": ["resources/samples"],     # the welcome screen's samples (Contents/Resources)
     "argv_emulation": False,        # Qt receives macOS file-open events itself
     # Standalone builds only: copy these packages whole (VTK and PyVista load
     # many modules lazily, which py2app's import scanner would otherwise miss).

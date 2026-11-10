@@ -405,7 +405,7 @@ class Measure:
                 for (p0, p1), c in zip(((a, corner1), (corner1, corner2), (corner2, b)),
                                        AXIS_COLORS):
                     if np.linalg.norm(p1 - p0) > 1e-12:
-                        self._add(pv.Line(p0, p1), c, 2.5, lit=False)   # was 1.5
+                        self._add(pv.Line(p0, p1), c, 2.5, lit=False)
             # picked points are screen-size dots (fixed pixels), not
             # spheres in model units that grew huge when zooming in. Drawn last = on top.
             self._dots(pts)

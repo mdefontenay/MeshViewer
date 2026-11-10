@@ -1,4 +1,4 @@
-"""2D geometry of the cross section: the cut as loops in the plane, wall offsets,
+"""2D geometry of the section: the cut as loops in the plane, wall offsets,
 layer collisions. Pure NumPy (used by gui/pages/section_cut.py)."""
 from __future__ import annotations
 

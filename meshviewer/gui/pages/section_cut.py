@@ -1,4 +1,4 @@
-"""The "Cross section" tab of the Inflation page (CFD mode).
+"""The "Section" tab of the Inflation Layers page.
 
 The section plane (sidebar ▸ Section) cuts the model; this tab draws that cut in
 2D, looking at the plane, and estimates how the inflation layers would sit on
@@ -37,7 +37,7 @@ from meshviewer.core.polys import bare
 
 
 class SectionLegend(QWidget):
-    """the legend of the Cross section, same look as the plot's.
+    """the legend of the Section tab, same look as the plot's.
     the layers are always shown; "Flow direction" shows / hides the arrow."""
     toggled = Signal(str, bool)
     ITEMS = (("layers", "band", "Inflation layers"), ("flow", "arrow", "Flow direction"))
@@ -152,10 +152,6 @@ class SectionView(QWidget):
         self.flip = bool(on)
         self._key = None
         self._poll()
-
-    def set_internal(self, on):
-        """internal flow = the fluid is on the other side of the walls."""
-        self.set_flip(on)
 
     def set_show(self, key, on):
         self.show[key] = bool(on)
@@ -527,7 +523,7 @@ class SectionView(QWidget):
         if c.get("segs") is None:
             p.drawText(self.rect(), Qt.AlignCenter, self._msg)
         elif r is None:
-            p.drawText(self.rect(), Qt.AlignCenter, "Fill in the CFD mode inputs in the sidebar")
+            p.drawText(self.rect(), Qt.AlignCenter, "Fill in Inflation Layers in the CFD tool")
         if self.show["flow"]:
             self._draw_flow(p, c, text, muted, back)
         # scale bar (model units shown as metres with the file's unit)

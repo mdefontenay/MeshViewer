@@ -16,9 +16,8 @@ except ImportError as exc:  # h5py is only needed for CGNS files
     raise MissingDependency("h5py", "CGNS files") from exc
 
 
-# CGNS element-type code -> nodes per element (fixed-size types only).
-# FIX: QUAD_8 (8), QUAD_9 (9 — was 8), HEXA_20 (20 — was 14), HEXA_27
-# (27 — was 25) and the quadratic pyramids / prisms were missing or wrong.
+# CGNS element-type code -> nodes per element (fixed-size types only), quadratic
+# elements included (QUAD_8 / 9, HEXA_20 / 27, pyramids, prisms).
 FIXED_NPE = {2: 1, 3: 2, 4: 3, 5: 3, 6: 6, 7: 4, 8: 8, 9: 9, 10: 4, 11: 10,
              12: 5, 13: 14, 14: 6, 15: 15, 16: 18, 17: 8, 18: 20, 19: 27, 21: 13}
 

@@ -1,7 +1,7 @@
-"""Sidebar section "Plots" — measurements plotted under the 3D view (F13).
+"""The Plots tool — plots under the 3D view (F13).
 
     Plots
-      [ New Measurement… ]
+      [ New Plot… ]
       ▾ Root                                (opening it shows its plot)
         ┌ Plane ─────────────────────────────────────┐
         │ Normal to  [ X | Y | Z ]                    │
@@ -16,54 +16,34 @@
                                       [ Rename… | Delete ]
       ▸ Tip
 
-Every measurement has its tab under the 3D view (window.py) and a sub-section here,
-named by the user. The kind of measurement picks its editor: EDITORS (only "section"
+Every plot has its tab under the 3D view (window.py) and a fold-out here,
+named by the user. The kind of plot picks its editor: EDITORS (only "section"
 for now; a new kind adds an editor here and an entry in core/plots.py KINDS).
 The panel computes the plots (core.plots.compute) and says so with `changed`.
-The measurements live on the scene (scene.plots: a list of dicts, remembered per file).
+The plots live on the scene (scene.plots: a list of dicts, remembered per file).
 """
 from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QTimer, Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QActionGroup
 from PySide6.QtWidgets import (
-    QDialog, QDialogButtonBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QInputDialog, QLabel, QLayout,
-    QLineEdit, QPushButton, QSizePolicy, QVBoxLayout, QWidget,
+    QDialog, QDialogButtonBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QLayout, QLineEdit,
+    QPushButton, QSizePolicy, QVBoxLayout, QWidget,
 )
 
 from meshviewer.core import plots
 from meshviewer.core.fields import SPEED
 from meshviewer.core.units import nice_num
-from meshviewer.gui.forms import _grid, _label, _link
+from meshviewer.gui.access import name_controls
+from meshviewer.gui.forms import _grid, _label, _link, rule, segmented
+from meshviewer.gui.sheets import ask_open, ask_save, ask_text, save_folder
 from meshviewer.gui.widgets import (
     Capsule, CollapsibleSection, IconToggle, MenuSelect, NoWheelSlider, NumberField, Switch,
 )
 
 SLIDER_STEPS = 1000
-
-
-def _segmented(parent, items, slot):
-    group = QActionGroup(parent)
-    group.setExclusive(True)
-    acts = {}
-    for key, text, tip in items:
-        a = QAction(text, parent)
-        a.setCheckable(True)
-        a.setToolTip(tip)
-        group.addAction(a)
-        acts[key] = a
-        a.triggered.connect(lambda _=False, k=key: slot(k))
-    c = Capsule(list(acts.values()), name="Segmented")
-    return acts, c
-
-
-def _rule():
-    line = QFrame()
-    line.setObjectName("Divider")
-    line.setFixedHeight(1)
-    return line
 
 
 def _switch_row(text, tip, slot):
@@ -91,9 +71,9 @@ def value_label(v):
     return NAMES.get(v.lower(), v)
 
 
-# ---- the editor of a cross section ---------------------------------------------------------
+# ---- the editor of a section plot ---------------------------------------------------------
 class SectionEditor(QWidget):
-    """Settings of one cross section; edits the measurement dict in place."""
+    """Settings of one section plot; edits its dict in place."""
     changed = Signal()
 
     def __init__(self, panel, m):
@@ -122,7 +102,7 @@ class SectionEditor(QWidget):
         head.addWidget(self.adv_button)
         cl.addLayout(head)
         g = _grid()
-        self.axis, cap = _segmented(self, [(a, a.upper(), f"The plane is normal to {a.upper()}")
+        self.axis, cap = segmented(self, [(a, a.upper(), f"The plane is normal to {a.upper()}")
                                            for a in plots.AXES], self._axis)
         self.axis_group = next(iter(self.axis.values())).actionGroup()
         self.axis_group.setExclusionPolicy(QActionGroup.ExclusionPolicy.ExclusiveOptional)
@@ -167,7 +147,7 @@ class SectionEditor(QWidget):
         self.advanced.setVisible(False)
         self.adv_button.toggled.connect(self.advanced.setVisible)
         cl.addWidget(self.advanced)
-        cl.addWidget(_rule())
+        cl.addWidget(rule())
 
         # -- what is plotted
         cl.addWidget(_label("Plot", "Caption"))
@@ -189,7 +169,7 @@ class SectionEditor(QWidget):
         self.chord.toggled.connect(self._chord)
         # X / Y / Z made once; the plane's own axis is hidden (rebuilding the buttons
         # on each change left one of them unlit on macOS)
-        self.along, along_cap = _segmented(
+        self.along, along_cap = segmented(
             self, [(k, k.upper(), f"The plot's x axis: the {k.upper()} position along the cut")
                    for k in plots.AXES], self._along)
         self._along_cap = along_cap
@@ -203,7 +183,7 @@ class SectionEditor(QWidget):
         row, self.flip = _switch_row(
             "Negative up", "Negative values at the top (as cp is usually plotted)", self._flip)
         cl.addWidget(row)
-        cl.addWidget(_rule())
+        cl.addWidget(rule())
 
         # -- compare and save
         top = QHBoxLayout()
@@ -235,13 +215,13 @@ class SectionEditor(QWidget):
         ren = QAction("Rename…", self)
         ren.triggered.connect(lambda: self.panel.rename(self.m["id"]))
         dele = QAction("Delete", self)
-        dele.setToolTip("Delete this measurement and its tab")
+        dele.setToolTip("Delete this plot and its tab")
         dele.triggered.connect(lambda: self.panel.remove(self.m["id"]))
         bottom.addWidget(Capsule([ren, dele], name="Segmented"))
         lay.addLayout(bottom)
         self.sync()
 
-    # ---- from the measurement to the widgets ----------------------------------------------
+    # ---- from the plot's dict to the widgets --------------------------------------------
     @property
     def scene(self):
         return self.panel.scene
@@ -404,12 +384,12 @@ class SectionEditor(QWidget):
         self.changed.emit()
 
     def import_csv(self):
-        fn, _ = QFileDialog.getOpenFileName(self.window(), "Import Reference Points", "",
-                                            "CSV or text (*.csv *.txt *.dat);;All files (*)")
         if self.scene:
             self.scene.end_stuck_drag()
-        if not fn:
-            return
+        ask_open(self.window(), "Import Reference Points", "",
+                 "CSV or text (*.csv *.txt *.dat);;All files (*)", self._read_csv)
+
+    def _read_csv(self, fn):
         try:
             pts = plots.read_csv(Path(fn).read_text(errors="replace"))
         except OSError as exc:
@@ -428,30 +408,32 @@ class SectionEditor(QWidget):
         if not r or r["empty"]:
             return
         base = self.panel.file_stem
-        fn, _ = QFileDialog.getSaveFileName(self.window(), "Export Plot",
-                                            f"{base} - {self.m['name']}.csv", "CSV (*.csv)")
         if self.scene:
             self.scene.end_stuck_drag()
-        if fn:
-            s, unit = self._scale()
-            vu = self.panel.value_unit(r["value"]) if self.panel.value_unit else None
-            Path(fn).write_text(plots.to_csv(self.m, r, s, unit, value_unit=vu))
+        folder = save_folder(getattr(self.window(), "path", None))
+        ask_save(self.window(), "Export Plot", folder / f"{base} - {self.m['name']}.csv",
+                 "CSV (*.csv)", lambda fn: self._write_csv(fn, r))
+
+    def _write_csv(self, fn, r):
+        s, unit = self._scale()
+        vu = self.panel.value_unit(r["value"]) if self.panel.value_unit else None
+        Path(fn).write_text(plots.to_csv(self.m, r, s, unit, value_unit=vu))
 
 
 EDITORS = {"section": SectionEditor}
 
 
-# ---- New Measurement sheet -------------------------------------------------------------------
-class NewMeasurementDialog(QDialog):
+# ---- New Plot sheet -------------------------------------------------------------------------
+class NewPlotDialog(QDialog):
     def __init__(self, parent, name):
         super().__init__(parent)
-        self.setWindowTitle("New Measurement")
+        self.setWindowTitle("New Plot")
         self.setWindowModality(Qt.WindowModal)          # a sheet on macOS
         lay = QVBoxLayout(self)
         lay.setSizeConstraint(QLayout.SetFixedSize)
         lay.setContentsMargins(20, 18, 20, 14)
         lay.setSpacing(10)
-        t = QLabel("New measurement")
+        t = QLabel("New Plot")
         t.setStyleSheet("font-size: 15px; font-weight: 600;")
         lay.addWidget(t)
         g = _grid()
@@ -474,9 +456,9 @@ class NewMeasurementDialog(QDialog):
         lay.addWidget(b)
 
 
-# ---- the section --------------------------------------------------------------------------
+# ---- the tool -----------------------------------------------------------------------------
 class PlotsPanel(QWidget):
-    changed = Signal(int)          # a measurement's plot is new (id)
+    changed = Signal(int)          # a plot is new (id)
     added = Signal(int)
     removed = Signal(int)
     renamed = Signal(int)
@@ -493,10 +475,10 @@ class PlotsPanel(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(8)
-        self.new = QPushButton("New Measurement…")
+        self.new = QPushButton("New Plot…")
         self.new.setObjectName("ApplyButton")
         self.new.setCursor(Qt.PointingHandCursor)
-        self.new.setToolTip("A new plot: name it and pick the type (Cross section)")
+        self.new.setToolTip("Name a new plot and pick its type")
         self.new.clicked.connect(self.ask_new)
         lay.addWidget(self.new)
         self.list = QVBoxLayout()
@@ -523,7 +505,7 @@ class PlotsPanel(QWidget):
             self._editor(m, expanded=False)
             self._compute(m["id"], emit=False)
 
-    def measurement(self, ident):
+    def plot(self, ident):
         return next((m for m in self.scene.plots if m["id"] == ident), None) if self.scene \
             else None
 
@@ -539,7 +521,7 @@ class PlotsPanel(QWidget):
     def ask_new(self):
         if not self.scene:
             return
-        d = NewMeasurementDialog(self.window(), self._next_name("section"))
+        d = NewPlotDialog(self.window(), self._next_name("section"))
         self._dialog = d
         d.accepted.connect(lambda: self.add(d.kind.currentData(),
                                             d.name.text().strip() or self._next_name("section")))
@@ -547,7 +529,7 @@ class PlotsPanel(QWidget):
 
     def add(self, kind, name):
         ident = max((m["id"] for m in self.scene.plots), default=0) + 1
-        m = plots.new_measurement(kind, name, ident, self.scene.model)
+        m = plots.new_plot(kind, name, ident, self.scene.model)
         self.scene.plots.append(m)
         self._editor(m, expanded=True)
         self._compute(ident, emit=False)
@@ -555,15 +537,15 @@ class PlotsPanel(QWidget):
         return ident
 
     def rename(self, ident, name=None):
-        m = self.measurement(ident)
+        m = self.plot(ident)
         if m is None:
             return
         if name is None:
-            name, ok = QInputDialog.getText(self.window(), "Rename", "Name", text=m["name"])
             if self.scene:
                 self.scene.end_stuck_drag()
-            if not ok:
-                return
+            ask_text(self.window(), "Rename Plot", "Name", m["name"],
+                     lambda text: self.rename(ident, text))
+            return
         name = name.strip()
         if name:
             m["name"] = name
@@ -571,7 +553,7 @@ class PlotsPanel(QWidget):
             self.renamed.emit(ident)
 
     def remove(self, ident):
-        m = self.measurement(ident)
+        m = self.plot(ident)
         if m is None:
             return
         self.scene.plots.remove(m)
@@ -596,6 +578,7 @@ class PlotsPanel(QWidget):
         sec.toggled.connect(lambda on, i=m["id"]: on and self.show_plot.emit(i))
         self.list.addWidget(sec)
         self.editors[m["id"]] = (sec, ed)
+        name_controls(sec)                             # VoiceOver: its switches and eye
 
     # ---- computing ----------------------------------------------------------------------------
     def _visible(self):
@@ -603,7 +586,7 @@ class PlotsPanel(QWidget):
         return [n for n in sc.names if sc.visible.get(n)]
 
     def _compute(self, ident, emit=True):
-        m = self.measurement(ident)
+        m = self.plot(ident)
         if m is None:
             return
         r = plots.compute(m, self.scene.model.parts, self._visible())

@@ -1,11 +1,13 @@
-"""Form helpers shared by the sidebar panels: a label, the 4-column grid
-(label · field · unit · "?") and its rows, a link-style button."""
+"""Form helpers shared by the sidebar panels and dialogs: a label, the 4-column grid
+(label · field · unit · "?") and its rows, a link-style button, a caption, a divider
+line and one-of-many buttons."""
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QGridLayout, QLabel, QPushButton
+from PySide6.QtGui import QAction, QActionGroup
+from PySide6.QtWidgets import QFrame, QGridLayout, QLabel, QPushButton, QSizePolicy
 
-from meshviewer.gui.widgets import UnitField
+from meshviewer.gui.widgets import Capsule, UnitField
 
 
 def _label(text, name=None):
@@ -53,3 +55,39 @@ def _link(text, tip, slot):
     b.setToolTip(tip)
     b.clicked.connect(slot)
     return b
+
+
+def caption(text):
+    """A small grey title over a group of controls."""
+    return _label(text, "Caption")
+
+
+def rule():
+    """A thin line between two groups of controls."""
+    line = QFrame()
+    line.setObjectName("Divider")
+    line.setFixedHeight(1)
+    return line
+
+
+def segmented(parent, items, slot=None, expand=False):
+    """One-of-many buttons in a capsule -> ({key: action}, the capsule).
+    items: (key, text) or (key, text, tooltip); slot(key) is called on a click;
+    expand: the buttons share the whole width."""
+    group = QActionGroup(parent)
+    group.setExclusive(True)
+    actions = {}
+    for key, text, *tip in items:
+        a = QAction(text, parent)
+        a.setCheckable(True)
+        a.setData(key)
+        a.setToolTip(tip[0] if tip else "")
+        if slot is not None:
+            a.triggered.connect(lambda _=False, k=key: slot(k))
+        group.addAction(a)
+        actions[key] = a
+    capsule = Capsule(list(actions.values()), name="Segmented")
+    if expand:
+        for w in (capsule, *capsule.buttons):
+            w.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+    return actions, capsule

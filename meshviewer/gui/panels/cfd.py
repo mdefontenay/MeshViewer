@@ -1,4 +1,4 @@
-"""Sidebar section "CFD" — y+ estimate (flat-plate boundary layer).
+"""The CFD tool — y+ estimate (flat-plate boundary layer).
 "Flow" and "y+ estimator" are groups that fold; each has a "Values" pop-up
 with every computed number; the auto length is the longest streamwise distance.
 
@@ -44,6 +44,7 @@ from meshviewer.gui.widgets import (
 )
 from meshviewer.gui.dialogs.wall_help import YPLUS_URL, label_with_help, wall_help_button
 from meshviewer.core.units import SPEED_UNITS, LEVEL_UNITS, DENSITY_UNITS, VISCOSITY_UNITS, LENGTH_UNITS, nice_length
+from meshviewer.gui.panels.fluid import FluidInputs
 from meshviewer.gui.forms import _label, _grid, _row
 
 ATMOSPHERE_URL = "https://www.engineeringtoolbox.com/standard-atmosphere-d_604.html"
@@ -118,13 +119,13 @@ YPLUS_FORMULAS = [
     ("First cell at a wall node P: the shortest step to a node Q off the wall, along an "
      "edge of a cell touching the wall, measured along the wall normal n̂",
      r"y_P = \min_Q \left| (\mathbf{x}_Q - \mathbf{x}_P)\cdot \hat{n}_P \right|"),
-    ("Colours (3D view and the max): y+ / target — blue 0 · green 1 · orange 2 · red 3 or "
+    ("Colors (3D view and the max): y+ / target — blue 0 · green 1 · orange 2 · red 3 or "
      "more. The max is green up to 1.25 × target, orange up to 2.5 ×, then red", ""),
     ("link", "Dimensionless wall distance (y plus) — CFD Online ↗", YPLUS_URL),
 ]
 
 
-class CfdPanel(QWidget):
+class CfdPanel(FluidInputs, QWidget):
     changed = Signal()                         # settings changed (remembered per file)
     measured = Signal()                        # volume cells read (Info can count them)
 
@@ -287,7 +288,7 @@ class CfdPanel(QWidget):
         r = QHBoxLayout()                              # back to the auto length
         r.setContentsMargins(0, 0, 0, 0)
         r.addStretch(1)
-        self.auto_length = QPushButton("Back to auto length")
+        self.auto_length = QPushButton("Back to Auto Length")
         self.auto_length.setObjectName("LinkButton")
         self.auto_length.setFlat(True)
         self.auto_length.setCursor(Qt.PointingHandCursor)
@@ -346,7 +347,7 @@ class CfdPanel(QWidget):
         cl.addWidget(self.height_file)
         yl.addWidget(self.card)
         r = QHBoxLayout()                              # colour the boundary by y+
-        r.addWidget(QLabel("Colour by y+"))
+        r.addWidget(QLabel("Color by y+"))
         r.addStretch(1)
         self.colour = Switch()
         self.colour.setToolTip("Paint the boundary by its y+ at each wall node (volume meshes)")
@@ -357,7 +358,7 @@ class CfdPanel(QWidget):
         self.legend = GradientBar([(x / top, c) for x, c in YPLUS_STOPS],
                                   [(0, "0"), (1 / top, "target"), (2 / top, "2×"),
                                    (1, "3× or more")])
-        self.legend.setToolTip("y+ / target. Grey: no first cell found")
+        self.legend.setToolTip("y+ / target. Gray: no first cell found")
         self.legend.setVisible(False)
         yl.addWidget(self.legend)
         self.note = _label("", "InfoLine")
@@ -464,14 +465,6 @@ class CfdPanel(QWidget):
     def _unit_changed(self, *_):
         self._update()                       # placeholders, remembered units
 
-    def _auto_length(self):
-        self.length.setValue(None)
-        self._update()
-
-    def _kind_changed(self, *_):
-        self._kind_labels()
-        self._update()
-
     def _kind_labels(self):
         """external flow (length L) or internal (hydraulic diameter D)."""
         internal = self.kind.currentData() == "internal"
@@ -501,59 +494,9 @@ class CfdPanel(QWidget):
         self._sync_vectors()
 
     # ---- fluid -----------------------------------------------------------------------
-    def _fluid_changed(self, *_):
-        self._fill_properties()
-        self._update()
-
-    def _fill_properties(self, custom=None):
-        kind = self.fluid.currentData()
-        for w in (self.level, self.level_head, self.level_unit, self.temp, self.temp_label,
-                  self.temp_unit):
-            w.setVisible(kind != "custom")
-        for box in (self.rho, self.mu, self.a):     # only typed for "Custom"
-            box.setEnabled(kind == "custom")
-        self.level_label.setText("Altitude" if kind == "air" else "Depth")
-        self.level_help.setVisible(kind == "air")
-        self.level.setToolTip("Geometric altitude above sea level (U.S. Standard Atmosphere 1976)"
-                              if kind == "air" else "Depth below the surface (water at 15 °C)")
-        if kind == "custom":
-            self._props = None
-            if custom:
-                self.rho.setValue(custom.get("rho"))
-                self.mu.setValue(custom.get("mu"))
-                self.a.setValue(custom.get("a"))
-            return
-        h = self.level.value() or 0.0
-        t = self._temperature(kind)                 # None = standard
-        props = cfd.air(h, t) if kind == "air" else cfd.water(h, kind, t)
-        if kind == "air":
-            self.temp.setValue(props["T"])
-        self.temp.setPlaceholderText(f"auto: {self.temp.shown(props['T_std']):.4g}")
-        self._props = props
-        self.rho.setValue(props["rho"])
-        self.mu.setValue(props["mu"])
-        self.a.setValue(props["a"])
-
     def _property_typed(self, *_):
         """Your own density, viscosity or sound speed (Custom only: the boxes are
         locked for air and water)."""
-        self._update()
-
-    def _temperature(self, kind):
-        """air at an altitude — its standard temperature, greyed out like ρ, μ
-        and a; water — typed (empty = 15 °C). Returns the temperature to use, or None."""
-        air = kind == "air"
-        if not air and self._temp_auto:              # leaving air: forget its standard T
-            self.temp.setValue(None)
-        self._temp_auto = air
-        self.temp.setEnabled(not air)
-        return None if air else self.temp.value()
-
-    def _speed_typed(self, u):
-        """a typed speed sets the Mach number (M = U / a)."""
-        a = self.a.value()
-        if u is not None and a:
-            self.mach.setValue(u / a)          # u in m/s (UnitField)
         self._update()
 
     def _colour_toggled(self, on):
@@ -561,9 +504,6 @@ class CfdPanel(QWidget):
         self._update()
 
     # ---- direction / vectors -------------------------------------------------------------
-    def _dir(self):
-        return np.array([b.value() or 0.0 for b in self.direction], dtype=float)
-
     def _direction_changed(self, *_):
         self._update()
         self._sync_vectors()
@@ -599,7 +539,7 @@ class CfdPanel(QWidget):
         unit = sc.model.units or sc.measure.display_unit
         if unit in UNITS:
             return UNITS[unit], ""
-        return 1.0, "No unit in this file: the mesh is taken to be in metres " \
+        return 1.0, "No unit in this file: the mesh is taken to be in meters " \
                     "(pick its unit in the toolbar)."
 
     def _measure_heights(self):
@@ -616,7 +556,8 @@ class CfdPanel(QWidget):
         def work():
             grid = qv.dataset()                     # reads the volume cells the first time
             return name, cfd.first_layer(grid, wall)
-        self._job = run_job(work, self._measured, self._failed)
+        self._job = run_job(work, self._measured, self._failed,
+                            busy=(self.window(), "Measuring the first cells…"))
 
     def _measured(self, result):
         self._job = None

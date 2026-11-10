@@ -1,4 +1,4 @@
-"""F13 Plots (cross sections in tabs under the 3D view) and F15 (gradient)."""
+"""F13 Plots (section plots in tabs under the 3D view) and F15 (gradient)."""
 import numpy as np
 from PySide6.QtCore import Qt
 
@@ -10,11 +10,11 @@ def test(app, files):
     w = open_file(app, files["tecplot"])
     sc, sb = w.scene, w.sidebar
     pp = sb.plots_panel
-    check(not w.view_bar.isVisible(), "no tabs before a measurement")
+    check(not w.view_bar.isVisible(), "no tabs before a plot")
     i = pp.add("section", "Mid")
     app.processEvents()
     check(w.view_bar.isVisible() and w._page == f"plot:{i}"
-          and w.stack.currentWidget() is w.plot_page, "New Measurement: a tab, shown")
+          and w.stack.currentWidget() is w.plot_page, "New Plot: a tab, shown")
     check(set(pp.editors) == {i} and pp.editors[i][0].title_label.text() == "Mid",
           "a sub-section named Mid")
     r = pp.results[i]
@@ -24,7 +24,11 @@ def test(app, files):
     sb.show_section("plots", True, expand=True)
     w._show_cuts()
     check(sc.plot_cut._actor is not None, "the cut drawn in 3D")
-    check(sb._analysis_sep.isVisibleTo(sb), "a line above the analysis tools")
+    check(sb.current_tab() == "measure" and sb.tab_shown("plots"), "Plots: the Measure tab")
+    sb.show_tab("view")                                  # another tab: no cuts in 3D
+    check(sc.plot_cut._actor is None, "another tab: the cut hidden")
+    sb.show_tab("measure")
+    check(sc.plot_cut._actor is not None, "Measure tab again: the cut back")
     ed = pp.editors[i][1]
     sb._visibility_changed(["FLOOR"], False)            # the chord of what is shown
     ed.chord.setChecked(True)
@@ -36,15 +40,15 @@ def test(app, files):
     ed.slider.setValue(900)                              # the plane moves
     ed.flush()
     r2 = pp.results[i]
-    check(abs(r2["origin"][plots.AXES.index(pp.measurement(i)["axis"])] -
-              r["origin"][plots.AXES.index(pp.measurement(i)["axis"])]) > 0.1, "slider moves it")
-    a, b = plots.in_plane(pp.measurement(i)["axis"])
+    check(abs(r2["origin"][plots.AXES.index(pp.plot(i)["axis"])] -
+              r["origin"][plots.AXES.index(pp.plot(i)["axis"])]) > 0.1, "slider moves it")
+    a, b = plots.in_plane(pp.plot(i)["axis"])
     ed.along[b].trigger()
     check(ed.along[b].isChecked() and not ed.along[a].isChecked() and pp.results[i]["along"] == b,
           f"Along {b.upper()} lit")
     ed.along[a].trigger()
     check(ed.along[a].isChecked() and not ed.along[b].isChecked(), f"Along {a.upper()} lit again")
-    own = pp.measurement(i)["axis"]
+    own = pp.plot(i)["axis"]
     check(not ed._along_cap.buttons[plots.AXES.index(own)].isVisible()
           and ed.chord.text() == "Normalize", "the plane's own axis hidden; Normalize")
     # Advanced: a tilted plane through the same origin
@@ -57,7 +61,7 @@ def test(app, files):
     check(abs(abs(r["normal"][0]) - 2 ** -0.5) < 1e-6 and not any(a.isChecked()
           for a in ed.axis.values()), "tilted plane: no X / Y / Z lit")
     ed.axis["x"].trigger()
-    check(pp.measurement(i)["normal"] is None and ed.axis["x"].isChecked(), "X: straight again")
+    check(pp.plot(i)["normal"] is None and ed.axis["x"].isChecked(), "X: straight again")
     # the eye: cut drawn or not
     sec = pp.editors[i][0]
     eye = sec.header.findChild(type(ed.adv_button))
@@ -65,14 +69,14 @@ def test(app, files):
     w._show_cuts()
     check(sc.plot_cut._actor is not None, "eye open: the cut in 3D")
     eye.setChecked(False)
-    check(sc.plot_cut._actor is None and pp.measurement(i)["show"] is False, "eye shut: no cut")
+    check(sc.plot_cut._actor is None and pp.plot(i)["show"] is False, "eye shut: no cut")
     eye.setChecked(True)
     ed.set_reference("test.csv", [(0.1, -0.5), (0.5, 0.2)])
     check(w.plot_page.plot.ref == [(0.1, -0.5), (0.5, 0.2)], "reference points on the plot")
-    csv = plots.to_csv(pp.measurement(i), pp.results[i])
+    csv = plots.to_csv(pp.plot(i), pp.results[i])
     check(csv.startswith("part,x/c,cp,X,Y,Z"), "CSV export: " + csv.splitlines()[0])
     j = pp.add("section", "Shape")
-    m2 = pp.measurement(j)
+    m2 = pp.plot(j)
     pp.editors[j][1].value.setCurrentIndex(pp.editors[j][1].value.findData("coord:z"))
     check(m2["value"] == "coord:z" and not pp.results[j]["flip"], "second one: the shape (Z)")
     check(len(w._plot_acts) == 2 and w._page == f"plot:{j}", "two tabs")
@@ -112,19 +116,19 @@ def test(app, files):
     QTimer.singleShot(100, lambda: pick("Delete"))
     w._tab_menu(many[0], btn.mapToGlobal(btn.rect().center()))
     app.processEvents()
-    check(many[0] not in w._plot_acts and pp.measurement(many[0]) is None, "tab menu ▸ Delete")
+    check(many[0] not in w._plot_acts and pp.plot(many[0]) is None, "tab menu ▸ Delete")
     QTimer.singleShot(100, lambda: pick("Open"))
     w._tab_menu(many[1], w.mapToGlobal(w.rect().center()))
     app.processEvents()
     check(w._page == f"plot:{many[1]}", "tab menu ▸ Open")
     for k in many[1:]:
         pp.remove(k)
-    pp.ask_new()                                        # the New Measurement sheet
+    pp.ask_new()                                        # the New Plot sheet
     d = pp._dialog
     d.name.setText("Tip")
     d.accept()
     k = max(pp.editors)
-    check(pp.measurement(k)["name"] == "Tip" and w._page == f"plot:{k}", "sheet: named Tip")
+    check(pp.plot(k)["name"] == "Tip" and w._page == f"plot:{k}", "sheet: named Tip")
     pp.remove(k)
     pp.remove(j)
     check(set(w._plot_acts) == {i}, "deleted: its tab too")
@@ -133,7 +137,7 @@ def test(app, files):
     from meshviewer.gui import memory
     st = memory.load(w.path)
     check([m["name"] for m in st["plots"]] == ["Root"] and st["inflation_page"]["page"] ==
-          f"plot:{i}", "remembered: the measurement and its tab")
+          f"plot:{i}", "remembered: the plot and its tab")
     # F15: gradient
     rp = sb.results_panel
     rp.field.setCurrentIndex(rp.field.findData("cp"))

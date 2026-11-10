@@ -1,17 +1,17 @@
-"""The "Inflation" page of CFD mode (CAD files) — plots and visuals
-of the inflation layer calculator. Inputs are in the sidebar (CFD mode).
+"""The Inflation Layers page (CAD files) — plots and visuals
+of the inflation layer calculator. Inputs are in the CFD tool (Inflation Layers).
 
     Inflation layers                          Turbulent · Supersonic
     [Reynolds] [First layer for y+] [Estimated y+] [Boundary layer] [Total] [Max layer]
-    ┌ [ Layer size plot | Cross section ]         ■ Layer height  — Total so far ┐
+    ┌ [ Layer Sizes | Section ]         ■ Layer height  — Total so far ┐
     │ bars: each layer's height · line: total thickness so far                  │
     │ dashed: boundary layer · dotted: next cell size (labels on the right)     │
     └───────────────────────────────────────────────────────────────────────────┘
     ✓ / ⚠ checks            (every number is in the sidebar's Values pop-ups)
 
 The plot takes the full width, under tabs; drawn like the rest of the app. Second tab
-"Cross section" (section_cut.py): the section plane's cut, in 2D, with the inflation
-layers estimated on the walls. The tab, Flip side, the flow arrow and the cross-section
+"Section" (section_cut.py): the section plane's cut, in 2D, with the inflation
+layers estimated on the walls. The tab, Flip Side, the flow arrow and the section
 zoom are remembered per file (get_state / set_state).
 Everything is drawn with QPainter in the app's colours (light and dark).
 """
@@ -89,7 +89,7 @@ class _Plot(QWidget):
     grid, y ticks, a y-axis title along the axis, an x-axis title, reference lines
     labelled at the right (name, then value), an end label, hover crosshair."""
     PAD_L, PAD_R, PAD_T, PAD_B = 76, 132, 14, 40
-    EMPTY = "Fill in the CFD mode inputs in the sidebar"
+    EMPTY = "Fill in Inflation Layers in the CFD tool"
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -376,7 +376,7 @@ class InflationView(QScrollArea):
         group = QActionGroup(self)
         group.setExclusive(True)
         self.tabs = {}
-        for key, text in (("plot", "Layer size plot"), ("section", "Cross section")):
+        for key, text in (("plot", "Layer Sizes"), ("section", "Section")):
             a = QAction(text, self)
             a.setCheckable(True)
             a.triggered.connect(lambda _=False, k=key: self.show_tab(k))
@@ -389,16 +389,16 @@ class InflationView(QScrollArea):
         bar.addWidget(self.legend)
         self.section_legend = SectionLegend()
         bar.addWidget(self.section_legend)
-        # Cross section — Flip side + Fit view, capsule buttons like the tabs
+        # Section — Flip Side + Fit View, capsule buttons like the tabs
         self.section_bar = QWidget()
         sb = QHBoxLayout(self.section_bar)
         sb.setContentsMargins(12, 0, 0, 0)
         sb.setSpacing(8)
-        self.flip_action = QAction("Flip side", self)
+        self.flip_action = QAction("Flip Side", self)
         self.flip_action.setCheckable(True)
         self.flip_action.setToolTip("Put the layers on the other side of the walls\n"
                                     "(e.g. internal flow in a duct, or a wall facing the wrong way)")
-        self.fit_action = QAction("Fit view", self)
+        self.fit_action = QAction("Fit View", self)
         self.fit_action.setToolTip("Show the whole cut again (or double-click the view)")
         sb.addWidget(Capsule([self.flip_action], name="Segmented"))
         sb.addWidget(Capsule([self.fit_action], name="Segmented"))
@@ -454,7 +454,7 @@ class InflationView(QScrollArea):
             for t in self.tiles.values():
                 t.set("—")
             self.regime.setText("")
-            self.checks.setText("Fill in the inputs in the sidebar (CFD mode).")
+            self.checks.setText("Fill in the inputs in the CFD tool (Inflation Layers).")
             return
         self.regime.setText(("Turbulent" if r["turbulent"] else "Laminar") + " · " +
                             ("Supersonic" if r["supersonic"] else "Subsonic"))

@@ -1,16 +1,16 @@
 """Screenshot sheet: image size + background (as shown on screen, or transparent).
 
 the Light / Dark / Custom backgrounds were removed — "As Shown" already
-uses whatever background is set in Appearance."""
+uses whatever background is set in Settings ▸ Appearance."""
 from __future__ import annotations
 
-from PySide6.QtCore import QSettings, Qt
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QActionGroup
 from PySide6.QtWidgets import (
-    QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout, QLabel, QLayout,
-    QVBoxLayout, QWidget,
+    QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout, QLabel, QLayout, QVBoxLayout, QWidget,
 )
 
+from meshviewer.gui.store import settings
 from meshviewer.gui.widgets import Capsule, MenuSelect
 
 BACKGROUNDS = (("current", "As Shown"), ("transparent", "Transparent"))
@@ -21,7 +21,7 @@ class ScreenshotDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Save Screenshot")
         self.setWindowModality(Qt.WindowModal)          # a sheet on macOS
-        st = QSettings("local", "Mesh Viewer")
+        st = settings()
 
         lay = QVBoxLayout(self)
         lay.setSizeConstraint(QLayout.SetFixedSize)
@@ -78,7 +78,7 @@ class ScreenshotDialog(QDialog):
         return next(k for k, a in self.bg_actions.items() if a.isChecked())
 
     def _accept(self):
-        st = QSettings("local", "Mesh Viewer")
+        st = settings()
         st.setValue("shot/scale", self.scale)
         st.setValue("shot/bg", self.background)
         self.accept()

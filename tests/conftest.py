@@ -41,8 +41,10 @@ def open_file(app, path, size=(1400, 900)):
 
 
 def run(test):
-    from PySide6.QtCore import QSettings
-    QSettings("local", "Mesh Viewer").remove("views")           # fresh per-file memory
+    # settings in a scratch file, fresh each run: what the app remembers for you is untouched
+    import os
+    import tempfile
+    os.environ["MESHVIEWER_SETTINGS"] = os.path.join(tempfile.mkdtemp(), "settings.ini")
     from fixtures import files
     from meshviewer.gui.app import MeshViewerApp
     app = MeshViewerApp(["test"])

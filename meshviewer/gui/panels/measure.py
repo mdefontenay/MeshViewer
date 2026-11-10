@@ -1,4 +1,4 @@
-"""Side-panel block for measurements. Measuring is on while this section is open.
+"""The Measure tool. Measuring is on while the tool is open.
 Distance (two points; "From origin": one point from (0, 0, 0)) · Angle · Area (and volume)."""
 from __future__ import annotations
 
@@ -63,7 +63,7 @@ class MeasurePanel(QWidget):
         sr.addWidget(self.snap)
         lay.addWidget(self.snap_row)
 
-        self.origin_row, orr = QWidget(), QHBoxLayout()   # was the Point tool
+        self.origin_row, orr = QWidget(), QHBoxLayout()   # distance from (0, 0, 0)
         self.origin_row.setLayout(orr)
         orr.setContentsMargins(0, 0, 0, 0)
         orr.addWidget(QLabel("From origin"))

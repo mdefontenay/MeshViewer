@@ -4,7 +4,7 @@ Every version of Mesh Viewer, newest first. Each table lists the files that
 changed and what changed in them. (The version number lives in
 `meshviewer/__init__.py`.)
 
-**Version numbers:** 2.X marks a new stage of the app — only five so far:
+**Version numbers:** 2.X marks a new stage of the app — six so far:
 
 | | Stage |
 |---|---|
@@ -13,8 +13,10 @@ changed and what changed in them. (The version number lives in
 | 2.2 | Edit and Export |
 | 2.3 | analysis: cell quality, Info, CFD (y+) and CFD mode (inflation layers) |
 | 2.4 | simulation results, the icon bar sidebar, more formats, plots |
+| 2.5 | organized the macOS way: menu bar, undo, Settings, one name per thing, inspector (in beta) |
 
 Everything inside a stage is 2.X.Y — new tools in a section, tweaks and fixes alike.
+A stage can start with betas, 2.Xb1, 2.Xb2… (shown "2.X beta 1"), before 2.X.
 The versions were renumbered to this (twice before, the last time harder):
 
 <details><summary>Now · was · before that</summary>
@@ -80,6 +82,97 @@ The versions were renumbered to this (twice before, the last time harder):
 | 2.0 | 2.0 |  |
 
 </details>
+
+## 2.5 beta 3 — Parts on the left, tools on the right in three tabs, a lighter toolbar
+
+| File | |
+|---|---|
+| `gui/icons.py` | **Fixed**: toolbar and menu icons sometimes went missing while a window was empty (on the welcome screen): a grayed SF Symbol was drawn with a see-through color and came out blank. Symbols are drawn solid, then faded |
+| `gui/app.py`, `gui/macos.py` | **Fixed**: Settings and About still slid a full-screen window away. They now open as a window of the front window, on its Space |
+| `gui/inspector.py` (new), `gui/sidebar.py`, `gui/sections.py`, `gui/window.py`, `gui/style.py` | **The inspector**: the tools moved to a panel right of the 3D view, in three tabs — **View** (Mesh Quality, Section, Edit), **Measure** (Info, Measure, Plots), **Analyze** (CFD, Cell Quality, Results). View ▸ Inspector (⌥⌘I), View ▸ View / Measure / Analyze Tools (⌥⌘1–3). The icon bar and its **+** are gone. A tool works while it is in view (open, in the tab shown): Measure stops measuring on another tab, Plots draw their cuts in 3D while the Measure tab shows. Each file remembers its tab and the tools open; files open on View, results files on Analyze ▸ Results, drawings on Measure |
+| `gui/sidebar.py`, `gui/sidebar_layout.py` | **The sidebar is the parts list**, the whole height of the window (no more line to drag between the tools and the list) |
+| `gui/window_bars.py`, `gui/dialogs/toolbar.py` (new), `gui/window.py` | **A lighter toolbar**: Sidebar · views · **Show ▾** (edges, faces, axes, grid…) · the **unit ▾** (with File Unit…) · Export · Screenshot · Inspector. **View ▸ Customize Toolbar…** (or a right-click on the toolbar) chooses which groups show, for every window; Settings can be added. Everything stays in the menus |
+| `gui/memory.py`, `render/scene.py` | A file remembers the inspector's tab and the tools open (what was shown in the icon bar is no longer read) |
+| `gui/widgets/formulas.py` | Formulas open just left of the inspector |
+| `tests/test_sidebar.py`, `tests/test_mac.py`, `tests/test_plots.py`, `tests/test_formats.py` | The tabs and their tools, a tool in view or not (measuring, cuts), per-file memory, Customize Toolbar, the View menu |
+
+## 2.5 beta 2 — Fixes; welcome screen, samples, Revert to Original, sheets, VoiceOver
+
+| File | |
+|---|---|
+| `gui/app.py`, `gui/window_bars.py` | **Fixed**: *Check for Updates…* was twice in the app menu (the window's menu bar and the no-window one both added it), and Settings showed as "Preferences…" with an icon. The three app-menu items are made once and live in one menu bar |
+| `gui/macos.py` (new), `gui/app.py` | **Fixed**: Settings and About opened on the desktop, sliding a full-screen window away. They now open on the Space you are in |
+| `gui/window.py`, `gui/memory.py` | **File ▸ Revert to Original…**: after a confirmation sheet, everything remembered about the file is forgotten and it opens as the first time |
+| `gui/welcome.py`, `gui/samples.py` (new), `setup.py`, `resources/samples/` | **Welcome screen** in an empty window: Open…, recent files, *Try a Sample* — the ONERA M6 wing (its three boundaries from `onera_m6.cgns`, 5 MB instead of 416 MB) and the avionics bay STEP. Also File ▸ Open Sample. Samples save their exports in Documents. The empty window hides its sidebar |
+| `gui/feedback.py` (new), `gui/jobs.py`, `gui/window.py`, `gui/panels/cfd.py`, `gui/panels/quality.py` | **Progress**: a small spinner in the toolbar while a file opens, the model is re-meshed, y+ or the cells are measured (hover: what it is doing); no more spinning wait cursor. **Errors** in a sheet that says what failed, why, and what to do next, with *Report a Problem…* |
+| `gui/sheets.py` (new), `gui/window_export.py`, `gui/panels/plots.py`, `gui/sidebar_menu.py`, `gui/dialogs/settings.py`, `gui/widgets/basics.py` | **Sheets**: save panels (Export, Screenshot, CFD Settings, plot CSV), Import Points, Rename, Color…, the background image, and "close without exporting?" slide down from their window instead of blocking the app |
+| `gui/report.py` (new) | **Help ▸ Report a Problem…**: a GitHub issue filled with the app, macOS and library versions (nothing is sent until you press Submit) |
+| `gui/access.py` (new), `gui/style.py`, `gui/widgets/basics.py` | **Accessibility**: VoiceOver reads a name for every icon button and switch; switches show a ring when they have the keyboard focus; *Increase contrast* (System Settings ▸ Accessibility) makes lines, borders and gray text stronger |
+| `tests/test_mac.py` | Welcome screen and samples, Revert to Original (and Cancel), spinner, VoiceOver names, the app menu made once |
+
+## 2.5 beta 1 — The Mac way: full menu bar, undo, Settings, one name per thing
+
+| File | |
+|---|---|
+| `gui/window_bars.py`, `gui/app.py`, `gui/window_pages.py` | **Full menu bar**: **Edit** (Undo ⌘Z, Redo ⇧⌘Z, Select All ⌘A, Deselect All ⌥⌘A, Hide Selection, Isolate Selection, Show All, Find… ⌘F → the parts filter), **Window** (Minimize ⌘M, Zoom, Bring All to Front, the open windows), **Help** (Mesh Viewer Help, Keyboard Shortcuts, Release Notes). View ▸ Units (the toolbar's units + File Unit…), View ▸ Show Next / Previous Tab (⌃⇥ / ⌃⇧⇥). Check for Updates… and Settings… in the app menu, also with no window open. Every toolbar button is in a menu. Sidebar is ⌃⌘S (macOS's own shortcut; was ⌥⌘S) |
+| `gui/dialogs/shortcuts.py` (new) | Help ▸ Keyboard Shortcuts: every shortcut, menu by menu, read from the menus |
+| `gui/undo.py` (new), `gui/sidebar.py`, `gui/sidebar_menu.py`, `gui/window.py` | **Undo / Redo for every change**: showing / hiding / isolating parts, colors, renames, hidden CAD faces, and the Edit tool's rotations, mirrors, moves, its Undo and Reset buttons. Edit ▸ Undo says what it undoes ("Undo Hide Wing"). Not the camera or the selection (the view, as in other Mac apps) |
+| `gui/dialogs/settings.py` (new, replaces `gui/dialogs/appearance.py`) | **Settings… (⌘,)** instead of Appearance…: a window of its own with General · Appearance · Units tabs, every change at once, no OK button. New: *CAD mesh quality* (the level STEP / IGES / BREP open at, or the last one used), *Show lengths in* (the unit for a new file), the unit of meshes and triangle CAD that don't say theirs, and *Ask when a file is opened the first time* |
+| `gui/window.py` | The title says "— Edited" while rotations / moves wait to be exported (with the dot in the close button, as before) |
+| every file with words on screen | **One name per thing**, in Apple's style: American spelling (color, center, gray, meters); a plot is a *plot* (New Plot…, Rename Plot — "measurement" belonged to Measure); *CFD mode* is now *Inflation Layers*, like the page it opens; *cross section* is *section* (Plots ▸ Section, the page's Section tab); right-click *Hide Face* / *Show Hidden Faces* (were Surface); sidebar panels are *tools* (View ▸ Tools); Title Case for tool names, tabs and buttons (Mesh Quality, Cell Quality, 3D Model, Layer Sizes, Flip Side, Pick Faces…). Saved settings and file memories still load |
+| `meshviewer/__init__.py`, `gui/dialogs/about.py`, `setup.py` | Version 2.5b1, shown "2.5 beta 1". The update check knows a beta comes before its release (2.5b1 < 2.5); macOS gets "2.5" as the app's short version |
+| `gui/store.py` (new), `tests/conftest.py` | Settings are read and written in one place; the tests now use a scratch file, so running them no longer clears what the app remembers about your files |
+| `core/model.py`, `core/cad/occt.py` | The CAD mesh quality names live in one list (Settings shows them without loading OpenCASCADE) |
+| `tests/test_mac.py` (new) | Menus, every toolbar button in a menu, undo / redo of each kind of change, Settings tabs and their effect on opening a file, the beta version |
+
+## 2.4.11 — STEP meshes: OpenCASCADE's own triangles again, faster
+
+| File | |
+|---|---|
+| `core/cad/remesh.py` (removed), `core/cad/occt.py` | Faces are no longer meshed again: the triangles are OpenCASCADE's, as they come (the 2.4.10 even meshes added 2–4× the triangles and time for display only). The duplicate-triangle clean-up it needed goes too. OpenCASCADE's faster triangulator (Delabella) stays. Compared with 2.4.8, at the same Mesh quality: ONERA M6 air domain Medium 2 107 → 1 687 triangles, Very fine 0.55 → 0.18 s; the 300-part test assembly opens in 0.1 s instead of 3.3 s. Thin triangles and fans on some faces are back |
+| `tests/test_core.py` | The STEP test checks the surface is closed and gets finer with the quality |
+
+## 2.4.10 — Cleaner STEP meshes, no hole when zoomed in, even axis numbers
+
+| File | |
+|---|---|
+| `core/cad/remesh.py` (rewritten), `core/cad/occt.py` | **STEP / IGES / BREP meshes are even.** Every face is meshed again to a target size (model size ÷ 20, 32, 50, 80, 130 for the five levels): long outline edges are cut in equal pieces (the same on both faces that share them), points are laid inside on a triangular lattice, then added where a triangle is too big or too thin, so the size grows smoothly away from small details. A cylinder is no longer long strips, a flat face around a small part no longer a fan of needles. On the ONERA M6 air domain at Medium: half of the triangles had an angle under 26°, now half are equilateral (60°); triangles under 15°: 28 % → 8 %. Faces with a pole (a sphere's cap) and very thin ones keep OpenCASCADE's triangles. More triangles than before at the same level (about 2–4×) |
+| `core/cad/occt.py` | OpenCASCADE's own mesher runs with its faster triangulator (Delabella: 1.5–2.5×). Two faces meeting along a curve no longer leave a doubled thin triangle. Medium on the test files: 0.05–0.2 s |
+| `render/camera.py`, `render/scene.py` | **No more hole in the model when zoomed in** (parallel view): after zooming in on a spot and turning, the camera could stand inside the model, and everything behind it was cut away. The camera is now kept far behind the whole model (the picture is the same). Switching to perspective keeps the size on screen |
+| `render/camera.py`, `render/appearance.py` | **Axis numbers the same size on every axis** (parallel view): they were sized by their distance to the camera, so the nearest axis had the smallest numbers, and they grew when zooming in. A short axis gets fewer numbers (2–5 by its length) so they don't run into each other |
+| `tests/test_viewport.py`, `tests/test_core.py` | Tests for the camera, the numbers' size and the new mesher (closed, no needles) |
+
+## 2.4.9 — Faster and smoother; the code in smaller files
+
+Nothing new to click: the same app, quicker. Times measured on three test files (300-part
+STEP assembly, 1.6 M-triangle STL, CGNS volume mesh), without a graphics card — the
+ratios matter, not the seconds.
+
+| File | |
+|---|---|
+| `gui/viewport.py` (new) | **Each frame is drawn once.** The view drew the whole scene twice per frame shown (once to draw, once to put it on screen) — also on every frame of a turn or a zoom: about 1.8× faster. And several "draw again" during one click now make one frame (a unit change drew 5, *Select All* on 300 parts drew 300) |
+| `render/scene.py` | **One outline** for the whole selection instead of one per part: *Select All* on 300 parts 20 s → 0.2 s. The outline of a selection over 300 000 triangles hides while the view moves. A part's colour / visibility settings are kept at hand instead of looked up by name (hide / show all 3×, isolate 5×) |
+| `render/scene.py` | Surface normals were computed twice at opening (the app, then PyVista): once now |
+| `core/cad/occt.py` | **Repeated parts of an assembly are meshed once** (a bolt used 40 times: one mesh, moved to each place): opening the assembly 10.5 s → 2.7 s, a mesh quality change 8.5 s → 1.1 s. Their triangles are now the same on every copy. Exact face areas are computed once, not at every refresh of the lists (unit change 5–7×) |
+| `core/polys.py` | VTK's worker threads only on big parts (they cost more than they save on hundreds of small ones) |
+| `render/section.py` | The plane's handle no longer draws a frame at each of its settings (cross section on: 1.6–4×; moving it: 4–7×) |
+| `gui/widgets/select.py`, `gui/widgets/basics.py` | Pop-up menus don't measure every item again at each one added; one colour dot per colour (parts list 5× faster to fill) |
+| `render/overlays.py` | Result colours no longer rely on a frame having been drawn |
+
+**Code, for readers** (no behaviour change):
+
+| File | |
+|---|---|
+| `render/scene.py` → + `picking.py`, `camera.py`, `editing.py`, `appearance.py`, `screenshot.py`, `style.py` | The 1 220-line Scene in six files, one subject each (530 lines for the main one) |
+| `gui/widgets.py` → `gui/widgets/` | `basics`, `sections`, `select`, `numbers`, `formulas` (imports unchanged: `from meshviewer.gui.widgets import …`) |
+| `gui/window.py` → + `window_bars.py`, `window_pages.py`, `window_export.py` | actions / toolbar / menus, pages and tabs, export and screenshot (857 → 440 lines) |
+| `gui/sidebar.py` → + `sidebar_layout.py`, `sidebar_menu.py` | layout pieces, a part's right-click menu (863 → 640 lines) |
+| `gui/panels/fluid.py` (new) | The fluid / speed / direction inputs that `cfd.py` and `inflation.py` each had a copy of |
+| `gui/forms.py` | One `caption()`, `rule()` and `segmented()` instead of a copy in four panels |
+| `core/cfd.py`, `gui/pages/section_cut.py`, `gui/panels/results.py` | Unused functions removed; comments about past versions rewritten as what the code does |
+| `tools/bench.py` (new) | `python tools/bench.py file`: how long opening, a frame, selecting, hiding, cutting… take on your machine |
+| `tests/test_viewport.py` (new) | An action draws one frame, and the screen shows it |
+| `ARCHITECTURE.md`, `README.md` | The new files in the map; a *Speed* section with the rules that keep it fast |
 
 ## 2.4.8 — Plot tabs scroll; right-click a tab
 

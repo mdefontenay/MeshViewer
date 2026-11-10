@@ -26,8 +26,8 @@ from meshviewer.core.polys import bare, faces_by_size
 FORMATS = {   # key: (menu text, file extension)
     "stl": ("STL — binary, all parts merged", ".stl"),
     "stl_ascii": ("STL — text, one named solid per part", ".stl"),
-    "obj": ("OBJ — one group per part, with colours", ".obj"),
-    "ply": ("PLY — binary, merged, with colours", ".ply"),
+    "obj": ("OBJ — one group per part, with colors", ".obj"),
+    "ply": ("PLY — binary, merged, with colors", ".ply"),
     "vtu": ("VTU — volume + boundaries (ParaView)", ".vtu"),
     "ugrid": ("UGRID + .mapbc — FUN3D / AFLR3", ".lb8.ugrid"),
 }

@@ -1,9 +1,9 @@
 """File unit sheet: asked the first time a file is opened — what unit are its numbers in?
 
 STEP and IGES store their unit (the readers convert to mm), DXF may: it is
-preselected. Other files store none: meshes are preselected in metres, triangle CAD in
-millimetres. The answer is remembered per file; the ✎ button left of the toolbar units
-(or Info ▸ File unit) opens this sheet again.
+preselected. Other files store none: Settings ▸ Units says what to preselect (meshes
+in meters, triangle CAD in millimeters at first) and whether to ask at all. The answer is remembered per file; File Unit… (File menu, the toolbar's unit menu,
+or Info ▸ File unit) opens this sheet again.
 """
 from __future__ import annotations
 
@@ -16,11 +16,13 @@ from meshviewer.gui.widgets import Capsule
 FILE_UNITS = (("mm", "mm"), ("cm", "cm"), ("m", "m"), ("in", "in"), ("ft", "ft"))
 
 
-def default_unit(model):
-    """The unit to preselect: the file's own, else m for meshes, mm for CAD."""
+def default_unit(model, prefs=None):
+    """The unit to preselect: the file's own, else Settings ▸ Units (m for meshes and mm
+    for triangle CAD, unless changed there)."""
     if model.units:
         return model.units
-    return "mm" if model.is_cad else "m"
+    prefs = prefs or {}
+    return prefs.get("unit_cad", "mm") if model.is_cad else prefs.get("unit_mesh", "m")
 
 
 class FileUnitDialog(QDialog):
@@ -39,7 +41,7 @@ class FileUnitDialog(QDialog):
         title.setStyleSheet("font-size: 15px; font-weight: 600;")
         lay.addWidget(title)
         note = QLabel(f"The file says {said}." if said else
-                      "This file doesn't say. Change it any time with ✎ in the toolbar.")
+                      "This file doesn't say. Change it any time in the toolbar's unit menu.")
         note.setObjectName("InfoLine")
         lay.addWidget(note)
         row = QHBoxLayout()

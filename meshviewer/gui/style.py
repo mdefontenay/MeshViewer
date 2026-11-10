@@ -8,6 +8,8 @@ from PySide6.QtCore import Qt
 import numpy as np
 from PySide6.QtGui import QColor, QGuiApplication, QPalette
 
+from meshviewer.gui.macos import increase_contrast
+
 LIGHT = dict(
     text="#1d1d1f", secondary="#6e6e73", sidebar="#ebebee", divider="rgba(0,0,0,0.10)",
     capsule="rgba(0,0,0,0.045)", capsule_border="rgba(0,0,0,0.08)",
@@ -25,14 +27,9 @@ DARK = dict(
 )
 
 TEMPLATE = """
-/* ---- sidebar column ---- */
-#SideScroll, #SideScroll > QWidget, #SideTools, #Sidebar, #SideMain, #SideTop, #SideBottom {{ background: {sidebar}; border: none; }}
-#SideMain::handle {{ background: transparent; }}
-#IconBar {{ background: {sidebar}; border: none; border-right: 1px solid {divider}; }}
-#IconBar QToolButton {{ border: none; border-radius: 7px; padding: 0; }}
-#IconBar QToolButton:hover {{ background: {hover}; }}
-#IconBar QToolButton:pressed {{ background: {pressed}; }}
-#IconBar QToolButton:checked {{ background: {capsule}; }}
+/* ---- side columns ---- */
+/* the parts list (left) and the inspector (right), on the same shade */
+#SideScroll, #SideScroll > QWidget, #Sidebar, #Inspector, #InspectorPage {{ background: {sidebar}; border: none; }}
 #UnavailableNote {{ color: {secondary}; font-size: 11px; padding: 0 2px 2px 2px; }}
 #SectionHeader {{ color: {secondary}; font-size: 12px; font-weight: 600; }}
 #SmallLabel {{ color: {text}; font-size: 11px; }}
@@ -55,6 +52,11 @@ TEMPLATE = """
 #MutedValue {{ color: {secondary}; font-size: 16px; font-weight: 500; }}
 #Divider {{ background: {divider}; border: none; min-height: 1px; max-height: 1px; }}
 #EmptyState {{ color: {secondary}; font-size: 15px; }}
+#WelcomeTitle {{ font-size: 24px; font-weight: 700; }}
+#WelcomeRow {{ border: none; border-radius: 6px; background: transparent; text-align: left; }}
+#WelcomeRow:hover {{ background: {divider}; }}
+#WelcomeRow:focus {{ background: {divider}; }}
+#WelcomeRowTitle {{ font-size: 13px; }}
 QSplitter::handle {{ background: {divider}; }}
 
 #LinkButton {{ color: {accent}; border: none; background: transparent;
@@ -104,16 +106,17 @@ QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
 #Capsule QToolButton:pressed, #Segmented QToolButton:pressed {{ background: {pressed}; }}
 #Capsule QToolButton:checked, #Segmented QToolButton:checked {{ background: {accent}; color: white; }}
 #Capsule QToolButton:disabled, #Segmented QToolButton:disabled {{ color: {secondary}; }}
+#Capsule QToolButton:checked:disabled {{ background: transparent; }}   /* an empty window */
 
-/* thin scrollbars on the sidebar: just the handle, no wide grey track */
-#Sidebar QScrollBar:vertical {{ background: transparent; width: 8px; margin: 2px 1px; border: none; }}
-#Sidebar QScrollBar::handle:vertical {{ background: {scroll}; border-radius: 3px; min-height: 28px; }}
-#Sidebar QScrollBar::add-line:vertical, #Sidebar QScrollBar::sub-line:vertical {{ height: 0; border: none; }}
-#Sidebar QScrollBar::add-page:vertical, #Sidebar QScrollBar::sub-page:vertical {{ background: transparent; }}
-#Sidebar QScrollBar:horizontal {{ background: transparent; height: 8px; margin: 1px 2px; border: none; }}
-#Sidebar QScrollBar::handle:horizontal {{ background: {scroll}; border-radius: 3px; min-width: 28px; }}
-#Sidebar QScrollBar::add-line:horizontal, #Sidebar QScrollBar::sub-line:horizontal {{ width: 0; border: none; }}
-#Sidebar QScrollBar::add-page:horizontal, #Sidebar QScrollBar::sub-page:horizontal {{ background: transparent; }}
+/* thin scrollbars on the side columns: just the handle, no wide grey track */
+#Sidebar QScrollBar:vertical, #Inspector QScrollBar:vertical {{ background: transparent; width: 8px; margin: 2px 1px; border: none; }}
+#Sidebar QScrollBar::handle:vertical, #Inspector QScrollBar::handle:vertical {{ background: {scroll}; border-radius: 3px; min-height: 28px; }}
+#Sidebar QScrollBar::add-line:vertical, #Sidebar QScrollBar::sub-line:vertical, #Inspector QScrollBar::add-line:vertical, #Inspector QScrollBar::sub-line:vertical {{ height: 0; border: none; }}
+#Sidebar QScrollBar::add-page:vertical, #Sidebar QScrollBar::sub-page:vertical, #Inspector QScrollBar::add-page:vertical, #Inspector QScrollBar::sub-page:vertical {{ background: transparent; }}
+#Sidebar QScrollBar:horizontal, #Inspector QScrollBar:horizontal {{ background: transparent; height: 8px; margin: 1px 2px; border: none; }}
+#Sidebar QScrollBar::handle:horizontal, #Inspector QScrollBar::handle:horizontal {{ background: {scroll}; border-radius: 3px; min-width: 28px; }}
+#Sidebar QScrollBar::add-line:horizontal, #Sidebar QScrollBar::sub-line:horizontal, #Inspector QScrollBar::add-line:horizontal, #Inspector QScrollBar::sub-line:horizontal {{ width: 0; border: none; }}
+#Sidebar QScrollBar::add-page:horizontal, #Sidebar QScrollBar::sub-page:horizontal, #Inspector QScrollBar::add-page:horizontal, #Inspector QScrollBar::sub-page:horizontal {{ background: transparent; }}
 
 QToolBar {{ spacing: 8px; padding: 3px 8px; border: none; border-bottom: 1px solid {divider_solid}; }}
 
@@ -138,7 +141,7 @@ QToolBar {{ spacing: 8px; padding: 3px 8px; border: none; border-bottom: 1px sol
 #HelpButton:hover {{ color: {accent}; border-color: {accent}; }}
 QLineEdit[invalid="true"] {{ border: 1px solid #ff453a; }}
 QLineEdit:disabled {{ color: {secondary}; background: {capsule}; border-color: {capsule_border}; }}
-/* CFD mode — the Inflation page and the bar under the 3D view */
+/* Inflation Layers — its page and the bar under the 3D view */
 #InflationView, #InflationPage {{ background: {page}; border: none; }}
 #PageTitle {{ color: {text}; font-size: 17px; font-weight: 700; }}
 #TileValue {{ color: {text}; font-size: 17px; font-weight: 600; }}
@@ -171,6 +174,16 @@ QLineEdit:disabled {{ color: {secondary}; background: {capsule}; border-color: {
 #ContextMenu::separator {{ height: 1px; background: {divider}; margin: 5px 10px; }}
 #ContextMenu::right-arrow {{ width: 8px; height: 8px; right: 10px; }}
 """
+
+
+# System Settings ▸ Accessibility ▸ Display ▸ Increase contrast: stronger lines and text
+HIGH_CONTRAST = {
+    False: dict(secondary="#3a3a3c", divider="rgba(0,0,0,0.32)", capsule_border="rgba(0,0,0,0.35)",
+                field_border="rgba(0,0,0,0.50)", menu_border="rgba(0,0,0,0.40)"),
+    True: dict(secondary="#d1d1d6", divider="rgba(255,255,255,0.32)",
+               capsule_border="rgba(255,255,255,0.38)", field_border="rgba(255,255,255,0.50)",
+               menu_border="rgba(255,255,255,0.40)"),
+}
 
 
 def is_dark() -> bool:
@@ -231,6 +244,8 @@ def _solid(rgba, base: QColor) -> str:
 def colors(dark=None) -> dict:
     d = is_dark() if dark is None else dark
     c = dict(DARK if d else LIGHT)
+    if increase_contrast():
+        c.update(HIGH_CONTRAST[d])
     c["accent"] = accent(dark)
     base = QGuiApplication.palette().window().color()
     side = QColor(c["sidebar"])

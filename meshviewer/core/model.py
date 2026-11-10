@@ -83,6 +83,11 @@ class Model:
             self.file_type, ("part", "parts"))
 
 
+# Mesh quality of exact CAD (STEP, IGES, BREP), coarsest first: the names of
+# core/cad/occt.QUALITY_LEVELS (kept here so Settings can list them without OpenCASCADE)
+CAD_QUALITY_NAMES = ("Very coarse", "Coarse", "Medium", "Fine", "Very fine")
+
+
 class MissingDependency(RuntimeError):
     """Raised when an optional Python package for one format isn't installed."""
 

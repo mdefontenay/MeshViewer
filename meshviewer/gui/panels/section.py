@@ -1,4 +1,4 @@
-"""Side-panel block for the cross-section: on/off, then
+"""The Section tool: on/off, then
 
     Plane                                              (gear: Advanced)
                Normal to [ X | Y | Z ]              [ Flip ]
@@ -6,18 +6,18 @@
                Origin / Normal  [x] [y] [z]   (Advanced: the exact plane, any direction)
     Show       Fill cut faces · Show plane
 
-laid out like a Plots cross section (panels/plots.py) so the two read the same."""
+laid out like a section plot (panels/plots.py) so the two read the same."""
 from __future__ import annotations
 
 import numpy as np
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup
 from PySide6.QtWidgets import (
-    QAbstractSpinBox, QApplication, QFrame, QGridLayout, QHBoxLayout, QLabel, QVBoxLayout,
+    QAbstractSpinBox, QApplication, QGridLayout, QHBoxLayout, QLabel, QVBoxLayout,
     QWidget,
 )
 
-from meshviewer.gui.forms import _grid
+from meshviewer.gui.forms import _grid, caption, rule
 from meshviewer.gui.widgets import Capsule, IconToggle, NoWheelSlider, NoWheelSpinBox, Switch
 
 SLIDER_STEPS = 1000
@@ -34,19 +34,6 @@ def _spin(lo, hi, step, decimals):
     s.setKeyboardTracking(False)          # update on Enter / focus out, not each keystroke
     s.setMinimumWidth(56)
     return s
-
-
-def _caption(text):
-    lbl = QLabel(text)
-    lbl.setObjectName("Caption")
-    return lbl
-
-
-def _rule():
-    line = QFrame()
-    line.setObjectName("Divider")
-    line.setFixedHeight(1)
-    return line
 
 
 class SectionPanel(QWidget):
@@ -70,7 +57,7 @@ class SectionPanel(QWidget):
         lay.addWidget(self.hint)
 
         # ---- details (only shown when the section is on) -----------------
-        # Same layout as a Plots cross section: Plane (normal to, position), then the
+        # Same layout as a section plot: Plane (normal to, position), then the
         # exact numbers, then what is shown.
         self.details = QWidget()
         d = QVBoxLayout(self.details)
@@ -78,7 +65,7 @@ class SectionPanel(QWidget):
         d.setSpacing(6)
 
         head = QHBoxLayout()
-        head.addWidget(_caption("Plane"))
+        head.addWidget(caption("Plane"))
         head.addStretch(1)
         self.adv_button = IconToggle("advanced", "Advanced: the plane's origin and normal, "
                                      "in any direction")
@@ -91,7 +78,7 @@ class SectionPanel(QWidget):
         for i, axis in enumerate("XYZ"):
             a = QAction(axis, self)
             a.setCheckable(True)
-            a.setToolTip(f"Normal along +{axis}, through the centre")
+            a.setToolTip(f"Normal along +{axis}, through the center")
             a.triggered.connect(lambda _=False, k=i: self._axis(k))
             group.addAction(a)
             self.axis_actions.append(a)
@@ -99,7 +86,7 @@ class SectionPanel(QWidget):
         flip.setToolTip("Show the other half")
         flip.triggered.connect(lambda: self._do(lambda s: s.flip()))
         center = QAction("Center", self)
-        center.setToolTip("Move the plane to the model centre")
+        center.setToolTip("Move the plane to the model center")
         center.triggered.connect(lambda: self._do(lambda s: s.set_plane(origin=s.center)))
         row = QHBoxLayout()
         row.setSpacing(6)
@@ -147,15 +134,15 @@ class SectionPanel(QWidget):
         self.advanced.setVisible(False)
         self.adv_button.toggled.connect(self.advanced.setVisible)
         d.addWidget(self.advanced)
-        d.addWidget(_rule())
+        d.addWidget(rule())
 
-        d.addWidget(_caption("Show"))
+        d.addWidget(caption("Show"))
         self.fill = Switch()
         self.fill.toggled.connect(self._fill_toggled)
         self.handle = Switch(True)
         self.handle.toggled.connect(lambda on: self.section and self.section.set_handle(on))
         self._labels = {}
-        for text, sw, tip in (("Fill cut faces", self.fill, "Solid colour on the cut"),
+        for text, sw, tip in (("Fill cut faces", self.fill, "Solid color on the cut"),
                               ("Show plane", self.handle,
                                "Show the plane; drag it or its arrow in the 3D view")):
             row = QHBoxLayout()
@@ -219,10 +206,10 @@ class SectionPanel(QWidget):
         their edges follow the Mesh edges toggle. Same label either way."""
         if self.section and self.section.has_volume:
             tip = ("Fill the cut with the volume cells the plane goes through.\n"
-                   "Their edges show when Mesh edges (toolbar) is on.\n"
+                   "Their edges show when Mesh Edges (toolbar) is on.\n"
                    "The cells are read from the file the first time.")
         else:
-            tip = "Solid colour on the cut"
+            tip = "Solid color on the cut"
         self._labels[self.fill].setToolTip(tip)
 
     def _fill_toggled(self, on):

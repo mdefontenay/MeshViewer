@@ -1,6 +1,6 @@
 """Export sheet — pick the file format (only those that fit the
 open file), whether hidden parts are left out, then where to save.
-CAD files: a second tab, "CFD settings" — the inflation layers of CFD mode
+CAD files: a second tab, "CFD Settings" — the layers of Inflation Layers
 for OpenFOAM / Fluent / STAR-CCM+ / Pointwise, or every input and value as a CSV.
 
     [ 3D model | CFD settings ]
@@ -8,15 +8,15 @@ for OpenFOAM / Fluent / STAR-CCM+ / Pointwise, or every input and value as a CSV
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QSettings, Qt
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QActionGroup
 from PySide6.QtWidgets import (
-    QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout, QLabel, QLayout,
-    QVBoxLayout, QWidget,
+    QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout, QLabel, QLayout, QVBoxLayout, QWidget,
 )
 
 from meshviewer.core.cfd_export import FORMATS as CFD_FORMATS
 from meshviewer.core.export import FORMATS
+from meshviewer.gui.store import settings
 from meshviewer.gui.widgets import Capsule, MenuSelect, Switch
 
 CFD_NOTES = {
@@ -34,12 +34,12 @@ CFD_NOTES = {
 class ExportDialog(QDialog):
     def __init__(self, parent, keys, has_hidden=False, has_volume=False, edited=False,
                  renamed=False, cfd=None):
-        """cfd: None (no CFD tab) or {"on": CFD mode on and filled in}."""
+        """cfd: None (no CFD tab) or {"on": Inflation Layers on and filled in}."""
         super().__init__(parent)
         self.setWindowTitle("Export")
         self.setWindowModality(Qt.WindowModal)          # a sheet on macOS
         self.has_volume = has_volume
-        st = QSettings("local", "Mesh Viewer")
+        st = settings()
 
         lay = QVBoxLayout(self)
         lay.setSizeConstraint(QLayout.SetFixedSize)
@@ -55,7 +55,7 @@ class ExportDialog(QDialog):
         if cfd is not None:                              # 3D model | CFD settings
             group = QActionGroup(self)
             group.setExclusive(True)
-            for key, text in (("model", "3D model"), ("cfd", "CFD settings")):
+            for key, text in (("model", "3D model"), ("cfd", "CFD Settings")):
                 a = QAction(text, self)
                 a.setCheckable(True)
                 a.triggered.connect(lambda _=False, k=key: self._show(k))
@@ -163,7 +163,7 @@ class ExportDialog(QDialog):
         on = bool(self.cfd.get("on"))
         text = CFD_NOTES.get(self.cfd_fmt, "")
         if not on:
-            text = "Switch on CFD mode in the sidebar and fill in the flow and the layers first."
+            text = "Switch on Inflation Layers in the CFD tool and fill in the flow and the layers first."
         self.cfd_note.setText(text)
         self.save_btn.setEnabled(on or self.what == "model")
 
@@ -175,9 +175,9 @@ class ExportDialog(QDialog):
             if k == "ugrid":
                 text += " Boundary names go in the .mapbc beside it (BC types set to 0)."
         elif k == "obj":
-            text = "Surfaces only. Part colours go in the .mtl beside it."
+            text = "Surfaces only. Part colors go in the .mtl beside it."
         elif k == "ply":
-            text = "Surfaces only, with the part colours."
+            text = "Surfaces only, with the part colors."
         else:
             text = "Surfaces only."
         done = [w for w, on in (("edits", self.edited), ("new part names", self.renamed)) if on]
@@ -186,7 +186,7 @@ class ExportDialog(QDialog):
         self.note.setText(text)
 
     def _accept(self):
-        st = QSettings("local", "Mesh Viewer")
+        st = settings()
         st.setValue("export/format", self.fmt)
         if self.cfd is not None:
             st.setValue("export/what", self.what)

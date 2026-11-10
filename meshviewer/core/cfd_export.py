@@ -1,4 +1,4 @@
-"""Export ▸ CFD settings — the inflation layers of CFD mode, written for a
+"""Export ▸ CFD Settings — the layers of Inflation Layers (CFD tool), written for a
 mesher, or every input and value as a CSV. No Qt.
 
     export(kind, path, info)
@@ -56,8 +56,8 @@ def _openfoam(info):
         "",
         " In system/snappyHexMeshDict: set \"addLayers true;\", then replace the",
         " addLayersControls block with this one (or #include this file there).",
-        " Thicknesses are absolute (relativeSizes false), in metres. If the geometry",
-        " is still in millimetres when snappyHexMesh runs, use firstLayerThickness",
+        " Thicknesses are absolute (relativeSizes false), in meters. If the geometry",
+        " is still in millimeters when snappyHexMesh runs, use firstLayerThickness",
         f" {_e(r['y_min'] * 1e3)} and minThickness {_e(r['y_min'] * 1e2)} instead.",
         " Rename the patch below to your wall patch (a regex is fine).",
         "*/",
@@ -138,7 +138,7 @@ def _pointwise(info):
             ("Wall boundary", info["walls"])]
     notes = ["Pointwise ▸ Grid ▸ Solve ▸ T-Rex (2D: on the domains, 3D: on the blocks):",
              "add the walls as Wall boundary conditions with this spacing. Pointwise works",
-             "in the model's units: convert the spacing if the model is not in metres",
+             "in the model's units: convert the spacing if the model is not in meters",
              f"({_e(r['y_min'] * 1e3)} mm).",
              f"Total thickness {_e(r['y_tot'])} m; last layer {_e(r['y_max'])} m."]
     return _table(info, "Pointwise — T-Rex", rows, notes)
@@ -163,7 +163,7 @@ def export(kind, path, info):
     path = Path(path)
     r = info.get("r") or {}
     if not r.get("ok"):
-        raise ValueError("fill in the CFD mode inputs first (no inflation layers yet)")
+        raise ValueError("fill in Inflation Layers (CFD tool) first: no layers yet")
     if kind == "csv":
         _csv(path, info)
         return path
