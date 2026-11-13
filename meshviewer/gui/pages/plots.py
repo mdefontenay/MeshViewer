@@ -209,6 +209,7 @@ class PlotPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("PlotPage")
+        self.setAttribute(Qt.WA_StyledBackground, True)     # the page color, not black
         self.ident = None
         lay = QVBoxLayout(self)
         lay.setContentsMargins(24, 18, 24, 18)

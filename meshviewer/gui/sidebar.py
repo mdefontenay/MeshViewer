@@ -234,10 +234,12 @@ class Sidebar(PartMenu, QWidget):
             self.activity_changed.emit()
 
     def _update_dividers(self):
+        """A line between tools, none above the first of each tab. (A tool's own hidden
+        state counts, not its tab's: the tabs not shown are hidden pages.)"""
         for key in ("view", "measure", "analyze"):
             first = True
             for k, box in self._boxes.items():
-                if BY_KEY[k].tab == key and box.widget.isVisibleTo(self.inspector):
+                if BY_KEY[k].tab == key and not box.widget.isHidden():
                     box.divider.setVisible(not first)
                     first = False
 
@@ -324,6 +326,7 @@ class Sidebar(PartMenu, QWidget):
         if self.changes is not None:
             self.changes.clear()                    # a new file: nothing to undo
         scene.on_pick = self.show_selection
+        scene.elements.on_changed = lambda: self._show_info(scene.selected_parts)
         self.section_panel.bind(scene.section)
         self.edit_panel.bind(scene)
         self.measure_panel.bind(scene)
@@ -406,21 +409,27 @@ class Sidebar(PartMenu, QWidget):
 
     def _clear_selection(self):
         if self.scene:
+            self.scene.elements.clear()
             self.scene.set_selection([], notify=True)
 
     def _show_info(self, names):
         names = [] if not names else ([names] if isinstance(names, str) else list(names))
-        if self.scene:
+        picked = self.scene.elements.describe() if self.scene else None
+        if picked:                                            # Select ▾: nodes, edges, faces
+            self.sel_label.setText(picked[0])
+        elif self.scene:
             one, many = self.scene.model.item_words
             what = one if len(names) == 1 else many
             self.sel_label.setText(f"{len(names)} {what} selected")
-        empty = not names                                     # greyed, not hidden
+        empty = not names and not picked                      # greyed, not hidden
         if self.sel_label.property("empty") != empty:
             self.sel_label.setProperty("empty", empty)
             self.sel_label.style().unpolish(self.sel_label)
             self.sel_label.style().polish(self.sel_label)
         self.sel_clear.setEnabled(not empty)
-        if self.scene and len(names) == 1:
+        if picked:
+            self.info.setText(picked[1])
+        elif self.scene and len(names) == 1:
             self.info.setText(f"{names[0]}\n{self.scene.info(names[0])}")
         elif self.scene and names:
             n = sum(self.scene.model.parts[x].n_cells for x in names)

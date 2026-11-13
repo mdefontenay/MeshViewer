@@ -1,4 +1,39 @@
-## What's new in 2.5 beta 3
+## What's new in 2.5 beta 4
+
+- **Select ▾** in the toolbar (also Edit ▸ Select) chooses what a click picks: the
+  **Part**, or on a mesh a **Mesh Node**, **Mesh Edge** or **Mesh Triangle**, or on
+  any file a **Feature Node**, **Feature Edge** or **Feature Face** (a CAD face, or
+  the part of a mesh between its edges). On a mesh, smooth edges are found too (a
+  cylinder meeting a sphere: mesh edges in a line or in one plane, from one edge to
+  another, where the surface creases or changes how it bends), and Show ▸ Feature
+  Edges draws them. On STEP files, Feature Edges are the borders of the CAD faces,
+  as in Onshape or other CAD programs. A feature edge is
+  straight or in one plane, and is cut in two where another one meets it. ⌘/⇧-click picks more. Under the parts list:
+  how many, and the node's coordinates, the edges' length or the faces' area.
+- **Fixed**: a results file could hang while opening when one of its plots cut across
+  a flat boundary (a symmetry plane). It opens again, plots and all.
+- **Results, reorganized**:
+  - the **Field** list is grouped by subject (Flow, Pressure, Wall, Stress, Strain…),
+    with headers;
+  - **usual CFD and FEA fields are recognized** (pressure, Mach, velocity, y+, wall
+    shear, heat flux, k, ε, ω… von Mises and principal stresses, strains, displacement,
+    reaction force) and offer their usual units — or say they have none (Mach, y+, cp);
+  - **units are clearer**: *Unit in file* says what the file's numbers are in (*As
+    written*, often non-dimensional, or a unit); *Shown in* appears once that is known.
+    A field Mesh Viewer doesn't know can be given any unit;
+  - **Position X / Y / Z**: color the boundaries by where they are;
+  - **Scale ▸ Log** for values spread over decades (y+, gradients).
+- **Edit Plane** (the pencil right of X / Y / Z, in Section and in section plots)
+  shows the plane's origin and normal right under *Normal to*; it replaces the gear.
+- **Plots moved to the Analyze tab**, below Results. A plot's page now follows light
+  and dark mode (it was black).
+- **Mesh Quality is now Meshing Control** (also in Settings ▸ General).
+- The **Show** menu has check marks for what is on.
+- Pull-downs and pop-up menus show the same **chevron** as other Mac apps.
+- The tabs under the 3D view are rounded and evenly spaced; no more line above the
+  first tool of the Measure and Analyze tabs.
+
+## In 2.5 beta 3
 
 - **Tools on the right**: the tools moved to an inspector right of the 3D view, in
   three tabs — **View** (Mesh Quality, Section, Edit), **Measure** (Info, Measure,

@@ -1,6 +1,6 @@
 """Mesh Viewer internals. See README.md for the layout."""
 
-__version__ = "2.5b3"       # single source: setup.py (app bundle) and About read it
+__version__ = "2.5b4"       # single source: setup.py (app bundle) and About read it
 #                             a beta: "2.5b1" (shown "2.5 beta 1"); a release: "2.5", "2.5.1"
 
 

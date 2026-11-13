@@ -3,9 +3,10 @@ colour scale bar."""
 from __future__ import annotations
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QIcon, QLinearGradient, QPainter, QPainterPath, QPalette, QPen
+from PySide6.QtGui import QColor, QIcon, QLinearGradient, QPainter, QPalette, QPen
 from PySide6.QtWidgets import QPushButton, QWidget
 
+from meshviewer.gui.icons import paint_chevron
 from meshviewer.gui.style import accent
 from meshviewer.gui.widgets.basics import Menu
 
@@ -25,6 +26,7 @@ class MenuSelect(QPushButton):
         self.setCursor(Qt.PointingHandCursor)
         self._items = []                      # [(text, data)]
         self._icons = []                      # optional icon per item
+        self._sections = {}                   # item index -> header above it ("" = a line)
         self._index = -1
         self._widest, self._has_icon = 0, False   # widest text so far (px), any icon?
         self.clicked.connect(self._open)
@@ -42,11 +44,16 @@ class MenuSelect(QPushButton):
         self._has_icon = self._has_icon or icon is not None
         self._fit_width()
 
+    def addSection(self, title=""):
+        """A line, then `title` as a small gray header, above the next item added."""
+        self._sections[len(self._items)] = title
+
     def count(self):
         return len(self._items)
 
     def clear(self):
         self._items, self._icons, self._index = [], [], -1
+        self._sections = {}
         self._widest, self._has_icon = 0, False
         self.setText("")
         self.setIcon(QIcon())
@@ -87,6 +94,11 @@ class MenuSelect(QPushButton):
     def _open(self):
         menu = Menu(self)
         for i, (text, _) in enumerate(self._items):
+            if i in self._sections:
+                if i:
+                    menu.addSeparator()
+                if self._sections[i]:
+                    menu.addAction(self._sections[i]).setEnabled(False)   # the header
             a = menu.addAction(text)
             if self._icons[i] is not None:
                 a.setIcon(self._icons[i])
@@ -104,15 +116,9 @@ class MenuSelect(QPushButton):
         super().paintEvent(e)
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        pen = QPen(self.palette().color(QPalette.PlaceholderText), 1.5)
-        pen.setCapStyle(Qt.RoundCap)
-        pen.setJoinStyle(Qt.RoundJoin)
-        p.setPen(pen)
-        cx, cy = self.width() - 14, self.height() / 2
-        path = QPainterPath(QPointF(cx - 3.5, cy - 1.5))
-        path.lineTo(QPointF(cx, cy + 2))
-        path.lineTo(QPointF(cx + 3.5, cy - 1.5))
-        p.drawPath(path)
+        paint_chevron(p, self.width() - 14, self.height() / 2, self.isEnabled(),
+                      QPalette.PlaceholderText)
+        p.end()
 
 
 def paint_gradient(p, rect, stops):

@@ -2,7 +2,8 @@
 plot, with the tab bar under the view that switches between them."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+import shiboken6
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QFrame, QScrollArea, QSizePolicy
 
@@ -29,9 +30,17 @@ class TabScroll(QScrollArea):
         if old is not None:
             old.hide()
             old.deleteLater()
-        capsule.adjustSize()
         self.setWidget(capsule)
+        # setWidget fills the pill's whole rect (a square behind its rounded corners)
+        capsule.setAutoFillBackground(False)
+        # sized after the stylesheet's font is applied: sized before, the pill came out
+        # wider than its buttons (more room after the last tab than before the first)
+        capsule.ensurePolished()
+        for b in getattr(capsule, "buttons", []):
+            b.ensurePolished()
+        capsule.adjustSize()
         self.setFixedHeight(capsule.sizeHint().height() + 10)   # + the thin scrollbar
+        QTimer.singleShot(0, lambda: capsule.adjustSize() if shiboken6.isValid(capsule) else None)
 
     def show_current(self):
         cap = self.widget()
@@ -151,6 +160,12 @@ class Pages:
         if was:
             self._show_page("model")
 
+    def _plot_renamed(self, ident):
+        """Its tab, and the page's title when it is the one shown."""
+        self._rebuild_view_bar()
+        if self._page == f"plot:{ident}":
+            self._refresh_plot(ident)
+
     def _plot_changed(self, ident):
         self._active_plot = ident
         if self._page == f"plot:{ident}":
@@ -159,11 +174,11 @@ class Pages:
             self._show_cuts()
 
     def _show_cuts(self):
-        """The cuts whose eye is open, drawn in 3D while the Measure tab (Plots) shows."""
+        """The cuts whose eye is open, drawn in 3D while the Analyze tab (Plots) shows."""
         if self.scene is None:
             return
         pp = self.sidebar.plots_panel
-        on = self.sidebar.tab_shown("plots")          # cuts while the Measure tab shows
+        on = self.sidebar.tab_shown("plots")          # cuts while the Analyze tab shows
         lines = [pp.results[m["id"]]["lines"] for m in self.scene.plots
                  if on and m.get("show", True) and pp.results.get(m["id"])
                  and pp.results[m["id"]].get("lines") is not None]

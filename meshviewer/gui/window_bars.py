@@ -5,7 +5,7 @@ The menu bar, as Mac apps lay it out — every toolbar button is in it too:
     Mesh Viewer   About, Check for Updates…, Settings… ⌘,          (macOS's app menu)
     File          Open… ⌘O, Open Recent, Open Sample, Close ⌘W, Revert to Original…, Export… ⇧⌘E,
                   Save Screenshot… ⇧⌘S, File Unit…
-    Edit          Undo ⌘Z, Redo ⇧⌘Z, Select All ⌘A, Deselect All ⌥⌘A, Hide / Isolate
+    Edit          Undo ⌘Z, Redo ⇧⌘Z, Select All ⌘A, Deselect All ⌥⌘A, Select ▸, Hide / Isolate
                   Selection, Show All, Find… ⌘F
     View          Sidebar ⌃⌘S, Inspector ⌥⌘I, View / Measure / Analyze Tools ⌥⌘1–3,
                   Section, Measure, Show, Units, Perspective, Fit, views ⌘1–4,
@@ -13,7 +13,7 @@ The menu bar, as Mac apps lay it out — every toolbar button is in it too:
     Window        Minimize ⌘M, Zoom, Bring All to Front, the open windows
     Help          Mesh Viewer Help, Keyboard Shortcuts, Release Notes, Report a Problem…
 
-The toolbar is light: the sidebar on the left; the views; Show ▾ and the unit ▾
+The toolbar is light: the sidebar on the left; the views; Show ▾, Select ▾ and the unit ▾
 (pull-down menus); then Export and Screenshot; the inspector on the right. View ▸
 Customize Toolbar… (or a right-click on it) picks which groups it shows.
 """
@@ -21,17 +21,33 @@ from __future__ import annotations
 
 import sys
 
-from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QAction, QActionGroup, QDesktopServices, QKeySequence
+from PySide6.QtCore import QEvent, QObject, Qt, QUrl
+from PySide6.QtGui import QAction, QActionGroup, QDesktopServices, QKeySequence, QPainter
 from PySide6.QtWidgets import QSizePolicy, QToolBar, QToolButton, QWidget
 
 from meshviewer.gui.dialogs.toolbar import CustomizeToolbar, hidden_items
 from meshviewer.gui.feedback import Spinner
-from meshviewer.gui.icons import icon
+from meshviewer.gui.icons import icon, paint_chevron
 from meshviewer.gui.report import report_problem
 from meshviewer.gui.sections import TABS
 from meshviewer.gui.welcome import add_sample_menu
 from meshviewer.gui.widgets import Capsule, Menu
+from meshviewer.render.elements import KINDS as SELECT_KINDS, MESH_KINDS
+
+class _ChevronMark(QObject):
+    """On a toolbar pull-down (Show, the unit): the button as usual, then the
+    chevron.down mark in the room its padding leaves on the right."""
+
+    def eventFilter(self, b, e):
+        if e.type() != QEvent.Paint:
+            return False
+        QToolButton.paintEvent(b, e)
+        p = QPainter(b)
+        p.setRenderHint(QPainter.Antialiasing)
+        paint_chevron(p, b.width() - 12, b.height() / 2 + 0.5, b.isEnabled(), size=9)
+        p.end()
+        return True
+
 
 HELP_URL = "https://github.com/mdefontenay/MeshViewer#readme"
 NOTES_URL = "https://github.com/mdefontenay/MeshViewer/releases"
@@ -76,6 +92,19 @@ class Bars:
         self.a_isolate_sel = self._act("Isolate Selection", self._isolate_selection)
         self.a_show_all = self._act("Show All", lambda: self.scene and self.sidebar._set_all(True))
         self.a_find = self._act("Find…", self._find, QKeySequence.Find)
+        # Select ▾ (toolbar, Edit ▸ Select): what a click in the 3D view picks
+        self.select_group = QActionGroup(self)
+        self.select_group.setExclusive(True)
+        self.a_select = {}
+        for key, text, *_ in SELECT_KINDS:
+            a = QAction(text, self)
+            a.setCheckable(True)
+            a.setData(key)
+            a.setIcon(icon(f"pick_{key}"))
+            self.select_group.addAction(a)
+            self.a_select[key] = a
+        self.a_select["part"].setChecked(True)
+        self.select_group.triggered.connect(lambda a: self.set_select_kind(a.data()))
         # ---- View ▸ tabs under the view, Window, Help
         self.a_next_tab = self._act("Show Next Tab", lambda: self._step_tab(1), "Meta+Tab")
         self.a_prev_tab = self._act("Show Previous Tab", lambda: self._step_tab(-1),
@@ -150,8 +179,8 @@ class Bars:
 
     def _pulldown(self, text, menu, icon_name=None):
         """A toolbar button that opens `menu` (its own QMenu: the menu bar has the same
-        items): an icon or a word, then ▾."""
-        a = QAction(f"{text} ▾" if icon_name is None else "▾", self)
+        items): an icon or a word, then the chevron.down mark."""
+        a = QAction(text, self)
         if icon_name:
             a.setIcon(icon(icon_name))
         a.setMenu(menu)
@@ -159,8 +188,10 @@ class Bars:
         cap = Capsule([a])
         b = cap.buttons[0]
         b.setPopupMode(QToolButton.InstantPopup)
-        b.setToolButtonStyle(Qt.ToolButtonTextBesideIcon if icon_name else Qt.ToolButtonTextOnly)
-        b.setStyleSheet("QToolButton::menu-indicator { image: none; width: 0; }")
+        b.setToolButtonStyle(Qt.ToolButtonIconOnly if icon_name else Qt.ToolButtonTextOnly)
+        b.setStyleSheet("QToolButton { padding-right: 19px; }"          # room for the mark
+                        "QToolButton::menu-indicator { image: none; width: 0; }")
+        b.installEventFilter(self._chevron_marks)
         b.setAccessibleName(text)
         return a, cap
 
@@ -171,6 +202,7 @@ class Bars:
         tb.setFloatable(False)
         tb.toggleViewAction().setVisible(False)
         tb.setContextMenuPolicy(Qt.PreventContextMenu)   # the window's menu: Customize…
+        self._chevron_marks = _ChevronMark(tb)           # paints the pull-downs' mark
         # Groups of related buttons, each in one capsule (macOS 27 toolbar style).
         items = {}
         items["sidebar"] = tb.addWidget(Capsule([self.a_sidebar]))
@@ -183,6 +215,8 @@ class Bars:
             show.addAction(a)
         self.a_show_menu, cap = self._pulldown("Show", show, "eye")
         items["show"] = tb.addWidget(cap)
+        self.a_select_menu, cap = self._pulldown("Select", self._select_menu(), "pick_part")
+        items["select"] = tb.addWidget(cap)
         units = Menu(self)                             # the shown unit (= View ▸ Units)
         for a in self.a_units:
             units.addAction(a)
@@ -204,6 +238,15 @@ class Bars:
         self.addToolBar(tb)
         self.apply_toolbar()
 
+    def _select_menu(self, menu=None):
+        """Part · mesh node, edge, triangle (meshes) · feature node, edge, face."""
+        menu = menu if menu is not None else Menu(self)
+        for key, a in self.a_select.items():
+            if key in ("mesh_node", "feature_node"):
+                menu.addSeparator()
+            menu.addAction(a)
+        return menu
+
     def apply_toolbar(self):
         """Show the groups Customize Toolbar… left on (and the views only for 3D files)."""
         hidden = hidden_items()
@@ -211,6 +254,8 @@ class Bars:
             on = key not in hidden
             if key == "views":
                 on = on and getattr(self.view_capsule, "has_shown", True)
+            if key == "select":
+                on = on and getattr(self, "_select_shown", True)
             slot.setVisible(on)
 
     def customize_toolbar(self):
@@ -249,6 +294,7 @@ class Bars:
         e.addSeparator()
         e.addAction(self.a_select_all)
         e.addAction(self.a_deselect)
+        self.m_select = self._select_menu(e.addMenu("Select"))   # the toolbar's Select ▾
         e.addSeparator()
         e.addAction(self.a_hide_sel)
         e.addAction(self.a_isolate_sel)
@@ -317,6 +363,18 @@ class Bars:
     def _zoom_window(self):
         self.showNormal() if self.isMaximized() else self.showMaximized()
 
+    def set_select_kind(self, kind):
+        """Select ▾: what a click in the 3D view picks (this window, every file)."""
+        if self.scene is not None:
+            self.scene.elements.set_kind(kind)
+            kind = self.scene.elements.kind            # a CAD file has no mesh nodes
+        self.select_kind = kind
+        a = self.a_select.get(kind) or self.a_select["part"]
+        a.setChecked(True)
+        self.a_select_menu.setIcon(icon(f"pick_{kind}"))
+        if self.scene is not None:
+            self.sidebar._show_info(self.scene.selected_parts)
+
     def _select_all(self):
         if self.scene:
             shown = [n for n in self.scene.names if self.scene.visible.get(n)]
@@ -362,7 +420,7 @@ class Bars:
                   self.a_parallel, self.a_select_all, self.a_deselect, self.a_hide_sel,
                   self.a_isolate_sel, self.a_show_all, self.a_find, self.a_next_tab,
                   self.a_prev_tab, self.a_inspector, *self.a_tabs, self.a_show_menu,
-                  self.a_units_menu]:
+                  self.a_units_menu, self.a_select_menu, *self.a_select.values()]:
             a.setEnabled(loaded)
         if loaded and self.scene is not None:
             self._fit_toolbar(self.scene.model)
@@ -374,7 +432,8 @@ class Bars:
     def _fit_toolbar(self, model):
         """Only the buttons that mean something for this file: 2D files are always seen
         from above (no views, no perspective); drawings are lines only (no edges or
-        faces toggles, no bounding box or origin)."""
+        faces toggles, no bounding box or origin, no Select ▾); mesh nodes, edges and
+        triangles are picked on meshes only."""
         flat, drawing = model.dim == 2, model.file_type == "drawing"
         hide = set()
         if flat:
@@ -382,7 +441,11 @@ class Bars:
         if drawing:
             hide |= {self.a_show[k] for k in ("mesh_edges", "feature_edges", "faces",
                                                "bbox", "origin")}
-        for a in (*self.a_views, self.a_parallel, *self.a_show.values()):
+        hide |= {self.a_select[k] for k in MESH_KINDS if model.kind != "mesh"}  # CAD
+        self._select_shown = not drawing             # lines only: a click picks the layer
+        self.m_select.menuAction().setVisible(not drawing)
+        for a in (*self.a_views, self.a_parallel, *self.a_show.values(),
+                  *self.a_select.values()):
             a.setVisible(a not in hide)              # menus and shortcuts too
         cap = self.view_capsule
         cap.show_only([b.defaultAction() for b in cap.buttons if b.defaultAction() not in hide])

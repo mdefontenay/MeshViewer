@@ -50,6 +50,7 @@ def test(app, files):
     check(not sc.state["bbox"] and not sc.state["origin"], "drawing: bbox, origin stay off")
     check(not sb.parts_section.isVisible(), "drawing: no layer list")
     import pyvista as pv
+    sc.set_theme(False)                  # light first (the app follows the Mac, maybe dark)
     cols = {tuple(round(c, 3) for c in sc._attrs["surf"][sc._index[n]].color)
             for n in sc.names}
     sc.set_theme(True)
@@ -145,6 +146,15 @@ def test(app, files):
     wait(app, lambda: w.scene.section._volume is not None, 30)
     app.processEvents()
     check(w.scene.section._vol_cut is not None, "Fluent 3D: cut cells on the section")
+    # Section: ✎ Edit Plane, right of X | Y | Z, shows the origin and normal under Normal to
+    check(sp.edit_plane.icon() is not None and not sp.edit_plane.isChecked()
+          and sp.advanced.isHidden(), "Section: Edit Plane off at first")
+    sp.edit_plane.setChecked(True)
+    app.processEvents()
+    lay = sp.details.layout().itemAt(1).layout()           # the Plane grid
+    idx = lay.indexOf(sp.advanced)
+    check(not sp.advanced.isHidden() and idx >= 0 and lay.getItemPosition(idx)[0] == 1,
+          "Section: Edit Plane shows the origin and normal right under Normal to")
     w.close()
 
 

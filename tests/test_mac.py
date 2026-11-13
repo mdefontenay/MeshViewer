@@ -1,4 +1,6 @@
 """2.5: the app organized the macOS way — menu bar, undo, Settings, names, title, beta."""
+import sys
+
 import numpy as np
 from conftest import check, open_file, run
 
@@ -38,8 +40,13 @@ def test(app, files):
     check({"Minimize", "Zoom", "Bring All to Front"} <= set(m["Window"])
           and {"Mesh Viewer Help", "Keyboard Shortcuts", "Release Notes"} <= set(m["Help"]),
           "Window and Help menus")
+    # macOS: the app menu items live in the no-window menu bar only (shared by every
+    # window); elsewhere they are in the window's File menu
+    app_menu = ({a.text() for top in app._global_menu.actions() if top.menu() is not None
+                 for a in top.menu().actions()} if sys.platform == "darwin" else set(m["File"]))
     check({"Inspector", "View Tools", "Measure Tools", "Analyze Tools", "Units", "Show",
-           "Customize Toolbar…"} <= set(m["View"]) and "Settings…" in m["File"]
+           "Customize Toolbar…"} <= set(m["View"]) and "Settings…" in app_menu
+          and (sys.platform != "darwin" or "Settings…" not in m["File"])
           and "Tools" not in m["View"],
           "View ▸ Inspector, its tabs, Units, Customize Toolbar…; Settings… (app menu on macOS)")
     in_menus = set()
@@ -50,6 +57,8 @@ def test(app, files):
             if a.menu() is not None:
                 walk(a.menu())
     walk(w.menuBar())
+    if sys.platform == "darwin":
+        walk(app._global_menu)                            # the app menu (Settings…)
     from PySide6.QtWidgets import QToolBar, QToolButton
     bar = w.findChildren(QToolBar)[0]                     # the window's toolbar only
     tb = {b.defaultAction() for b in bar.findChildren(QToolButton) if b.defaultAction()}
@@ -135,7 +144,7 @@ def test(app, files):
     # ---- names ---------------------------------------------------------------------------------
     from meshviewer.gui.sections import BY_KEY
     from meshviewer.core import plots
-    check(BY_KEY["quality"].title == "Mesh Quality" and BY_KEY["cells"].title == "Cell Quality"
+    check(BY_KEY["quality"].title == "Meshing Control" and BY_KEY["cells"].title == "Cell Quality"
           and plots.KINDS["section"]["title"] == "Section", "Title Case tool names; Section plot")
     check(sb.plots_panel.new.text() == "New Plot…", "New Plot…")
     w.close()
@@ -173,7 +182,7 @@ def test(app, files):
     st.remove("views")                                   # as if the file were new
     w = open_file(app, path)
     pump()
-    check(w.scene.model.quality == 0, "opens at Settings ▸ CAD mesh quality (Very coarse)")
+    check(w.scene.model.quality == 0, "opens at Settings ▸ CAD meshing control (Very coarse)")
     check(w.scene.measure.display_unit == "cm", "lengths shown in Settings ▸ Units (cm)")
     check(getattr(w, "_unit_dialog", None) is None or not w._unit_dialog.isVisible(),
           "Ask when opened: off -> no unit sheet")

@@ -64,7 +64,7 @@ others could benefit from it.
   the parts list on the left and the tools on the right (View · Measure · Analyze
   tabs), a light toolbar you can customize, one window per file with its name and "Edited" in
   the title. A second file opens instantly, without starting the app again.
-- **Settings** (⌘,): theme, the mesh quality CAD files open at, 3D background
+- **Settings** (⌘,): theme, the meshing control level CAD files open at, 3D background
   (gradient, color or a picture), axis label size, edge thickness, hiding edges while
   rotating, and the units files are shown and assumed in.
 
@@ -117,20 +117,21 @@ smoothly into the mesh.
 Open the Tecplot file a solver writes for its boundaries — FUN3D's
 `project_tec_boundary.dat` — with File ▸ Open (⌘O). Each boundary becomes a part,
 and the inspector opens on **Analyze ▸ Results**: pick a *Field* (any variable in
-the file, or *Speed*), switch on *Color the boundaries*, and the walls are colored
+the file, grouped by subject — Flow, Pressure, Wall… — *Speed*, or *Position X / Y / Z*),
+switch on *Color the boundaries*, and the walls are colored
 with a scale underneath. *Colors* shows the color maps themselves: pick one
 (rainbow by default; also blue–white–red, thermal, gray and blue). The range is the
 min to max of the boundaries shown, and follows when you hide or show one; type a
 *Min* / *Max* to fix it. Hiding parts and the section plane work as usual, and the
 numbers (max · mean · min) are for the visible boundaries.
 
-*Show ▸ Gradient* colors by how fast the field changes along the surface (|∇f| per
+*Color by ▸ Gradient* colors by how fast the field changes along the surface (|∇f| per
 unit length): shocks, leading edges and separation lines stand out.
 
-**Plots** (inspector, Measure tab) draw plots, each in
+**Plots** (inspector, Analyze tab, below Results) draw plots, each in
 its own tab under the 3D view. *New Plot…* asks for a name and a type — for now
 a **section**: the visible boundaries cut by a plane normal to X, Y or Z (type
-the position or drag the slider; the cut shows in 3D while the Measure tab is shown), with cp,
+the position or drag the slider; the cut shows in 3D while the Analyze tab is shown), with cp,
 Mach… or the shape (X / Y / Z) plotted along the cut, optionally against x/c, negative
 up for cp. *Points ▸ Import…* adds reference points from a CSV (test data, another
 solver: the first two numbers of each row), *Export…* saves the plotted points. Each file
@@ -227,6 +228,19 @@ Keep the MeshViewer folder where it is: this app runs the code from it.
   Press X, Y or Z again to look from the opposite side.
 - **Select**: click a part, or ⌘/⇧-click to add parts; Edit ▸ Select All (⌘A).
   Click empty space, press Esc or Edit ▸ Deselect All (⌥⌘A) to clear.
+  **Select ▾** in the toolbar (also Edit ▸ Select) chooses what a click picks: the
+  **Part**; on a mesh, a **Mesh Node**, **Mesh Edge** or **Mesh Triangle** (a mesh's
+  own cell); on any file, a **Feature Node**, **Feature Edge** or **Feature Face** —
+  a CAD face, or on a mesh the cells between its edges: sharp ones (over 30°) and
+  smooth ones, where the surface bends gently (a cylinder meeting a sphere) but at
+  least three mesh edges in a row are aligned or lie in one plane across it, from one
+  edge to another (rows that line up by chance and stop mid-face don't count). Show ▸
+  Feature Edges draws these on meshes too; on STEP / IGES / BREP files it draws the
+  borders of the CAD faces, as the CAD program does. On a mesh a
+  feature edge is straight or lies in one plane (it ends where its mesh edges stop
+  being aligned or coplanar, or turn sharply), and it is cut in two where another
+  feature edge meets it, also one of another boundary. What is picked shows in the accent color; under the parts list,
+  how many, with the node's coordinates, the edges' length or the faces' area.
 - **Undo** (⌘Z) and **Redo** (⇧⌘Z), with what they undo in the Edit menu: showing and
   hiding parts, isolating, colors, renames, hidden CAD faces and the Edit tool's
   rotations, mirrors and moves. The camera and the selection are not undone.
@@ -242,8 +256,8 @@ Keep the MeshViewer folder where it is: this app runs the code from it.
 - **Sidebar** (⌃⌘S, the button at the left of the toolbar): the parts / boundaries
   list, the whole height of the window — filter, selection, Show All / Hide All.
 - **Inspector** (⌥⌘I, the button at the right of the toolbar): the tools, in three tabs
-  — **View** (Mesh Quality, Section, Edit), **Measure** (Info, Measure, Plots),
-  **Analyze** (CFD, Cell Quality, Results); also View ▸ View / Measure / Analyze Tools
+  — **View** (Meshing Control, Section, Edit), **Measure** (Info, Measure),
+  **Analyze** (CFD, Cell Quality, Results, Plots); also View ▸ View / Measure / Analyze Tools
   (⌥⌘1–3). A tool shows up closed; click its title to open it. A tool works while it
   is in view: Measure measures, Plots draw their cuts in 3D, Cell Quality and CFD
   compute only while their tab is shown. Every tool is there for every file; one that
@@ -255,17 +269,17 @@ Keep the MeshViewer folder where it is: this app runs the code from it.
   show X and Y only. The list of a 2D mesh has two groups: *Faces* (the cells) and
   *Boundaries* (the lines); right-click says Hide Face / Hide Boundary. DXF drawings show lines only, all in one color
   (white on black in dark mode, black in light mode), without a layer list.
-- **Toolbar**: Sidebar · Fit, Isometric, X, Y, Z, Perspective · Show ▾ · the unit ▾ ·
+- **Toolbar**: Sidebar · Fit, Isometric, X, Y, Z, Perspective · Show ▾ · Select ▾ · the unit ▾ ·
   Export, Screenshot · Inspector. View ▸ Customize Toolbar… (or a right-click on the
   toolbar) picks which groups it shows (Settings can be added); everything is in the
   menus too.
   - **Info**: the file's unit (*File unit*), extent per axis, faces, points, edge
     lengths, volume cells.
-  - **Mesh Quality** (STEP/IGES/BREP): five levels; the part is re-meshed in the
+  - **Meshing Control** (STEP/IGES/BREP): five levels; the part is re-meshed in the
     background (OpenCASCADE's own triangles: few of them, quickly).
   - **Section**: the plane controls. Switching it on opens them, off folds them.
-    *Plane*: Normal to X / Y / Z, Flip, the Position slider, Center; the gear opens the
-    exact Origin / Normal; *Show*: Fill cut faces, Show plane. For CGNS / UGRID meshes, *Fill cut faces*
+    *Plane*: Normal to X / Y / Z, the pencil (*Edit Plane*: the exact Origin / Normal,
+    right under it), Flip, the Position slider, Center; *Show*: Fill cut faces, Show plane. For CGNS / UGRID meshes, *Fill cut faces*
     shows the volume cells the plane cuts.
   - **Measure**: measuring is on while this tool is open.
     - *Distance*: click two points — the distance and ΔX, ΔY, ΔZ between them.
@@ -285,12 +299,21 @@ Keep the MeshViewer folder where it is: this app runs the code from it.
     the standard one for air (grayed out, from the altitude), typed for water (empty =
     15 °C); the **?** next to *Target y+* helps pick it (resolve the wall or wall
     functions) and can set it for you.
-  - **Results** (Tecplot `.dat` files): *Field*, *Colors* (the color map), *Show*
-    (value or gradient), *Values in* / *Shown in* (fields with a unit: p, ρ, u, T…),
-    *Color the boundaries*, the color scale, *Min* / *Max* (empty = auto).
+  - **Results** (Tecplot `.dat` files), in two groups:
+    - the field: *Field* (grouped by subject), *Unit in file* (what the file's numbers
+      are in: *As written* — often non-dimensional — or a unit) and *Shown in* (once
+      the file's unit is known). Fields Mesh Viewer knows — CFD: pressure, cp, Mach,
+      velocity, density, temperature, y+, cf, wall shear, heat flux, k, ε, ω, viscosity…;
+      FEA: displacement, von Mises / principal / component stresses, strains, safety
+      factor, reaction force — offer their usual units, or say they have none (Mach,
+      y+, cp…). Any other field can be given any unit. Positions: the file's unit,
+      shown in the toolbar's until another is picked.
+    - the colors: *Color the boundaries*, *Color by* (value or gradient), *Scale*
+      (linear or log: by powers of ten, values above zero), *Colors* (the color map),
+      the color scale, *Min* / *Max* (empty = auto).
   - **Plots**: *New Plot…* (name + type: section) → a fold-out here
     (opening it shows its plot; the eye shows its cut in 3D) with a card: *Plane* (normal
-    to X / Y / Z, position, slider; the gear: origin and normal in any direction), *Plot*
+    to X / Y / Z and the pencil: origin and normal in any direction; position, slider), *Plot*
     (values, along, normalize = x/c, negative up), *Points* (import / export CSV), and
     *Rename… · Delete* under it; and a tab under the 3D view with the plot (hover a line
     for its numbers; right-click the tab to open, rename or delete it; many tabs scroll
@@ -321,7 +344,7 @@ Keep the MeshViewer folder where it is: this app runs the code from it.
   (mm · cm · m · in · ft, also View ▸ Units) picks the unit measurements and axis
   labels are shown in.
 - **Settings** (⌘, in the app menu, or a toolbar button via Customize Toolbar…), the same in every window:
-  - *General*: theme, parts list spacing, the mesh quality STEP / IGES / BREP open at
+  - *General*: theme, parts list spacing, the meshing control level STEP / IGES / BREP open at
     (or the one used last time).
   - *Appearance*: 3D background, shading, axis label size, edge line thickness, hide
     edges while moving.

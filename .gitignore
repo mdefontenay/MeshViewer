@@ -21,6 +21,3 @@ Claude outputs/
 # test files (tests/fixtures.py writes them) and your own test files
 tests/_data/
 test_files/
-
-# SF Symbols exports: not shared (the app asks macOS for the symbols)
-/icons/

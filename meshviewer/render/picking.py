@@ -99,6 +99,9 @@ class Picking:
                              additive)
             m._changed()
             return
+        if self.elements.kind != "part":             # Select ▾: a node, an edge, a face…
+            self.elements.click(name, cell, pos, additive)
+            return
         if additive and name:
             self.toggle_part(name)
         else:

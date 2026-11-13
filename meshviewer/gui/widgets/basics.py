@@ -6,11 +6,12 @@ from functools import lru_cache
 import re
 
 from PySide6.QtCore import (
-    Property, QEasingCurve, QPropertyAnimation, QRectF, QRegularExpression, QSize, Qt, QUrl,
-    Signal,
+    Property, QEasingCurve, QPropertyAnimation, QRect, QRectF, QRegularExpression, QSize, Qt,
+    QUrl, Signal,
 )
 from PySide6.QtGui import (
-    QColor, QDesktopServices, QIcon, QPainter, QPen, QPixmap, QRegularExpressionValidator,
+    QColor, QDesktopServices, QIcon, QPainter, QPalette, QPen, QPixmap,
+    QRegularExpressionValidator,
 )
 from PySide6.QtWidgets import (
     QAbstractButton, QDoubleSpinBox, QFrame, QHBoxLayout, QLabel, QLineEdit,
@@ -211,12 +212,53 @@ class NoWheelSpinBox(QDoubleSpinBox):
 # ---------------------------------------------------------------------------
 
 class Menu(QMenu):
+    """The app's pop-up menu (rounded, accent highlight). Checkable items with an icon
+    (View ▸ Show) get a check mark column on the left, as in macOS menus: Qt's styled
+    menus draw the icon in the check's place, so what is on didn't show."""
+
+    CHECK_COLUMN = 18                            # px left of the icons, for the mark
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("ContextMenu")
         # Transparent window so the rounded corners show (macOS adds the shadow).
         self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
+        self.aboutToShow.connect(self._check_column)
+
+    def _marked(self):
+        return [a for a in self.actions() if a.isCheckable() and not a.icon().isNull()]
+
+    def _check_column(self):
+        on = bool(self._marked())
+        if self.property("checks") != on:
+            self.setProperty("checks", on)       # #ContextMenu[checks="true"]: room
+            self.style().unpolish(self)
+            self.style().polish(self)
+
+    def paintEvent(self, e):
+        super().paintEvent(e)
+        marked = [a for a in self._marked() if a.isChecked() and a.isVisible()]
+        if not marked:
+            return
+        from meshviewer.gui.icons import icon
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        col = self.CHECK_COLUMN
+        for a in marked:
+            r = self.actionGeometry(a)                # the row, the margin included
+            on_it = a is self.activeAction() and a.isEnabled()
+            ic = _white_check() if on_it else icon("checkmark")
+            ic.paint(p, QRect(r.left() + 4, r.center().y() - 6, 12, 12), Qt.AlignCenter,
+                     QIcon.Normal if a.isEnabled() else QIcon.Disabled)
+        p.end()
+
+
+@lru_cache(maxsize=1)
+def _white_check():
+    """The check mark on the highlighted (accent) row: white, as the text."""
+    from meshviewer.gui.icons import icon
+    return icon("checkmark", role=QPalette.HighlightedText)
 
 
 # ---------------------------------------------------------------------------

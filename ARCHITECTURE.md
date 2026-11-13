@@ -25,10 +25,12 @@ Imports only go down: gui -> render -> core. Imports are absolute
 | volume cells (CGNS, UGRID, .msh) | `core/mesh/cgns.py` `read_volume`, `core/mesh/polyhedra.py` (NGON/NFACE), `core/mesh/volume.py` |
 | CFD numbers (y+, atmosphere, layers) | `core/cfd.py`; exports for meshers `core/cfd_export.py` |
 | units, number formatting | `core/units.py` (unit tables, `fmt`, `show_length`, `nice_length`, `nice_num`) |
-| solution fields, color scales | `core/fields.py` (`solution_fields`, `ramp_rgb`, `COLORMAPS`, `DEFAULT_MAP`; F15 `gradient_magnitude`, `cell_jumps`) |
+| solution fields, color scales | `core/fields.py` (`solution_fields`, `ramp_rgb` (linear or log), `COLORMAPS`, `DEFAULT_MAP`; F15 `gradient_magnitude`, `cell_jumps`) |
+| what a field is (its name, group, unit) | `core/field_kinds.py` (`KINDS`: the usual CFD and FEA fields — title, group in the Field menu, quantity or none; `field_kind(name)`); their units `core/units.py` (`QUANTITIES`, `QUANTITY_TITLES`, `unit_quantity`) |
 | Plots (each plot → a tab) | `core/plots.py` (`KINDS`: defaults + compute per kind; CSV), `gui/panels/plots.py` (`PlotsPanel`, `EDITORS` per kind), `gui/pages/plots.py` (`PlotPage`), tabs in `gui/window_pages.py` (`_rebuild_view_bar`, `_show_page("plot:<id>")`), the 3D cut `render/overlays.py` `CutLineView`. A new kind: an entry in `KINDS` + an editor in `EDITORS` |
 | 2D cut geometry (inflation layers) | `core/geometry2d.py` |
-| the 3D view (`Scene`) | `render/scene.py`: parts, colors, visibility, selection, Display toggles. The rest of the class, one subject per file: `render/picking.py` (clicks), `render/camera.py` (views, 2D lock, lines hidden while moving), `render/editing.py` (new mesh quality, rename, rotate / mirror / move), `render/appearance.py` (theme, background, grid, axes, origin, bounding box), `render/screenshot.py`; colors and sizes in `render/style.py` |
+| the 3D view (`Scene`) | `render/scene.py`: parts, colors, visibility, selection, Display toggles. The rest of the class, one subject per file: `render/picking.py` (clicks; Select ▾ in `render/elements.py`), `render/camera.py` (views, 2D lock, lines hidden while moving), `render/editing.py` (new mesh quality, rename, rotate / mirror / move), `render/appearance.py` (theme, background, grid, axes, origin, bounding box), `render/screenshot.py`; colors and sizes in `render/style.py` |
+| what a click picks (Select ▾: part, mesh node / edge / triangle, feature node / edge / face) | `render/elements.py` (`Elements`, `scene.elements`: the kind, the picked items, their accent drawing, the line under the parts list); feature faces, edges and nodes `core/features.py` (`Features`, `components`; on meshes sharp edges `_hysteresis` + `_tidy`, smooth edges `_smooth_edges` kept by `_distinct` (crease or change of bend) and `_anchored`, on CAD the face borders, drawn by Show ▸ Feature Edges through `Elements.feature_lines`, straight / planar edges `_runs`, cut where others meet them `cut_at_junctions`); the menu `gui/window_bars.py` (`a_select`, `set_select_kind`) |
 | the 3D view widget (when frames are drawn) | `gui/viewport.py` |
 | overlays (flow arrows, y+, walls, results) | `render/overlays.py`; cell quality colors `render/quality_overlay.py` |
 | section plane, measurements | `render/section.py`, `render/measure.py` |
@@ -42,7 +44,7 @@ Imports only go down: gui -> render -> core. Imports are absolute
 | Settings (⌘,) | `gui/dialogs/settings.py` (the window, a tab per subject); the values in `MeshViewerApp.appearance` / `.prefs` (`gui/app.py`), saved through `gui/store.py` |
 | shared form pieces (label · field · unit · ? rows, caption, divider line, one-of-many buttons) | `gui/forms.py` |
 | switches, menus, number fields | `gui/widgets/` (import from the package): `basics.py`, `sections.py` (folding section), `select.py` (pop-up choices), `numbers.py`, `formulas.py` |
-| icons | `gui/icons.py`: `SF` maps icon names to SF Symbols (drawn by macOS at run time, via PyObjC); `DRAWINGS` are the fallbacks |
+| icons | `gui/icons.py`: `SF` maps icon names to SF Symbols (drawn by macOS at run time, via PyObjC); `FILES` the app's own SVGs in `icons/` (Select ▾; white on clear, recolored when drawn; copied into the app by `setup.py`); `DRAWINGS` are the fallbacks |
 | colors / stylesheet | `gui/style.py` |
 | per-file memory | `gui/memory.py` (`capture` / `restore`, one key per setting) |
 | the window | `gui/window.py` (opening a file, units, appearance, closing); its actions, toolbar and menus `gui/window_bars.py`; pages and tabs under the view `gui/window_pages.py`; Export and Save Screenshot `gui/window_export.py` |
@@ -90,7 +92,7 @@ Imports only go down: gui -> render -> core. Imports are absolute
 - **No version notes in code**: history goes in CHANGELOG.md, not in comments.
 - **Words on screen** (Apple's rules): American spelling (color, center, gray, meters).
   Title Case for menus and their items, buttons, tabs, window titles and tool names
-  ("Mesh Quality", "Save Screenshot…"); sentence case for labels, switches, notes and
+  ("Meshing Control", "Save Screenshot…"); sentence case for labels, switches, notes and
   hover texts ("Fill cut faces"). One name per thing: a panel in the inspector is a **tool**, a
   plot under the view is a **plot** (not a measurement: that is the Measure tool), the
   CAD side of CFD is **Inflation Layers**, a cut by a plane is a **section**, a face of a

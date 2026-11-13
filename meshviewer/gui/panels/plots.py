@@ -4,7 +4,9 @@
       [ New Plot… ]
       ▾ Root                                (opening it shows its plot)
         ┌ Plane ─────────────────────────────────────┐
-        │ Normal to  [ X | Y | Z ]                    │
+        │ Normal to  [ X | Y | Z ] [ ✎ ]              │
+        │ Origin     [x] [y] [z]   (✎ Edit Plane)     │
+        │ Normal     [x] [y] [z]                      │
         │ Position   [ auto: 0.35 ] m                 │
         │            ───●──────────  (slider)         │
         │ Plot ──────────────────────────────────────  │
@@ -26,6 +28,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QActionGroup
 from PySide6.QtWidgets import (
@@ -37,6 +40,7 @@ from meshviewer.core import plots
 from meshviewer.core.fields import SPEED
 from meshviewer.core.units import nice_num
 from meshviewer.gui.access import name_controls
+from meshviewer.gui.panels.section import edit_plane_action
 from meshviewer.gui.forms import _grid, _label, _link, rule, segmented
 from meshviewer.gui.sheets import ask_open, ask_save, ask_text, save_folder
 from meshviewer.gui.widgets import (
@@ -62,13 +66,11 @@ def _switch_row(text, tip, slot):
 
 
 def value_label(v):
-    """Menu text of a value: the results' names for fields, 'Position X' for X."""
-    from meshviewer.gui.panels.results import NAMES
+    """Menu text of a value: the field's usual name (as in Results), 'Position X' for X."""
+    from meshviewer.gui.panels.results import field_label
     if v.startswith(plots.COORD):
         return f"Position {v[len(plots.COORD):].upper()} (the shape)"
-    if v == SPEED:
-        return "Speed |u, v, w|"
-    return NAMES.get(v.lower(), v)
+    return field_label(v)
 
 
 # ---- the editor of a section plot ---------------------------------------------------------
@@ -94,34 +96,33 @@ class SectionEditor(QWidget):
         lay.addWidget(card)
 
         # -- where the plane cuts (laid out like the Section section)
-        head = QHBoxLayout()
-        head.addWidget(_label("Plane", "Caption"))
-        head.addStretch(1)
-        self.adv_button = IconToggle("advanced", "Advanced: the plane's origin and normal, "
-                                     "in any direction")
-        head.addWidget(self.adv_button)
-        cl.addLayout(head)
+        cl.addWidget(_label("Plane", "Caption"))
         g = _grid()
         self.axis, cap = segmented(self, [(a, a.upper(), f"The plane is normal to {a.upper()}")
                                            for a in plots.AXES], self._axis)
         self.axis_group = next(iter(self.axis.values())).actionGroup()
         self.axis_group.setExclusionPolicy(QActionGroup.ExclusionPolicy.ExclusiveOptional)
+        self.edit_plane = edit_plane_action(self)        # ✎: origin and normal, any way
+        row = QHBoxLayout()
+        row.setSpacing(6)
+        row.addWidget(cap)
+        row.addWidget(Capsule([self.edit_plane], name="Segmented"))
+        row.addStretch(1)
         g.addWidget(_label("Normal to"), 0, 0)
-        g.addWidget(cap, 0, 1, 1, 3, Qt.AlignLeft)
+        g.addLayout(row, 0, 1, 1, 3)
         self.pos = NumberField()
         self.pos.setToolTip("Where the plane is, along its normal (the X, Y or Z coordinate "
                             "when normal to one). Empty = the middle")
         self.pos.valueChanged.connect(self._pos_typed)
         self.pos_unit = _label("", "AxisLabel")
-        g.addWidget(_label("Position"), 1, 0)
-        g.addWidget(self.pos, 1, 1)
-        g.addWidget(self.pos_unit, 1, 2)
+        g.addWidget(_label("Position"), 2, 0)
+        g.addWidget(self.pos, 2, 1)
+        g.addWidget(self.pos_unit, 2, 2)
         self.slider = NoWheelSlider(Qt.Horizontal)
         self.slider.setRange(0, SLIDER_STEPS)
         self.slider.setToolTip("Slide the plane across the model")
         self.slider.valueChanged.connect(self._slid)
-        g.addWidget(self.slider, 2, 1, 1, 3)
-        cl.addLayout(g)
+        g.addWidget(self.slider, 3, 1, 1, 3)
         self.advanced = QWidget()                      # origin / normal, as in Section
         ag = QGridLayout(self.advanced)
         ag.setContentsMargins(0, 2, 0, 0)
@@ -145,8 +146,9 @@ class SectionEditor(QWidget):
                 b.valueChanged.connect(slot)
                 ag.addWidget(b, r, c)
         self.advanced.setVisible(False)
-        self.adv_button.toggled.connect(self.advanced.setVisible)
-        cl.addWidget(self.advanced)
+        self.edit_plane.toggled.connect(self.advanced.setVisible)
+        g.addWidget(self.advanced, 1, 0, 1, 4)         # right under Normal to
+        cl.addLayout(g)
         cl.addWidget(rule())
 
         # -- what is plotted
@@ -249,8 +251,11 @@ class SectionEditor(QWidget):
         self.sync_axis()
         self.value.blockSignals(True)
         self.value.clear()
-        for v in plots.values_of(self.scene.model.parts):
-            self.value.addItem(value_label(v), v)
+        from meshviewer.gui.panels.results import grouped
+        for title, group in grouped(plots.values_of(self.scene.model.parts)):
+            self.value.addSection(title)                # as Results ▸ Field
+            for v in group:
+                self.value.addItem(value_label(v), v)
         i = self.value.findData(m.get("value"))
         self.value.setCurrentIndex(i if i >= 0 else 0)
         self.value.blockSignals(False)
@@ -274,8 +279,12 @@ class SectionEditor(QWidget):
         self.pos.setValue(None if p is None else p * s)
         self.pos.blockSignals(False)
         here = mid if p is None else p
+        # the visible boundaries can be flat along the normal (a symmetry plane cut
+        # across): the range is then ~0 wide, so keep the slider within its ends
+        frac = (here - lo) / (hi - lo) if hi > lo else 0.0
+        frac = min(max(frac, 0.0), 1.0) if np.isfinite(frac) else 0.0
         self.slider.blockSignals(True)
-        self.slider.setValue(int(round((here - lo) / (hi - lo) * SLIDER_STEPS)) if hi > lo else 0)
+        self.slider.setValue(int(round(frac * SLIDER_STEPS)))
         self.slider.blockSignals(False)
         o, n = plots.section_plane(self.m, self.scene.model.parts, self._names())
         for boxes, vals in ((self.origin, o * s), (self.normal, n)):

@@ -1,6 +1,8 @@
 """Toolbar / sidebar icons.
 
-On a Mac, the icons are SF Symbols asked from macOS itself when they are drawn (SF
+The app's own icons (Select ▾: part, nodes, edges, faces) are SVG files in icons/
+(FILES), white on clear, recolored when drawn. On a Mac, the other icons are SF
+Symbols asked from macOS itself when they are drawn (SF
 below: icon name -> symbol name; browse the names in Apple's SF Symbols app). Nothing
 of Apple's is stored in this project. Elsewhere, or if a symbol is missing (older
 macOS, no PyObjC), the icon is drawn here as vectors in the same line style.
@@ -10,7 +12,9 @@ mode and stay sharp on Retina screens.
 """
 from __future__ import annotations
 
+import os
 import sys
+from pathlib import Path
 
 from PySide6.QtCore import QPointF, QRect, QRectF, QSize, Qt
 from PySide6.QtGui import (
@@ -33,6 +37,9 @@ SF = {   # icon name -> SF Symbol
     "advanced": "gearshape",
     "settings_general": "gearshape", "settings_appearance": "paintpalette",
     "settings_units": "ruler",
+    "chevron_down": "chevron.down",        # pull-downs and pop-up menus
+    "checkmark": "checkmark",              # what is on, in menus with icons
+    "pencil": "pencil",                    # Edit Plane: the origin and normal
 }
 _sf_cache = {}
 
@@ -212,6 +219,31 @@ def _draw_mesh_quality(p):
         _line(p, a, b)
 
 
+def _draw_chevron_down(p):
+    path = QPainterPath(QPointF(4, 6.5))
+    path.lineTo(QPointF(9, 11.5))
+    path.lineTo(QPointF(14, 6.5))
+    p.drawPath(path)
+
+
+def _draw_checkmark(p):
+    path = QPainterPath(QPointF(3.5, 9.5))
+    path.lineTo(QPointF(7.5, 13.5))
+    path.lineTo(QPointF(14.5, 4.5))
+    p.drawPath(path)
+
+
+def _draw_pencil(p):
+    path = QPainterPath(QPointF(4, 14))
+    path.lineTo(QPointF(4.6, 11))
+    path.lineTo(QPointF(12, 3.6))
+    path.lineTo(QPointF(14.4, 6))
+    path.lineTo(QPointF(7, 13.4))
+    path.closeSubpath()
+    p.drawPath(path)
+    _line(p, (10.5, 5.1), (12.9, 7.5))
+
+
 def _draw_plus(p):
     p.drawEllipse(QPointF(9, 9), 7, 7)
     _line(p, (9, 5.5), (9, 12.5))
@@ -305,7 +337,66 @@ def _draw_origin(p):
     p.restore()
 
 
+# --- Select ▾: what a click picks ------------------------------------
+def _dot(p, x, y, r=1.6):
+    p.save()
+    p.setBrush(QColor(p.pen().color()))
+    p.drawEllipse(QPointF(x, y), r, r)
+    p.restore()
+
+
+def _draw_pick_mesh_node(p):
+    for x in (5.5, 12.5):
+        for y in (5.5, 12.5):
+            _dot(p, x, y, 2.2)
+
+
+def _draw_pick_mesh_edge(p):
+    _line(p, (3.5, 14.5), (14.5, 3.5))
+
+
+def _draw_pick_mesh_cell(p):
+    _line(p, (9, 2.5), (16, 15), (2, 15), (9, 2.5))
+
+
+def _draw_pick_feature_node(p):
+    p.drawEllipse(QPointF(9, 9), 7, 7)
+    _dot(p, 9, 9, 2.4)
+
+
+def _draw_pick_feature_edge(p):
+    path = QPainterPath(QPointF(3.5, 4))
+    path.cubicTo(QPointF(13, 3), QPointF(5, 15), QPointF(14.5, 14))
+    p.drawPath(path)
+    _dot(p, 3.5, 4)
+    _dot(p, 14.5, 14)
+
+
+def _draw_pick_feature_face(p):
+    p.save()
+    pen = QPen(p.pen())
+    pen.setDashPattern([2, 1.6])
+    p.setPen(pen)
+    p.drawRoundedRect(QRectF(2.5, 2.5, 13, 13), 2, 2)
+    p.restore()
+    c = QColor(p.pen().color())
+    p.fillPath(_rounded(QRectF(5.5, 5.5, 7, 7), 1.2), c)
+
+
+def _rounded(rect, r):
+    path = QPainterPath()
+    path.addRoundedRect(rect, r, r)
+    return path
+
+
 DRAWINGS = {
+    "pick_part": _draw_cube,
+    "pick_mesh_node": _draw_pick_mesh_node,
+    "pick_mesh_edge": _draw_pick_mesh_edge,
+    "pick_mesh_cell": _draw_pick_mesh_cell,
+    "pick_feature_node": _draw_pick_feature_node,
+    "pick_feature_edge": _draw_pick_feature_edge,
+    "pick_feature_face": _draw_pick_feature_face,
     "mesh_edges": _draw_mesh_edges,
     "feature_edges": _draw_feature_edges,
     "faces": _draw_faces,
@@ -319,6 +410,9 @@ DRAWINGS = {
     "edit_unit": _draw_edit_unit,
     "plots": _draw_plots,
     "eye": _draw_eye,
+    "chevron_down": _draw_chevron_down,
+    "checkmark": _draw_checkmark,
+    "pencil": _draw_pencil,
     "eye_off": _draw_eye_off,
     "advanced": _draw_advanced,
     "ruler": _draw_ruler,
@@ -344,13 +438,62 @@ DRAWINGS = {
 }
 
 
+# The app's own icons (icons/*.svg, white on clear): drawn in the text color like the
+# others. Select ▾: what a click picks.
+FILES = {
+    "pick_part": "part.svg", "pick_mesh_node": "mesh_node.svg",
+    "pick_mesh_edge": "mesh_edge.svg", "pick_mesh_cell": "mesh_face.svg",
+    "pick_feature_node": "feature_node.svg", "pick_feature_edge": "feature_edge.svg",
+    "pick_feature_face": "feature_face.svg",
+}
+FILE_SCALE = 0.86            # as big as an SF Symbol looks in the same square
+_file_cache = {}
+
+
+def _icon_file(name):
+    """Path of an icon file (the source folder's icons/, or inside the app), or None."""
+    if name not in FILES:
+        return None
+    folders = [Path(__file__).resolve().parents[2] / "icons"]
+    if os.environ.get("RESOURCEPATH"):                     # the app (py2app)
+        folders.insert(0, Path(os.environ["RESOURCEPATH"]) / "icons")
+    for folder in folders:
+        if (folder / FILES[name]).exists():
+            return folder / FILES[name]
+    return None
+
+
+def _file_image(path, px, color):
+    """The SVG file drawn px × px (centered, its own proportions) in `color`."""
+    key = (str(path), px, color.rgba())
+    img = _file_cache.get(key)
+    if img is None:
+        from PySide6.QtSvg import QSvgRenderer
+        r = QSvgRenderer(str(path))
+        img = QImage(px, px, QImage.Format_ARGB32_Premultiplied)
+        img.fill(Qt.transparent)
+        if r.isValid():
+            w, h = r.defaultSize().width(), r.defaultSize().height()
+            k = px * FILE_SCALE / max(w, h, 1)
+            p = QPainter(img)
+            p.setRenderHint(QPainter.Antialiasing)
+            r.render(p, QRectF((px - w * k) / 2, (px - h * k) / 2, w * k, h * k))
+            p.setCompositionMode(QPainter.CompositionMode_SourceIn)  # keep the shape, recolor
+            p.fillRect(img.rect(), color)
+            p.end()
+        _file_cache[key] = img
+    return img
+
+
 class _Engine(QIconEngine):
-    def __init__(self, draw, role=QPalette.WindowText, on_accent=False, symbol=None):
+    def __init__(self, draw, role=QPalette.WindowText, on_accent=False, symbol=None,
+                 path=None):
         super().__init__()
         self.draw = draw
         self.role = role
         self.on_accent = on_accent      # checked: accent-coloured (icon bar), else white
         self.symbol = symbol            # SF Symbol name (macOS), else drawn
+        self.path = path                # the app's own SVG (icons/), else the above
 
     def paint(self, p, rect, mode, state):
         pal = QGuiApplication.palette()
@@ -359,6 +502,13 @@ class _Engine(QIconEngine):
         if state == QIcon.On and mode != QIcon.Disabled:
             # checked toolbar toggles sit on the accent colour; icon bar ones are accent
             color = pal.color(QPalette.Highlight) if self.on_accent else QColor("white")
+        if self.path is not None:
+            dpr = p.device().devicePixelRatioF() if p.device() is not None else 1.0
+            side = min(rect.width(), rect.height())
+            img = _file_image(self.path, max(8, round(side * dpr)), color)
+            p.drawImage(QRectF(rect.x() + (rect.width() - side) / 2,
+                               rect.y() + (rect.height() - side) / 2, side, side), img)
+            return
         if self.symbol:
             dpr = p.device().devicePixelRatioF() if p.device() is not None else 1.0
             px = max(8, round(min(rect.width(), rect.height()) * dpr))
@@ -393,7 +543,7 @@ class _Engine(QIconEngine):
         return self.scaledPixmap(size, mode, state, 1.0)
 
     def clone(self):
-        e = _Engine(self.draw, self.role, self.on_accent, self.symbol)
+        e = _Engine(self.draw, self.role, self.on_accent, self.symbol, self.path)
         _engines.append(e)
         return e
 
@@ -462,6 +612,19 @@ def _sf_render(symbol, px, color):
 
 
 def icon(name, role=QPalette.WindowText, on_accent=False) -> QIcon:
-    e = _Engine(DRAWINGS[name], role, on_accent, SF.get(name))
+    e = _Engine(DRAWINGS[name], role, on_accent, SF.get(name), _icon_file(name))
     _engines.append(e)
     return QIcon(e)
+
+
+_chevrons = {}
+
+
+def paint_chevron(p, cx, cy, enabled=True, role=QPalette.WindowText, size=10):
+    """The pull-down mark (SF Symbol chevron.down) centered on (cx, cy), `size` px,
+    grayed when disabled: toolbar pull-downs and pop-up menus."""
+    ic = _chevrons.get(role)
+    if ic is None:
+        ic = _chevrons[role] = icon("chevron_down", role)
+    ic.paint(p, QRect(round(cx - size / 2), round(cy - size / 2), size, size), Qt.AlignCenter,
+             QIcon.Normal if enabled else QIcon.Disabled)

@@ -37,6 +37,7 @@ class Editing:
         self._refresh_face_overlay()
         self.set_selection(self.selected_parts, render=False)
         self.measure._changed()
+        self.elements.parts_changed()
         self.p.camera_position = cam
         self.p.render()
 

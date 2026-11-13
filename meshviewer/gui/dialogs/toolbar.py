@@ -16,6 +16,7 @@ ITEMS = (
     ("sidebar", "Sidebar"),
     ("views", "Views: Fit, Isometric, X, Y, Z, Perspective"),
     ("show", "Show (edges, faces, axes, grid…)"),
+    ("select", "Select (part, node, edge, face)"),
     ("units", "Units"),
     ("export", "Export"),
     ("screenshot", "Screenshot"),

@@ -33,6 +33,7 @@ from meshviewer.core.polys import bare, one_thread, SMALL_PART
 from meshviewer.render.appearance import Appearance
 from meshviewer.render.camera import Camera
 from meshviewer.render.editing import Editing
+from meshviewer.render.elements import Elements
 from meshviewer.render.measure import Measure
 from meshviewer.render.overlays import CutLineView, FlowView, ResultsView, WallView, YplusView
 from meshviewer.render.picking import Picking
@@ -115,6 +116,7 @@ class Scene(Picking, Camera, Editing, Appearance, Screenshots):
         self.inflation_settings = None            # Inflation Layers (CAD), remembered too
         self.inflation_page = None                # Inflation page tab, zoom… (memory)
         self.measure = Measure(self)
+        self.elements = Elements(self)            # Select ▾: what a click picks
         self.set_theme(dark, render=False)
         self.set_parallel(self.state["parallel"])
         self.set_feature_edges(self.state["feature_edges"], render=False)
@@ -303,6 +305,7 @@ class Scene(Picking, Camera, Editing, Appearance, Screenshots):
 
     def _after_visibility_change(self):
         rv = getattr(self, "results", None)                 # only visible boundaries
+        self.elements.refresh(render=False, notify=False)   # picks of hidden parts go
         cbs = list(getattr(self, "visibility_listeners", []))
         for cb in cbs:                                      # Results (auto range), Plots
             cb()
@@ -510,6 +513,12 @@ class Scene(Picking, Camera, Editing, Appearance, Screenshots):
             if flat and not part.GetNumberOfPolys():
                 edges.append(pv.PolyData())          # 2D boundary lines: drawn already
                 continue
+            if self.model.file_type == "mesh" or (
+                    self.model.file_type == "cad" and "face_id" in part.cell_data):
+                # meshes: sharp and smooth edges; CAD: the borders of its faces (as in
+                # the CAD program) — what Select picks
+                edges.append(self.elements.feature_lines(n, self.hidden_faces.get(n)))
+                continue
             # 2D zones: their outline, so boundaries that are hidden or have no name show
             with one_thread(part.n_cells < SMALL_PART):
                 edges.append(part.extract_feature_edges(
@@ -540,4 +549,4 @@ class Scene(Picking, Camera, Editing, Appearance, Screenshots):
         """Everything the section plane should cut."""
         return [self._surf, self._edges, self._outline, *self._face_actors,
                 *self.quality.actors(), *self.yplus_view.actors(),
-                *self.walls.actors(), *self.results.actors()]
+                *self.walls.actors(), *self.results.actors(), *self.elements.actors()]

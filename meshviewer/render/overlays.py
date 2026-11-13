@@ -200,12 +200,12 @@ class ResultsView(YplusView):
 
     def __init__(self, scene):
         super().__init__(scene)
-        self.spec = None                      # (field, lo, hi, stops) while shown
+        self.spec = None                      # (field, lo, hi, stops, log) while shown
 
-    def show_field(self, field, lo, hi, stops):
+    def show_field(self, field, lo, hi, stops, log=False):
         self.hide(render=False)
         sc = self.scene
-        self.spec = (field, lo, hi, stops)
+        self.spec = (field, lo, hi, stops, log)
         polys, self._pieces = [], []          # (part name, "point" | "cell", RGB)
         for n in sc.names:
             part = sc.model.parts.get(n)
@@ -215,7 +215,7 @@ class ResultsView(YplusView):
             if vals is None:
                 continue
             surf = bare(part)
-            rgb = ramp_rgb(vals, lo, hi, stops)
+            rgb = ramp_rgb(vals, lo, hi, stops, log)
             (surf.point_data if where == "point" else surf.cell_data)["ResultRGB"] = rgb
             polys.append(surf)
             self._pieces.append((n, where, rgb))

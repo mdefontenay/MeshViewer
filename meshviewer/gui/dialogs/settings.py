@@ -2,7 +2,7 @@
 window. Like any Mac app's settings: a window of its own with a tab per subject in its
 toolbar, every change applied at once and remembered — no OK button.
 
-    General      theme, parts list spacing, mesh quality CAD files open at
+    General      theme, parts list spacing, the meshing control CAD files open at
     Appearance   the 3D view: background, shading, axis label size, edge lines
     Units        the unit lengths are shown in, the unit of files that don't say theirs,
                  whether to ask when a file is opened the first time
@@ -143,8 +143,8 @@ class SettingsWindow(QMainWindow):
         self.quality.setCurrentIndex(max(0, self.quality.findData(p["cad_quality"])))
         self.quality.currentIndexChanged.connect(
             lambda _: self.app.set_pref(cad_quality=self.quality.currentData()))
-        f.addRow("CAD mesh quality:", self.quality)
-        f.addRow("", _note("STEP, IGES and BREP files open at this quality."))
+        f.addRow("CAD meshing control:", self.quality)
+        f.addRow("", _note("STEP, IGES and BREP files open at this level (Meshing Control)."))
         return _page(f)
 
     # ---- Appearance (the 3D view) ----------------------------------------------------------

@@ -14,8 +14,12 @@ def test(app, files):
     check(sb.current_tab() == "view" and not any(sb.is_open(k) for k in sb._boxes),
           f"CAD opens on View, tools closed ({sb.current_tab()})")
     check(IN_TAB == {"view": ["quality", "section", "edit"],
-                     "measure": ["info", "measure", "plots"],
-                     "analyze": ["cfd", "cells", "results"]}, f"tabs {IN_TAB}")
+                     "measure": ["info", "measure"],
+                     "analyze": ["cfd", "cells", "results", "plots"]}, f"tabs {IN_TAB}")
+    firsts = {tab: keys[0] for tab, keys in IN_TAB.items()}    # no line above the first tool
+    check(all(sb._boxes[k].divider.isHidden() == (k in firsts.values())
+              for keys in IN_TAB.values() for k in keys),
+          "a line between tools, none above Meshing Control, Info, CFD")
     for tab, keys in IN_TAB.items():                 # each tool in its tab's page
         page = ins.pages[tab][2]
         check(all(page.isAncestorOf(sb._boxes[k].widget) for k in keys), f"{tab} page")
@@ -60,7 +64,7 @@ def test(app, files):
     check(names == ["Sidebar", "Inspector"], "Sidebar and Inspector buttons")
     check(not w._tb_items["settings"].isVisible() and w._tb_items["show"].isVisible()
           and w._tb_items["units"].isVisible(), "Settings off by default; Show ▾, units ▾")
-    check(w.a_units_menu.text().endswith("▾") and w.a_units_menu.text() != "Units ▾",
+    check(w.a_units_menu.text() in [a.data() for a in w.a_units],
           f"the unit in its pull-down: {w.a_units_menu.text()}")
     from meshviewer.gui.dialogs.toolbar import CustomizeToolbar
     d = CustomizeToolbar(w)

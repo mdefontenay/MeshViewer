@@ -116,7 +116,7 @@ class ViewerWindow(Bars, Pages, Exports, QMainWindow):
         pp = self.sidebar.plots_panel                                      # Plots
         pp.added.connect(self._plot_added)
         pp.removed.connect(self._plot_removed)
-        pp.renamed.connect(lambda i: self._rebuild_view_bar())
+        pp.renamed.connect(self._plot_renamed)
         pp.changed.connect(self._plot_changed)
         pp.show_plot.connect(lambda i: self._show_page(f"plot:{i}"))
         pp.cuts_changed.connect(self._show_cuts)               # an eye clicked
@@ -145,6 +145,7 @@ class ViewerWindow(Bars, Pages, Exports, QMainWindow):
         self.splitter.setChildrenCollapsible(False)
         self.setCentralWidget(self.splitter)
 
+        self.select_kind = "part"                         # Select ▾ (kept from file to file)
         self._build_actions()
         self._build_toolbar()
         self._build_menus()
@@ -166,7 +167,7 @@ class ViewerWindow(Bars, Pages, Exports, QMainWindow):
         self._set_title(False)
         self.welcome.opening(self.path.name)
         path = self.path
-        # STEP opens at Settings ▸ CAD mesh quality, or at the one used last time
+        # STEP opens at Settings ▸ CAD meshing control, or at the one used last time
         pref = self.ctl.prefs["cad_quality"]
         saved = _settings().value("step_quality") if pref == "last" else pref
         quality = int(saved) if saved is not None else None
@@ -205,6 +206,7 @@ class ViewerWindow(Bars, Pages, Exports, QMainWindow):
             self._section_synced = True
         self._section_switched(self.scene.section.enabled)
         self._set_loaded(True)
+        self.set_select_kind(self.select_kind)             # a mesh kind: Part on CAD
         ip = self.sidebar.inflation_panel                  # Inflation Layers as left
         page = getattr(self.scene, "inflation_page", None) or {}
         self.inflation_view.set_state(page)                # tab, flip side, zoom
@@ -256,7 +258,7 @@ class ViewerWindow(Bars, Pages, Exports, QMainWindow):
     def _retessellate_failed(self, exc):
         self.sidebar.quality_failed()
         show_error(self, "The model couldn't be meshed at this quality.", str(exc),
-                   "It stays at the quality it had. Try another level in Mesh Quality.",
+                   "It stays at the quality it had. Try another level in Meshing Control.",
                    self.path.name if self.path else "", warning=True)
 
     # ---- misc -----------------------------------------------------------
@@ -312,7 +314,7 @@ class ViewerWindow(Bars, Pages, Exports, QMainWindow):
         unit = self.scene.measure.display_unit or self.scene.model.units
         for a in self.a_units:
             a.setChecked(a.data() == unit)
-        self.a_units_menu.setText(f"{unit or 'Units'} ▾")      # the toolbar's pull-down
+        self.a_units_menu.setText(unit or "Units")      # the toolbar's pull-down
 
     def _ask_file_unit(self):
         """First time this file is opened: which unit are its numbers in?"""
@@ -345,6 +347,7 @@ class ViewerWindow(Bars, Pages, Exports, QMainWindow):
         self.sidebar.edit_panel.refresh()
         self.sidebar.cfd_panel.model_changed()         # lengths in metres
         self.sidebar.inflation_panel.model_changed()
+        self.sidebar.results_panel.length_unit_changed()   # positions X / Y / Z
         self.sidebar.plots_panel.model_changed()       # positions in the new unit
 
     def _toggle_section(self, on):
@@ -360,6 +363,7 @@ class ViewerWindow(Bars, Pages, Exports, QMainWindow):
             if self.scene.measure.mode != "off":
                 self.scene.measure.clear()
             self.scene.select(None)
+            self.scene.elements.clear()
             self.sidebar.show_selection([])
 
     def toggle_sidebar(self, on):
@@ -400,8 +404,10 @@ class ViewerWindow(Bars, Pages, Exports, QMainWindow):
             self.scene.measure.set_display_unit(a.data())
             self._sync_units()
             self.sidebar.info_panel.refresh()           # Info in the new unit
+            self.sidebar._show_info(self.scene.selected_parts)   # a picked length / area
             self.sidebar.cfd_panel.model_changed()      # mesh length in metres
             self.sidebar.inflation_panel.model_changed()   # auto length in metres
+            self.sidebar.results_panel.length_unit_changed()   # positions X / Y / Z
             self.sidebar.plots_panel.model_changed()       # plots in the new unit
 
     # --- Export ----------------------------------------------------------

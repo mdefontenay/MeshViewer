@@ -1,8 +1,8 @@
 """The tools of the inspector (the panel right of the 3D view), in three tabs:
 
-    View      Mesh Quality, Section, Edit         how the model is shown and changed
-    Measure   Info, Measure, Plots                numbers about it
-    Analyze   CFD, Cell Quality, Results          CFD checks and solver results
+    View      Meshing Control, Section, Edit      how the model is shown and changed
+    Measure   Info, Measure                       numbers about it
+    Analyze   CFD, Cell Quality, Results, Plots   CFD checks, solver results and plots
 
 (On screen they are "tools"; in the code a tool's fold-out box is a "section".)
 Every tool is in its tab for every file. When one doesn't apply to the open file, it
@@ -75,7 +75,7 @@ def _needs_fields(scene):
 SECTIONS = (
     SectionSpec("info", "Info", "info", "What's in the file: size, faces, points",
                 tab="measure"),
-    SectionSpec("quality", "Mesh Quality", "mesh_quality",
+    SectionSpec("quality", "Meshing Control", "mesh_quality",
                 "How finely curved CAD faces are triangulated", _needs_exact_cad),
     SectionSpec("section", "Section", "section", "Cut the model with a plane", _needs_3d),
     SectionSpec("edit", "Edit", "edit", "Rotate, mirror or move the model", _needs_editable),
@@ -91,7 +91,7 @@ SECTIONS = (
                 _needs_fields, tab="analyze"),
     SectionSpec("plots", "Plots", "plots",
                 "Plots under the 3D view: sections (cp along x/c…)",
-                _needs_3d_plots, tab="measure"),
+                _needs_3d_plots, tab="analyze"),
 )
 BY_KEY = {s.key: s for s in SECTIONS}
 

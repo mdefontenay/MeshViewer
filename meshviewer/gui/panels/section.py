@@ -1,9 +1,10 @@
 """The Section tool: on/off, then
 
-    Plane                                              (gear: Advanced)
-               Normal to [ X | Y | Z ]              [ Flip ]
+    Plane
+               Normal to [ X | Y | Z ] [ ✎ ]        [ Flip ]
+               Origin    [x] [y] [z]     (✎ Edit Plane: the exact plane, any direction)
+               Normal    [x] [y] [z]
                Position  ───●───────            [ Center ]
-               Origin / Normal  [x] [y] [z]   (Advanced: the exact plane, any direction)
     Show       Fill cut faces · Show plane
 
 laid out like a section plot (panels/plots.py) so the two read the same."""
@@ -18,10 +19,20 @@ from PySide6.QtWidgets import (
 )
 
 from meshviewer.gui.forms import _grid, caption, rule
-from meshviewer.gui.widgets import Capsule, IconToggle, NoWheelSlider, NoWheelSpinBox, Switch
+from meshviewer.gui.widgets import Capsule, NoWheelSlider, NoWheelSpinBox, Switch
 
 SLIDER_STEPS = 1000
 CAPS_DELAY_MS = 150      # recompute the filled cut this long after the last change
+
+
+def edit_plane_action(parent):
+    """The ✎ button right of X | Y | Z (Section, section plots): shows the plane's
+    origin and normal under Normal to, to set it exactly, in any direction."""
+    from meshviewer.gui.icons import icon
+    a = QAction(icon("pencil"), "Edit Plane", parent)
+    a.setCheckable(True)
+    a.setToolTip("Edit Plane")
+    return a
 
 
 def _spin(lo, hi, step, decimals):
@@ -64,13 +75,7 @@ class SectionPanel(QWidget):
         d.setContentsMargins(0, 0, 0, 0)
         d.setSpacing(6)
 
-        head = QHBoxLayout()
-        head.addWidget(caption("Plane"))
-        head.addStretch(1)
-        self.adv_button = IconToggle("advanced", "Advanced: the plane's origin and normal, "
-                                     "in any direction")
-        head.addWidget(self.adv_button)
-        d.addLayout(head)
+        d.addWidget(caption("Plane"))
         g = _grid()
         group = QActionGroup(self)
         group.setExclusionPolicy(QActionGroup.ExclusionPolicy.ExclusiveOptional)
@@ -88,9 +93,11 @@ class SectionPanel(QWidget):
         center = QAction("Center", self)
         center.setToolTip("Move the plane to the model center")
         center.triggered.connect(lambda: self._do(lambda s: s.set_plane(origin=s.center)))
+        self.edit_plane = edit_plane_action(self)        # ✎: origin and normal, any way
         row = QHBoxLayout()
         row.setSpacing(6)
         row.addWidget(Capsule(self.axis_actions, name="Segmented"))
+        row.addWidget(Capsule([self.edit_plane], name="Segmented"))
         row.addStretch(1)
         row.addWidget(Capsule([flip], name="Segmented"))
         g.addWidget(QLabel("Normal to"), 0, 0)
@@ -103,9 +110,8 @@ class SectionPanel(QWidget):
         row.setSpacing(6)
         row.addWidget(self.slider, 1)
         row.addWidget(Capsule([center], name="Segmented"))
-        g.addWidget(QLabel("Position"), 1, 0)
-        g.addLayout(row, 1, 1, 1, 3)
-        d.addLayout(g)
+        g.addWidget(QLabel("Position"), 2, 0)
+        g.addLayout(row, 2, 1, 1, 3)
 
         self.advanced = QWidget()                  # the exact plane, any direction
         grid = QGridLayout(self.advanced)
@@ -132,8 +138,9 @@ class SectionPanel(QWidget):
                 box.valueChanged.connect(self._typed)
                 grid.addWidget(box, row_i + 1, c)
         self.advanced.setVisible(False)
-        self.adv_button.toggled.connect(self.advanced.setVisible)
-        d.addWidget(self.advanced)
+        self.edit_plane.toggled.connect(self.advanced.setVisible)
+        g.addWidget(self.advanced, 1, 0, 1, 4)     # right under Normal to
+        d.addLayout(g)
         d.addWidget(rule())
 
         d.addWidget(caption("Show"))

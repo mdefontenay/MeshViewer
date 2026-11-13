@@ -36,7 +36,7 @@ def _axis_font(v) -> int:
 
 
 def _pref_quality(v):
-    """Settings ▸ CAD mesh quality: "last" or a level number."""
+    """Settings ▸ CAD meshing control: "last" or a level number."""
     try:
         return int(v)
     except (TypeError, ValueError):

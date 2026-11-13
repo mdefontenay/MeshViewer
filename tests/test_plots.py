@@ -24,11 +24,11 @@ def test(app, files):
     sb.show_section("plots", True, expand=True)
     w._show_cuts()
     check(sc.plot_cut._actor is not None, "the cut drawn in 3D")
-    check(sb.current_tab() == "measure" and sb.tab_shown("plots"), "Plots: the Measure tab")
+    check(sb.current_tab() == "analyze" and sb.tab_shown("plots"), "Plots: the Analyze tab")
     sb.show_tab("view")                                  # another tab: no cuts in 3D
     check(sc.plot_cut._actor is None, "another tab: the cut hidden")
-    sb.show_tab("measure")
-    check(sc.plot_cut._actor is not None, "Measure tab again: the cut back")
+    sb.show_tab("analyze")
+    check(sc.plot_cut._actor is not None, "Analyze tab again: the cut back")
     ed = pp.editors[i][1]
     sb._visibility_changed(["FLOOR"], False)            # the chord of what is shown
     ed.chord.setChecked(True)
@@ -52,8 +52,8 @@ def test(app, files):
     check(not ed._along_cap.buttons[plots.AXES.index(own)].isVisible()
           and ed.chord.text() == "Normalize", "the plane's own axis hidden; Normalize")
     # Advanced: a tilted plane through the same origin
-    ed.adv_button.setChecked(True)
-    check(ed.advanced.isVisible(), "gear: origin and normal shown")
+    ed.edit_plane.setChecked(True)
+    check(ed.advanced.isVisible(), "Edit Plane (✎): origin and normal shown")
     for box, v in zip(ed.normal, (1.0, 0.0, 1.0)):
         box.setValue(v)
     ed._normal_typed()
@@ -64,7 +64,8 @@ def test(app, files):
     check(pp.plot(i)["normal"] is None and ed.axis["x"].isChecked(), "X: straight again")
     # the eye: cut drawn or not
     sec = pp.editors[i][0]
-    eye = sec.header.findChild(type(ed.adv_button))
+    from meshviewer.gui.widgets import IconToggle
+    eye = sec.header.findChild(IconToggle)
     sb.show_section("plots", True)
     w._show_cuts()
     check(sc.plot_cut._actor is not None, "eye open: the cut in 3D")

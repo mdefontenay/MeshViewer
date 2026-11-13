@@ -131,8 +131,16 @@ def _cgns(path, ngon=False, mixed=False):
 
 
 def _step(path):
-    import cadquery as cq
-    cq.exporters.export(cq.Workplane().box(40, 20, 10).faces(">Z").workplane().hole(6), str(path))
+    """40 × 20 × 10 box centered on the origin, a hole of 6 through it along Z (OCP only)."""
+    from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox, BRepPrimAPI_MakeCylinder
+    from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt
+    from OCP.STEPControl import STEPControl_AsIs, STEPControl_Writer
+    box = BRepPrimAPI_MakeBox(gp_Pnt(-20, -10, -5), 40, 20, 10).Shape()
+    hole = BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0, 0, -6), gp_Dir(0, 0, 1)), 3, 12).Shape()
+    writer = STEPControl_Writer()
+    writer.Transfer(BRepAlgoAPI_Cut(box, hole).Shape(), STEPControl_AsIs)
+    writer.Write(str(path))
 
 
 def _ugrid(path):

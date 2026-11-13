@@ -87,29 +87,49 @@ def fmt(v, units=""):
 
 
 # ---- units of solution fields (Results, Plots) --------------------------------------------
-PRESSURE_UNITS = {"Pa": 1.0, "kPa": 1e3, "MPa": 1e6, "bar": 1e5, "atm": 101325.0,
-                  "psi": 6894.757}
+PRESSURE_UNITS = {"Pa": 1.0, "kPa": 1e3, "MPa": 1e6, "GPa": 1e9, "bar": 1e5,
+                  "atm": 101325.0, "psi": 6894.757, "ksi": 6894757.0}   # also stresses
 TEMPERATURE_UNITS = {"K": (1.0, 0.0), "°C": (1.0, 273.15), "°F": (5 / 9, 459.67 * 5 / 9)}
+STRAIN_UNITS = {"m/m": 1.0, "%": 0.01, "µε": 1e-6}
+FORCE_UNITS = {"N": 1.0, "kN": 1e3, "lbf": 4.4482216}
+HEAT_FLUX_UNITS = {"W/m²": 1.0, "kW/m²": 1e3, "BTU/(h·ft²)": 3.1545907}
+HTC_UNITS = {"W/(m²·K)": 1.0, "BTU/(h·ft²·°F)": 5.6782633}
+ENERGY_UNITS = {"J/kg": 1.0, "kJ/kg": 1e3, "BTU/lb": 2326.0}            # per mass
+TKE_UNITS = {"m²/s²": 1.0, "ft²/s²": 0.09290304}
+DISSIPATION_UNITS = {"m²/s³": 1.0, "ft²/s³": 0.09290304}
+RATE_UNITS = {"1/s": 1.0, "1/min": 1 / 60}
+KINEMATIC_UNITS = {"m²/s": 1.0, "cSt": 1e-6, "ft²/s": 0.09290304}
+# a field's quantity -> its units (the first one: SI). Every unit name is in one table
+# only (unit_quantity relies on it); lengths add µm for displacements.
 QUANTITIES = {"pressure": PRESSURE_UNITS, "density": DENSITY_UNITS, "speed": SPEED_UNITS,
-              "temperature": TEMPERATURE_UNITS, "viscosity": VISCOSITY_UNITS}
+              "temperature": TEMPERATURE_UNITS, "viscosity": VISCOSITY_UNITS,
+              "kinematic": KINEMATIC_UNITS, "length": {**LENGTH_UNITS, "µm": 1e-6},
+              "strain": STRAIN_UNITS, "force": FORCE_UNITS, "heat_flux": HEAT_FLUX_UNITS,
+              "htc": HTC_UNITS, "energy": ENERGY_UNITS, "tke": TKE_UNITS,
+              "dissipation": DISSIPATION_UNITS, "rate": RATE_UNITS}
+QUANTITY_TITLES = {"pressure": "Pressure and Stress", "density": "Density",
+                   "speed": "Speed", "temperature": "Temperature", "viscosity": "Viscosity",
+                   "kinematic": "Kinematic Viscosity", "length": "Length",
+                   "strain": "Strain", "force": "Force", "heat_flux": "Heat Flux",
+                   "htc": "Heat Transfer Coefficient", "energy": "Energy per Mass",
+                   "tke": "Turbulent Kinetic Energy", "dissipation": "Dissipation",
+                   "rate": "Rate"}
 NO_UNIT = ""                       # the file's numbers as they are (often non-dimensional)
 
 
+def unit_quantity(unit):
+    """The quantity a unit measures ("kPa" -> "pressure"), or None. (Every unit is in
+    one table only, so a field the app doesn't know gets its quantity from its unit.)"""
+    return next((q for q, table in QUANTITIES.items() if unit in table), None) \
+        if unit else None
+
+
 def field_quantity(name):
-    """What a solution field measures, from its name: "pressure", "speed"… or None
-    (cp, Mach, y+…: no unit)."""
-    k = (name or "").lower().strip()
-    if k in ("p", "pressure", "press", "static_pressure", "pstat", "ptot", "p0"):
-        return "pressure"
-    if k in ("rho", "density", "dens"):
-        return "density"
-    if k in ("u", "v", "w", "vx", "vy", "vz", "velocity", "speed", "__speed__", "vel", "umag"):
-        return "speed"
-    if k in ("t", "temperature", "temp", "t0", "ttot"):
-        return "temperature"
-    if k in ("mu", "viscosity", "mut", "nu_t", "visc"):
-        return "viscosity"
-    return None
+    """What a solution field measures, from its name (core/field_kinds): "pressure",
+    "speed"… or None (cp, Mach, y+… have no unit; unknown fields neither)."""
+    from meshviewer.core.field_kinds import field_kind
+    kind = field_kind(name)
+    return kind.quantity if kind is not None else None
 
 
 def _to_si(v, unit, table):

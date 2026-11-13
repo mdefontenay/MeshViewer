@@ -1,4 +1,5 @@
 """py2app build description for Mesh Viewer.app — run through build_app.sh."""
+import glob
 import importlib.util
 import re
 from pathlib import Path
@@ -93,4 +94,7 @@ setup(
     app=["mesh_viewer.py"],
     name="Mesh Viewer",
     options={"py2app": OPTIONS},
+    # the app's own icons (Contents/Resources/icons): the .svg files only — a Finder
+    # .DS_Store in the folder would stop the app from being signed
+    data_files=[("icons", sorted(glob.glob("icons/*.svg")))],
 )

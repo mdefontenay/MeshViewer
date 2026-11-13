@@ -8,7 +8,7 @@ import numpy as np
 INTERNAL_PREFIXES = ("vtk", "pyvista", "__")
 INTERNAL_NAMES = {"face_id", "Normals", "TextureCoordinates", "Texture Coordinates",
                   "RGB", "RGBA", "Colors", "colors"}
-SPEED = "__speed__"                 # |u, v, w| when the file has u, v, w
+from meshviewer.core.field_kinds import SPEED   # noqa: E402  |u, v, w| (u, v, w in the file)
 
 
 YPLUS_STOPS = ((0.0, "#0a84ff"), (1.0, "#30b350"), (2.0, "#ff9f0a"), (3.0, "#ff453a"))
@@ -46,10 +46,17 @@ COLORMAPS = {
 DEFAULT_MAP = "rainbow"
 
 
-def ramp_rgb(values, lo, hi, stops):
-    """Colour (n, 3) uint8 for values on lo..hi (clamped); NaN -> grey."""
+def ramp_rgb(values, lo, hi, stops, log=False):
+    """Colour (n, 3) uint8 for values on lo..hi (clamped); NaN -> grey. log: by powers of
+    ten (lo > 0; values at or below zero take the lowest colour)."""
     v = np.asarray(values, dtype=float)
-    t = np.clip((np.nan_to_num(v, nan=lo) - lo) / ((hi - lo) or 1.0), 0.0, 1.0)
+    if log and lo > 0 and hi > lo:
+        with np.errstate(divide="ignore", invalid="ignore"):
+            lv = np.where(v > 0, np.log10(np.where(v > 0, v, 1.0)), -np.inf)
+        a, b = np.log10(lo), np.log10(hi)
+        t = np.clip((np.nan_to_num(lv, nan=a, neginf=a) - a) / ((b - a) or 1.0), 0.0, 1.0)
+    else:
+        t = np.clip((np.nan_to_num(v, nan=lo) - lo) / ((hi - lo) or 1.0), 0.0, 1.0)
     cols = np.array([[int(c[i:i + 2], 16) for i in (1, 3, 5)] for c in stops], float)
     xs = np.linspace(0.0, 1.0, len(stops))
     out = np.stack([np.interp(t, xs, cols[:, k]) for k in range(3)], axis=1)

@@ -1,10 +1,24 @@
 """The 3D view draws each frame once, and what is on screen is the latest frame."""
+import sys
+
 import numpy as np
 from conftest import check, open_file, run
 
 
+def _float_on_top(w):
+    """macOS: the window above every other one, so a screen grab sees it (a test run from
+    a terminal or an agent is not the app in front, and other windows may cover it)."""
+    if sys.platform != "darwin":
+        return
+    import objc
+    win = objc.objc_object(c_void_p=int(w.winId())).window()
+    win.setLevel_(3)                                       # NSFloatingWindowLevel
+    win.orderFrontRegardless()
+
+
 def test(app, files):
     w = open_file(app, files["step"])
+    _float_on_top(w)
     sc, sb, view = w.scene, w.sidebar, w.plotter
     pump = lambda: [app.processEvents() for _ in range(5)]            # noqa: E731
     pump()

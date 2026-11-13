@@ -142,7 +142,7 @@ QToolBar {{ spacing: 8px; padding: 3px 8px; border: none; border-bottom: 1px sol
 QLineEdit[invalid="true"] {{ border: 1px solid #ff453a; }}
 QLineEdit:disabled {{ color: {secondary}; background: {capsule}; border-color: {capsule_border}; }}
 /* Inflation Layers — its page and the bar under the 3D view */
-#InflationView, #InflationPage {{ background: {page}; border: none; }}
+#InflationView, #InflationPage, #PlotPage {{ background: {page}; border: none; }}
 #PageTitle {{ color: {text}; font-size: 17px; font-weight: 700; }}
 #TileValue {{ color: {text}; font-size: 17px; font-weight: 600; }}
 #ViewBar {{ background: {page}; border-top: 1px solid {divider}; }}
@@ -170,6 +170,8 @@ QLineEdit:disabled {{ color: {secondary}; background: {capsule}; border-color: {
     font-size: 13px; min-width: 150px;
 }}
 #ContextMenu::item:selected {{ background: {accent}; color: white; }}
+#ContextMenu[checks="true"]::item {{ padding-left: 48px; }}   /* the check mark column */
+#ContextMenu[checks="true"]::icon {{ position: absolute; left: 22px; }}
 #ContextMenu::item:disabled {{ color: {secondary}; font-size: 12px; font-weight: 600; }}
 #ContextMenu::separator {{ height: 1px; background: {divider}; margin: 5px 10px; }}
 #ContextMenu::right-arrow {{ width: 8px; height: 8px; right: 10px; }}

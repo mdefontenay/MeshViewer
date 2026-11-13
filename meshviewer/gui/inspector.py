@@ -2,7 +2,7 @@
 
     ┌─────────────────────────────┐
     │  [ View | Measure | Analyze ] │   a segmented control (⌥⌘1 / ⌥⌘2 / ⌥⌘3)
-    │  Mesh Quality              ›  │
+    │  Meshing Control           ›  │
     │  Section             [on]  ›  │   the tools of the tab shown (gui/sections.py)
     │  Edit                      ›  │
     └─────────────────────────────┘
