@@ -1,7 +1,9 @@
 """Measurements: point-to-point distance, surface area, enclosed volume. No Qt.
 
 Distance  — click two points (on the model or a section cut face): ΔX, ΔY, ΔZ and
-            the straight-line distance between them. With "From origin" on, each
+            the straight-line distance between them. Snap to vertices: the nearest
+            corner of the face clicked; 2D files: Snap to edges, the nearest line or
+            line end on screen (render/elements.py, `snap_2d`). With "From origin" on, each
             click is one point instead: its coordinates, its distance from the
             origin (0, 0, 0), and to the section plane when the section is on.
 Area      — of the selected parts / boundaries, or of selected CAD faces.
@@ -61,7 +63,7 @@ class Measure:
         self.p = scene.p
         self.mode = "off"            # "off" | "distance" | "angle" | "area"
         self.pick_faces = False      # area mode on CAD: pick single CAD faces
-        self.snap = False            # distance: snap to the nearest mesh vertex
+        self.snap = False            # distance: snap to a vertex (2D: to the lines)
         self.from_origin = False     # distance: one point, measured from (0, 0, 0)
         self.points = []             # up to 2 picked 3D points
         self.normals = []            # angle: the faces' normals at those points

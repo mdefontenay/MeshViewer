@@ -1,13 +1,12 @@
 """The Results tool — a solution field from the solver painted on
-the boundaries (files that carry one: FUN3D's Tecplot boundary output, .dat).
+the boundaries (files that carry one: a solver's Tecplot boundary output, .dat).
 
-    Results
+    Results                                (switch: color the boundaries, in the header)
       Field          [ Velocity u                 ▾ ]   by subject (core/field_kinds)
       Unit in file   [ —  As written             ▾ ]   what the file's numbers are in
       Shown in       [ km/h                       ▾ ]   once the file's unit is known
       (a line saying what applies: no unit, as written, unknown field…)
       ───────────────────────────────────────────
-      Color the boundaries                    (switch)
       Color by       [ Value | Gradient ]
       Scale          [ Linear | Log ]               log: by powers of ten (values > 0)
       Colors         [ ▬▬▬▬ (the color map)       ▾ ]
@@ -32,15 +31,15 @@ from __future__ import annotations
 
 import numpy as np
 from PySide6.QtCore import QRectF, Qt, Signal
-from PySide6.QtGui import QAction, QActionGroup, QColor, QLinearGradient, QPainter, QPalette
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPalette
+from PySide6.QtWidgets import QSizePolicy, QWidget
 
-from meshviewer.gui.forms import _grid, _row, rule
+from meshviewer.gui.forms import _grid, _row, column, note, rule, segmented
 from meshviewer.core.field_kinds import GROUP_ORDER, KINDS, field_kind
 from meshviewer.core.fields import (COLORMAPS, DEFAULT_MAP, SEQUENTIAL, SPEED, field_values,
                                     gradient_magnitude, solution_fields)
 from meshviewer.core.plots import AXES, COORD
-from meshviewer.gui.widgets import Capsule, GradientSelect, MenuSelect, NumberField, Switch
+from meshviewer.gui.widgets import GradientSelect, MenuSelect, NumberField, Switch
 from meshviewer.core.units import (NO_UNIT, QUANTITIES, QUANTITY_TITLES, convert_field,
                                    field_scale, nice_num, unit_quantity)
 
@@ -122,9 +121,7 @@ class ResultsPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.scene = None
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(2, 0, 2, 0)
-        lay.setSpacing(6)
+        lay = column(self)
         # -- which field, and its unit
         g = _grid()
         self.field = MenuSelect()
@@ -142,50 +139,26 @@ class ResultsPanel(QWidget):
         self._unit_rows = [_row(g, 1, "Unit in file", self.file_unit, wide=True)[0],
                            _row(g, 2, "Shown in", self.shown_unit, wide=True)[0]]
         lay.addLayout(g)
-        self.unit_note = QLabel("")                    # what applies to this field's unit
-        self.unit_note.setObjectName("InfoLine")
-        self.unit_note.setWordWrap(True)
+        self.unit_note = note()                        # what applies to this field's unit
         lay.addWidget(self.unit_note)
         lay.addWidget(rule())
 
-        # -- how the boundaries are colored
-        r = QHBoxLayout()
-        r.addWidget(QLabel("Color the boundaries"))
-        r.addStretch(1)
+        # -- how the boundaries are colored (the switch: in the tool's header, sidebar.py)
         self.colour_on = Switch()
         self.colour_on.setToolTip("Color the Boundaries")
+        self.colour_on.setAccessibleName("Color the boundaries")
         self.colour_on.toggled.connect(self._update)
-        r.addWidget(self.colour_on)
-        lay.addLayout(r)
         g = _grid()
-        grp = QActionGroup(self)
-        grp.setExclusive(True)
-        self.show_acts = {}
-        for key, text in (("value", "Value"), ("gradient", "Gradient")):
-            a = QAction(text, self)                    # gradient: |∇f| along the surface
-            a.setCheckable(True)
-            a.setToolTip(text)
-            grp.addAction(a)
-            a.triggered.connect(self._field_changed)     # its own range
-            self.show_acts[key] = a
+        self.show_acts, cap = segmented(           # gradient: |∇f| along the surface
+            self, (("value", "Value", "Value"), ("gradient", "Gradient", "Gradient")),
+            lambda _k: self._field_changed())     # its own range
         self.show_acts["value"].setChecked(True)
-        g.addWidget(QLabel("Color by"), 0, 0)
-        g.addWidget(Capsule(list(self.show_acts.values()), name="Segmented"), 0, 1, 1, 3,
-                    Qt.AlignLeft)
-        grp = QActionGroup(self)
-        grp.setExclusive(True)
-        self.scale_acts = {}
-        for key, text in (("linear", "Linear"), ("log", "Log")):
-            a = QAction(text, self)                    # log: by powers of ten
-            a.setCheckable(True)
-            a.setToolTip(text)
-            grp.addAction(a)
-            a.triggered.connect(self._scale_changed)
-            self.scale_acts[key] = a
+        _row(g, 0, "Color by", cap, wide=True, align=Qt.AlignLeft)
+        self.scale_acts, cap = segmented(          # log: by powers of ten
+            self, (("linear", "Linear", "Linear"), ("log", "Log", "Log")),
+            lambda _k: self._scale_changed())
         self.scale_acts["linear"].setChecked(True)
-        g.addWidget(QLabel("Scale"), 1, 0)
-        g.addWidget(Capsule(list(self.scale_acts.values()), name="Segmented"), 1, 1, 1, 3,
-                    Qt.AlignLeft)
+        _row(g, 1, "Scale", cap, wide=True, align=Qt.AlignLeft)
         self.cmap = GradientSelect()
         self.cmap.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         for key, stops in COLORMAPS.items():
@@ -206,9 +179,7 @@ class ResultsPanel(QWidget):
         _, self.lo_unit = _row(g, 0, "Min", self.lo, unit=" ")
         _, self.hi_unit = _row(g, 1, "Max", self.hi, unit=" ")
         lay.addLayout(g)
-        self.stats = QLabel("")                        # only when there is nothing to show
-        self.stats.setObjectName("InfoLine")
-        self.stats.setWordWrap(True)
+        self.stats = note()                            # only when there is nothing to show
         self.stats.setVisible(False)
         lay.addWidget(self.stats)
         self._units = {}                               # field -> [file unit, shown unit]

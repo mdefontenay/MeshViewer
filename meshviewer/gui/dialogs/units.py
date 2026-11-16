@@ -12,6 +12,7 @@ from PySide6.QtGui import QAction, QActionGroup
 from PySide6.QtWidgets import QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QLayout, QVBoxLayout
 
 from meshviewer.gui.widgets import Capsule
+from meshviewer.gui.forms import sheet_title
 
 FILE_UNITS = (("mm", "mm"), ("cm", "cm"), ("m", "m"), ("in", "in"), ("ft", "ft"))
 
@@ -37,8 +38,7 @@ class FileUnitDialog(QDialog):
         lay.setSizeConstraint(QLayout.SetFixedSize)
         lay.setContentsMargins(20, 18, 20, 14)
         lay.setSpacing(10)
-        title = QLabel(f"What unit is “{file_name}” in?")
-        title.setStyleSheet("font-size: 15px; font-weight: 600;")
+        title = sheet_title(f"What unit is “{file_name}” in?")
         lay.addWidget(title)
         note = QLabel(f"The file says {said}." if said else
                       "This file doesn't say. Change it any time in the toolbar's unit menu.")

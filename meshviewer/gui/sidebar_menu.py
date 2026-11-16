@@ -1,8 +1,9 @@
 """Sidebar ▸ what a right-click on a part offers (in the list and in the 3D view): hide,
-isolate, zoom, color, rename, McMaster search. Changes go through Edit ▸ Undo."""
+isolate, zoom, color, rename, Material… (STEP, IGES, BREP), McMaster search. Changes go
+through Edit ▸ Undo."""
 from __future__ import annotations
 
-from PySide6.QtCore import QUrl
+from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QMessageBox
 
@@ -31,9 +32,16 @@ class PartMenu:
                 menu.addAction("Hide Face", lambda h=hit: self._hide_face(*h))
             menu.addAction(f"Isolate{what}", lambda: self._isolate(names))
             menu.addAction("Zoom To", lambda: self.scene.zoom_to(names))
-            if len(names) == 1 and clicked == names:
+            menu.addSeparator()                          # the part itself: name, look
+            group = getattr(self.list, "context_group", None)   # a group row clicked
+            if group is not None and set(clicked) == set(names):
+                menu.addAction("Rename Group…",
+                               lambda g=group: self.list.start_group_rename(g))
+            elif len(names) == 1 and clicked == names:
                 menu.addAction("Rename…", lambda: self.rename(names[0]))
             menu.addAction("Color…", lambda: self.choose_color(names))
+            if self.scene.model.source is not None and len(clicked) == 1:   # exact CAD
+                menu.addAction("Material…", lambda n=clicked[0]: self.show_material(n))
             # McMaster-Carr parts -> open their catalogue page
             # only the part / group that was right-clicked, not the selection
             numbers = sorted({mcmaster_number(n) for n in clicked} - {None})
@@ -57,6 +65,16 @@ class PartMenu:
         menu.exec(global_pos)
         self.scene.context_hit = None
         self.scene.end_stuck_drag()            # no zoom mode left behind
+
+    def show_material(self, name):
+        """The part's material, as the file states it (STEP), in a sheet."""
+        text, detail = material_text(self.scene.part_meta(name).get("material"))
+        box = QMessageBox(QMessageBox.Information, f"Material of {name}", text,
+                          QMessageBox.Ok, self.window())
+        box.setInformativeText(detail)
+        box.setWindowModality(Qt.WindowModal)              # a sheet on macOS
+        box.open()
+        self._material_box = box                           # (kept while it shows)
 
     def _menu_word(self, names):
         """" Part", " 3 Parts"; 2D meshes: " Face" (the cells) / " Boundary" (a line)."""
@@ -125,6 +143,33 @@ class PartMenu:
             self.refresh_parts()
             self.renamed.emit()
 
+    def _rename_group(self, kind, old, new, members):
+        """A group renamed in the list: its parts (their names start with the group's),
+        or an assembly of the file (only how the list shows it)."""
+        if not self.scene:
+            return
+        if kind == "assembly":
+            if self.changes is not None:
+                self.changes.assembly_name(old, new)
+            else:
+                self.scene.group_names[old] = new
+                self.refresh_parts()
+            return
+        pairs = [(n, new + n[len(old):]) for n in members if n.startswith(old)]
+        taken = set(self.scene.model.parts) - {o for o, _ in pairs}
+        clash = next((b for _, b in pairs if b in taken), None)
+        if clash or len({b for _, b in pairs}) < len(pairs):
+            QMessageBox.warning(self.window(), "Rename",
+                                f"There is already a {self._one_part()} named “{clash or new}”.")
+            return
+        if self.changes is not None:
+            self.changes.rename_group(pairs, old)
+        else:
+            for o, n in pairs:
+                self.scene.rename_part(o, n)
+            self.refresh_parts()
+            self.renamed.emit()
+
     def _hide_face(self, name, face_id):
         hidden = {k: set(v) for k, v in self.scene.hidden_faces.items()}
         hidden.setdefault(name, set()).add(int(face_id))
@@ -145,3 +190,18 @@ class PartMenu:
 
 def open_mcmaster(part_number):
     QDesktopServices.openUrl(QUrl(f"https://www.mcmaster.com/{part_number}"))
+
+
+def material_text(mat):
+    """(headline, details) for a part's material: its name, description and density —
+    or that the file has none."""
+    if not mat:
+        return "No material metadata embedded", \
+            "The file doesn't say what this part is made of."
+    lines = []
+    if mat.get("description"):
+        lines.append(mat["description"])
+    if mat.get("density"):
+        unit = mat.get("density_unit") or ""
+        lines.append(f"Density: {mat['density']:g} {unit}".rstrip())
+    return mat.get("name") or "Material", "\n".join(lines)

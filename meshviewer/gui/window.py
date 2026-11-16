@@ -1,4 +1,5 @@
-"""One document window: toolbar, then the parts list | the 3D view | the inspector."""
+"""One document window: toolbar, then the left sidebar (parts list) | the 3D view |
+the right sidebar (the tools)."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -81,7 +82,7 @@ class ViewerWindow(Bars, Pages, Exports, QMainWindow):
         self.view_bar.setObjectName("ViewBar")
         self.view_bar.setAttribute(Qt.WA_StyledBackground, True)
         vb = QHBoxLayout(self.view_bar)
-        vb.setContentsMargins(10, 6, 10, 6)
+        vb.setContentsMargins(10, 8, 10, 2)           # 8 above the tabs, 2 + 6 below
         self._view_lay = vb
         group = QActionGroup(self)
         group.setExclusive(True)
@@ -118,6 +119,8 @@ class ViewerWindow(Bars, Pages, Exports, QMainWindow):
         pp.removed.connect(self._plot_removed)
         pp.renamed.connect(self._plot_renamed)
         pp.changed.connect(self._plot_changed)
+        self.plot_page.ranges_changed.connect(                 # the plot zoomed / panned
+            lambda i, rng: i in pp.editors and pp.editors[i][1].set_ranges(*rng))
         pp.show_plot.connect(lambda i: self._show_page(f"plot:{i}"))
         pp.cuts_changed.connect(self._show_cuts)               # an eye clicked
         rp = self.sidebar.results_panel
@@ -125,9 +128,10 @@ class ViewerWindow(Bars, Pages, Exports, QMainWindow):
         self.sidebar.activity_changed.connect(self._activity_changed)   # a tab, a tool
         self.sidebar.results_panel.units_changed.connect(     # a field's unit: the plots too
             lambda: self._active_plot is not None and self._refresh_plot(self._active_plot))
-        self.sidebar.inflation_panel.changed.connect(self.inflation_view.set_result)
+        self.sidebar.inflation_panel.changed.connect(self._inflation_changed)
         self.sidebar.inflation_panel.wants_model.connect(self._show_model_page)
-        self.inflation_view.section.set_panel(self.sidebar.inflation_panel)
+        self.inflation_view.three_d_changed.connect(           # Show in 3D, Flip
+            lambda show, flip: self.sidebar.inflation_panel.set_3d(show, flip))
         ep = self.sidebar.edit_panel                                       # Edit section
         ep.edit_requested.connect(lambda r, t, label: self.scene and self.changes.edit(r, t, label))
         ep.undo_requested.connect(lambda: self.scene and self.changes.undo_last_edit())
@@ -167,9 +171,12 @@ class ViewerWindow(Bars, Pages, Exports, QMainWindow):
         self._set_title(False)
         self.welcome.opening(self.path.name)
         path = self.path
-        # STEP opens at Settings ▸ CAD meshing control, or at the one used last time
+        # STEP opens at the level this file had (Meshing Control), else at Settings ▸ CAD
+        # meshing control (Medium), or at the one used last time
+        mine = (memory.load(self.path) or {}).get("quality")
         pref = self.ctl.prefs["cad_quality"]
         saved = _settings().value("step_quality") if pref == "last" else pref
+        saved = mine if mine is not None else saved
         quality = int(saved) if saved is not None else None
 
         def job():
@@ -182,6 +189,7 @@ class ViewerWindow(Bars, Pages, Exports, QMainWindow):
         if not model.parts:
             return self._failed(RuntimeError(f"No {model.group_title.lower()} found in this file."))
         self.scene = Scene(self.plotter, model, dark=is_dark(), accent=accent())
+        self.scene.set_color_mode(self.sidebar.color_mode, render=False)   # File / Randomized
         saved = memory.load(self.path)                   # as you left it
         memory.restore(self.scene, saved)
         self.sidebar.bind(self.scene)
@@ -211,6 +219,7 @@ class ViewerWindow(Bars, Pages, Exports, QMainWindow):
         page = getattr(self.scene, "inflation_page", None) or {}
         self.inflation_view.set_state(page)                # tab, flip side, zoom
         self.inflation_view.set_result(ip.result)
+        self.inflation_view.set_3d(ip.show_3d, ip.flip_3d)
         self._cfd_mode(model.is_cad and ip.enabled, open_page=False)
         if model.is_cad and ip.enabled and page.get("page") == "cfd":
             self.a_page_cfd.setChecked(True)
@@ -220,6 +229,8 @@ class ViewerWindow(Bars, Pages, Exports, QMainWindow):
         memory.restore_camera(self.scene, saved)
         name_controls(self)                            # (the tools' controls are built now)
         self.ctl.add_recent(self.path)                   # File ▸ Open Recent
+        self.changes.watch(self.scene)                   # clicks and camera moves: undoable
+        self.changes.clear()                             # from where the file opened
         self.plotter.render()
 
     def _failed(self, exc):
@@ -271,12 +282,16 @@ class ViewerWindow(Bars, Pages, Exports, QMainWindow):
             self.scene.set_axis_font(a["axis_font"], rebuild=False)
             self.scene.set_edge_options(a["edge_width"], a["hide_edges_moving"], render=False)
             self.scene.set_shading(a["shading"], render=False)
-            self.scene.set_axes_mode(a["axes"], rebuild=False, render=False)
+            self.scene.set_axes_mode(a[self._axes_key()], rebuild=False, render=False)
             self.scene.set_background(*self.ctl.background())        # rebuilds grid + axes
 
     # --- toolbar toggles for what is shown -----------------------------
     SCENE_TOGGLES = {"mesh_edges": "set_mesh_edges", "feature_edges": "set_feature_edges",
                      "faces": "set_faces", "bbox": "set_bbox", "origin": "set_origin"}
+
+    def _axes_key(self):
+        """The saved axes / grid mode for this window's file: drawings have their own."""
+        return "drawing_axes" if self.scene is not None and self.scene.is_drawing else "axes"
 
     def _show_toggled(self, key, on):
         if key in ("axes", "grid"):
@@ -284,7 +299,7 @@ class ViewerWindow(Bars, Pages, Exports, QMainWindow):
             ax, gr = self.a_show["axes"].isChecked(), self.a_show["grid"].isChecked()
             mode = {(True, True): "both", (True, False): "axes",
                     (False, True): "grid", (False, False): "off"}[(ax, gr)]
-            self.ctl.set_appearance(axes=mode)
+            self.ctl.set_appearance(**{self._axes_key(): mode})
             return
         if not self.scene:
             return
@@ -297,7 +312,7 @@ class ViewerWindow(Bars, Pages, Exports, QMainWindow):
 
     def _sync_show(self):
         """Toolbar toggles = the scene's state + the saved axes mode (no signals)."""
-        mode = self.ctl.appearance["axes"]
+        mode = self.ctl.appearance[self._axes_key()]
         want = {"axes": mode in ("axes", "both"), "grid": mode in ("grid", "both")}
         if self.scene:
             want.update({k: bool(self.scene.state.get(k)) for k in self.SCENE_TOGGLES})
@@ -366,6 +381,12 @@ class ViewerWindow(Bars, Pages, Exports, QMainWindow):
             self.scene.elements.clear()
             self.sidebar.show_selection([])
 
+    def _inflation_changed(self, r):
+        """Inflation Layers: the page's plot and its Show in 3D / Flip switches."""
+        ip = self.sidebar.inflation_panel
+        self.inflation_view.set_result(r)
+        self.inflation_view.set_3d(ip.show_3d, ip.flip_3d)
+
     def toggle_sidebar(self, on):
         self.sidebar.setVisible(on)
 
@@ -404,6 +425,7 @@ class ViewerWindow(Bars, Pages, Exports, QMainWindow):
             self.scene.measure.set_display_unit(a.data())
             self._sync_units()
             self.sidebar.info_panel.refresh()           # Info in the new unit
+            self.sidebar.selected_panel.refresh()       # Measure Selected too
             self.sidebar._show_info(self.scene.selected_parts)   # a picked length / area
             self.sidebar.cfd_panel.model_changed()      # mesh length in metres
             self.sidebar.inflation_panel.model_changed()   # auto length in metres

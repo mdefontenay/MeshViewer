@@ -3,34 +3,34 @@ of the inflation layer calculator. Inputs are in the CFD tool (Inflation Layers)
 
     Inflation layers                          Turbulent · Supersonic
     [Reynolds] [First layer for y+] [Estimated y+] [Boundary layer] [Total] [Max layer]
-    ┌ [ Layer Sizes | Section ]         ■ Layer height  — Total so far ┐
-    │ bars: each layer's height · line: total thickness so far                  │
-    │ dashed: boundary layer · dotted: next cell size (labels on the right)     │
+    ┌ Layer sizes   Show in 3D [●]  Flip [○]    ■ Layer height  — Total so far ┐
+    │ ▤ the stack │ bars: each layer's height · line: total thickness so far     │
+    │  (to scale) │ dashed: boundary layer · dotted: next cell size              │
     └───────────────────────────────────────────────────────────────────────────┘
     ✓ / ⚠ checks            (every number is in the sidebar's Values pop-ups)
 
-The plot takes the full width, under tabs; drawn like the rest of the app. Second tab
-"Section" (section_cut.py): the section plane's cut, in 2D, with the inflation
-layers estimated on the walls. The tab, Flip Side, the flow arrow and the section
-zoom are remembered per file (get_state / set_state).
-Everything is drawn with QPainter in the app's colours (light and dark).
+Left of the plot, the layers stacked on the wall, to the plot's scale (the stack's
+top is the total thickness). The layers in 3D: Inflation Layers ▸ Show thickness in 3D
+(render/overlays.WallView). Everything is drawn with QPainter in the app's colours
+(light and dark).
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import (
-    QAction, QActionGroup, QColor, QFont, QPainter, QPainterPath, QPalette, QPen,
+    QColor, QFont, QPainter, QPainterPath, QPalette, QPen,
 )
 from PySide6.QtWidgets import (
     QFrame, QGridLayout, QHBoxLayout, QLabel, QScrollArea, QSizePolicy,
-    QStackedWidget, QToolTip, QVBoxLayout, QWidget,
+    QToolTip, QVBoxLayout, QWidget,
 )
 
-from meshviewer.gui.pages.section_cut import SectionLegend, SectionView
-from meshviewer.gui.widgets import Capsule
 from meshviewer.core.units import length_unit, show_length, nice_step
+from meshviewer.gui.forms import PAGE_MARGINS, note, status_mark
+from meshviewer.gui.style import STATUS
+from meshviewer.gui.widgets import Switch
 
-RED, GREEN = "#ff453a", "#30b350"                  # status colours (tiles, checks)
+RED, GREEN = STATUS["bad"], STATUS["ok"]           # status colors (tiles, checks)
 VISCOUS = 5.0                                      # y+ where the viscous sublayer ends
 
 
@@ -61,8 +61,7 @@ class _Tile(QFrame):
         row.addWidget(self.side, 0, Qt.AlignBottom)
         row.addStretch(1)
         lay.addLayout(row)
-        self.note = QLabel("")
-        self.note.setObjectName("InfoLine")
+        self.note = note()
         lay.addWidget(self.note)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
@@ -70,7 +69,7 @@ class _Tile(QFrame):
         self.value.setText(value)
         self.note.setText(note)
         self.side.setText(side)
-        color = {"ok": GREEN, "warn": "#ff9f0a", "bad": RED}.get(state, state)
+        color = STATUS.get(state, state)
         self.value.setStyleSheet(f"color: {color};" if color else "")
 
 
@@ -89,6 +88,7 @@ class _Plot(QWidget):
     grid, y ticks, a y-axis title along the axis, an x-axis title, reference lines
     labelled at the right (name, then value), an end label, hover crosshair."""
     PAD_L, PAD_R, PAD_T, PAD_B = 76, 132, 14, 40
+    LEFT0 = 0                                   # room left of the y labels (the stack)
     EMPTY = "Fill in Inflation Layers in the CFD tool"
 
     def __init__(self, parent=None):
@@ -136,8 +136,8 @@ class _Plot(QWidget):
             p.setPen(QPen(self._grid, 1))
             p.drawLine(QPointF(left, y), QPointF(right, y))
             p.setPen(self._muted)
-            p.drawText(QRectF(24, y - 7, left - 34, 14), Qt.AlignRight | Qt.AlignVCenter,
-                       y_label(gy))
+            p.drawText(QRectF(self.LEFT0 + 24, y - 7, left - 34 - self.LEFT0, 14),
+                       Qt.AlignRight | Qt.AlignVCenter, y_label(gy))
             gy += step
         for x, text in x_ticks:
             q = self._px(x, y0).x()
@@ -145,7 +145,7 @@ class _Plot(QWidget):
         p.setPen(self._text)                    # axis titles, text colour
         p.drawText(QRectF(left, self.height() - 16, right - left, 14), Qt.AlignHCenter, x_title)
         p.save()
-        p.translate(12, (top + base) / 2)
+        p.translate(self.LEFT0 + 12, (top + base) / 2)
         p.rotate(-90)
         p.drawText(QRectF(-(base - top) / 2, -7, base - top, 14), Qt.AlignCenter, y_title)
         p.restore()
@@ -218,7 +218,42 @@ class _Plot(QWidget):
 class InflationPlot(_Plot):
     """Layer size plot: one bar per layer (its height), a line for the total
     thickness of the layers so far, and two reference lines — the boundary
-    layer thickness and the next cell size. Hover a layer for its numbers."""
+    layer thickness and the next cell size. Hover a layer for its numbers. On the
+    left, the layers stacked on the wall at the plot's own scale."""
+    STACK_W = 58
+    LEFT0 = STACK_W + 14
+    PAD_L = 76 + LEFT0
+
+    def _stack(self, p, r):
+        """The layers on the wall, to scale: the wall at the bottom, each layer a band
+        as high as it is (alternating shades), the boundary layer dashed across."""
+        x0, w = 10.0, float(self.STACK_W)
+        base = self._px(0, 0).y()
+        c = series_color(self, "layer")
+        bg = self.palette().color(QPalette.Window)
+        wall = QColor(self._muted)
+        p.fillRect(QRectF(x0, base, w, 7), wall)
+        p.setPen(QPen(bg, 1))
+        for k in range(int(w // 6) + 1):           # hatched like a wall in a drawing
+            xx = x0 + 6 * k
+            p.drawLine(QPointF(xx, base + 7), QPointF(min(xx + 6, x0 + w), base))
+        p.setPen(self._muted)
+        p.drawText(QRectF(x0 - 6, base + 9, w + 12, 14), Qt.AlignHCenter, "Wall")
+        total = r["total"]
+        for i in range(1, len(total)):
+            y_lo, y_hi = self._px(0, total[i - 1]).y(), self._px(0, total[i]).y()
+            band = QColor(c)
+            band.setAlphaF(0.9 if i % 2 else 0.55)
+            if self.hover is not None and i != self.hover:
+                band.setAlphaF(band.alphaF() * 0.45)
+            p.fillRect(QRectF(x0, y_hi, w, max(y_lo - y_hi, 0.4)), band)
+        top = self._px(0, total[-1]).y()
+        p.setPen(QPen(self._text, 1))
+        p.setBrush(Qt.NoBrush)
+        p.drawRect(QRectF(x0, top, w, base - top))
+        d99 = self._px(0, r["d99"]).y()
+        p.setPen(QPen(self._text, 1, Qt.DashLine))
+        p.drawLine(QPointF(x0 - 4, d99), QPointF(x0 + w + 4, d99))
 
     def set_result(self, r):
         self.r = r if r and r.get("ok") else None
@@ -239,8 +274,15 @@ class InflationPlot(_Plot):
         n = r["N"]
         xstep = max(1, int(nice_step(n, 10)))
         ticks = [(k, str(k)) for k in [1] + list(range(xstep, n + 1, xstep))]
+        # the labels on the right decide the room there: as much as on the left of the
+        # stack, after the longest one
+        fm = p.fontMetrics()
+        texts = ["Pipe radius" if r.get("internal") else "Boundary layer", "Next cell size",
+                 show_length(r["d99"]), show_length(r["y_des"]), f"Total {show_length(r['y_tot'])}"]
+        self.PAD_R = 8 + max(fm.horizontalAdvance(t) for t in texts) + 10
         self._frame(p, f"Height ({unit})", "Layer number (1 = at the wall)",
                     lambda v: f"{v * f:.3g}", ticks)
+        self._stack(p, r)
         base = self._px(0, 0).y()
         # one bar per layer: its height (4 px rounded top, 2 px gap)
         slot = (self._px(1, 0).x() - self._px(0, 0).x())
@@ -324,6 +366,8 @@ class _Legend(QWidget):
 
 # ---- the page --------------------------------------------------------------------------------
 class InflationView(QScrollArea):
+    three_d_changed = Signal(bool, bool)          # Show in 3D, Flip
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("InflationView")
@@ -333,11 +377,11 @@ class InflationView(QScrollArea):
         page.setObjectName("InflationPage")
         self.setWidget(page)
         lay = QVBoxLayout(page)
-        lay.setContentsMargins(22, 18, 22, 18)
+        lay.setContentsMargins(*PAGE_MARGINS)
         lay.setSpacing(12)
 
         head = QHBoxLayout()
-        title = QLabel("Inflation layers")
+        title = QLabel("Inflation Layers")
         title.setObjectName("PageTitle")
         head.addWidget(title)
         head.addStretch(1)
@@ -366,55 +410,37 @@ class InflationView(QScrollArea):
             self.tiles[key] = t
         lay.addLayout(tiles)
 
-        # a card with tabs; the plot takes the whole width
+        # a card: the layer sizes, with the stack on the left
         card = QFrame()
         card.setObjectName("ResultCard")
         cl = QVBoxLayout(card)
         cl.setContentsMargins(14, 10, 14, 12)
         cl.setSpacing(8)
         bar = QHBoxLayout()
-        group = QActionGroup(self)
-        group.setExclusive(True)
-        self.tabs = {}
-        for key, text in (("plot", "Layer Sizes"), ("section", "Section")):
-            a = QAction(text, self)
-            a.setCheckable(True)
-            a.triggered.connect(lambda _=False, k=key: self.show_tab(k))
-            group.addAction(a)
-            self.tabs[key] = a
-        bar.addWidget(Capsule(list(self.tabs.values()), name="Segmented"))
+        head = QLabel("Layer sizes")
+        head.setObjectName("ValueLabel")
+        bar.addWidget(head)
+        bar.addSpacing(18)
+        # the layers' thickness over the walls, in the 3D view; Flip: the other side
+        self.show_3d = Switch()
+        self.show_3d.setToolTip("Show in 3D")
+        self.show_3d.setAccessibleName("Show in 3D")
+        self.flip = Switch()
+        self.flip.setToolTip("Flip")
+        self.flip.setAccessibleName("Flip side")
+        for text, sw in (("Show in 3D", self.show_3d), ("Flip", self.flip)):
+            bar.addWidget(QLabel(text))
+            bar.addWidget(sw)
+            bar.addSpacing(10)
+            sw.toggled.connect(self._three_d)
         bar.addStretch(1)
         self.legend = _Legend([("layer", "bar", "Layer height"),
                                ("total", "line", "Total thickness so far")])
         bar.addWidget(self.legend)
-        self.section_legend = SectionLegend()
-        bar.addWidget(self.section_legend)
-        # Section — Flip Side + Fit View, capsule buttons like the tabs
-        self.section_bar = QWidget()
-        sb = QHBoxLayout(self.section_bar)
-        sb.setContentsMargins(12, 0, 0, 0)
-        sb.setSpacing(8)
-        self.flip_action = QAction("Flip Side", self)
-        self.flip_action.setCheckable(True)
-        self.flip_action.setToolTip("Put the layers on the other side of the walls\n"
-                                    "(e.g. internal flow in a duct, or a wall facing the wrong way)")
-        self.fit_action = QAction("Fit View", self)
-        self.fit_action.setToolTip("Show the whole cut again (or double-click the view)")
-        sb.addWidget(Capsule([self.flip_action], name="Segmented"))
-        sb.addWidget(Capsule([self.fit_action], name="Segmented"))
-        bar.addWidget(self.section_bar)
         cl.addLayout(bar)
-        self.views = QStackedWidget()
         self.plot = InflationPlot()
-        self.views.addWidget(self.plot)
-        self.section = SectionView()                   # follows the section plane
-        self.views.addWidget(self.section)
-        self.flip_action.toggled.connect(self.section.set_flip)
-        self.fit_action.triggered.connect(self.section.fit)
-        self.section_legend.toggled.connect(self.section.set_show)
-        cl.addWidget(self.views, 1)
+        cl.addWidget(self.plot, 1)
         lay.addWidget(card, 1)
-        self.show_tab("plot")
 
         self.checks = QLabel("")
         self.checks.setObjectName("ValueLabel")
@@ -422,34 +448,25 @@ class InflationView(QScrollArea):
         self.checks.setTextFormat(Qt.RichText)
         lay.addWidget(self.checks)
 
-    def show_tab(self, key):
-        self.tabs[key].setChecked(True)
-        self.views.setCurrentWidget({"plot": self.plot, "section": self.section}[key])
-        self.legend.setVisible(key == "plot")
-        self.section_legend.setVisible(key == "section")
-        self.section_bar.setVisible(key == "section")
+    def _three_d(self, *_):
+        self.flip.setEnabled(self.show_3d.isChecked())
+        self.three_d_changed.emit(self.show_3d.isChecked(), self.flip.isChecked())
 
-    def current_tab(self):
-        return next((k for k, a in self.tabs.items() if a.isChecked()), "plot")
+    def set_3d(self, show, flip):
+        """The switches as the file left them (no signal)."""
+        Switch.set_silently(self.show_3d, bool(show))
+        Switch.set_silently(self.flip, bool(flip))
+        self.flip.setEnabled(bool(show))
 
-    # ---- remembered per file -------------------------------------------------------
+    # ---- remembered per file (nothing of its own now: the page is one plot) ----------
     def get_state(self):
-        sec = self.section
-        return {"tab": self.current_tab(), "flip": self.flip_action.isChecked(),
-                "flow": bool(sec.show.get("flow")), "view": sec.view_state()}
+        return {}
 
     def set_state(self, st):
-        st = st or {}
-        self.flip_action.setChecked(bool(st.get("flip", False)))
-        on = bool(st.get("flow", False))
-        self.section_legend.set_on("flow", on)
-        self.section.set_show("flow", on)
-        self.section.restore_view(st.get("view"))
-        self.show_tab(st.get("tab") if st.get("tab") in self.tabs else "plot")
+        pass
 
     def set_result(self, r):
         self.plot.set_result(r)
-        self.section.set_result(r)
         if not r or not r.get("ok"):
             for t in self.tiles.values():
                 t.set("—")
@@ -477,7 +494,7 @@ class InflationView(QScrollArea):
         self.tiles["y_max"].set(show_length(r["y_max"]),
                                 f"next cell {show_length(r['y_des'])}",
                                 "ok" if r["smooth"] else "warn")
-        ok, warn = f"<span style='color:{GREEN}'>✓</span>", "<span style='color:#ff9f0a'>⚠</span>"
+        ok, warn = status_mark(True), status_mark(False)
         if r.get("internal"):                    # the layers must fit in the pipe
             first = (f"{ok if r['covers_bl'] else warn} The layers ({show_length(r['y_tot'])} "
                      f"in total) take {r['y_tot'] / r['d99'] * 100:.0f} % of the pipe radius "

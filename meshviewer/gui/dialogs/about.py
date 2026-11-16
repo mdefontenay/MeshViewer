@@ -21,6 +21,7 @@ from PySide6.QtGui import QDesktopServices, QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import QApplication, QDialog, QLabel, QPushButton, QVBoxLayout
 
 from meshviewer import __version__, version_label
+from meshviewer.gui.forms import status_mark
 
 AUTHOR = "Matthieu de Fontenay"
 BUILT_WITH = "Claude Opus 5.5"
@@ -211,7 +212,7 @@ class AboutDialog(QDialog):
             self.download.setText(f"Download {latest}")
             self.download.setVisible(True)
         elif cmp == 0:
-            self._say(f"<span style='color:#30b350'>✓</span> You're up to date "
+            self._say(f"{status_mark(True)} You're up to date "
                       f"({version_label()} is the latest release).")
         else:
             self._say(f"This app is a pre-release: {version_label()} is newer than the latest "

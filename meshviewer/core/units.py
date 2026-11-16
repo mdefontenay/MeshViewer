@@ -124,14 +124,6 @@ def unit_quantity(unit):
         if unit else None
 
 
-def field_quantity(name):
-    """What a solution field measures, from its name (core/field_kinds): "pressure",
-    "speed"… or None (cp, Mach, y+… have no unit; unknown fields neither)."""
-    from meshviewer.core.field_kinds import field_kind
-    kind = field_kind(name)
-    return kind.quantity if kind is not None else None
-
-
 def _to_si(v, unit, table):
     f = table[unit]
     return v * f[0] + f[1] if isinstance(f, tuple) else v * f

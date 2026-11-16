@@ -79,10 +79,96 @@ def test(app, files):
     made, grid = sc._label_made[0], sc._grid_actor
     check(abs(grid.GetScreenSize() - made * sc.label_factor()) < 1e-3 * grid.GetScreenSize()
           and sc.label_factor() < 0.2, "grid numbers sized for the zoom, the same on every axis")
+    zoom_checks(app, w, pump, drawn)
     w.resize(1200, 800)
     pump()
     check(screen().shape[1] > 100 and differ(screen(), screen()) == 0, "after a resize: drawn at the new size")
     w.close()
+
+
+
+def zoom_checks(app, w, pump, drawn):
+    """The wheel, a trackpad scroll and a pinch zoom toward the cursor: the point under it
+    stays put (parallel and perspective, and a 2D-like view from +Z), a wheel notch is
+    eased in over a few frames — one draw each — edges come back 0.3 s after the last
+    step, and a zoom is one Undo step."""
+    import time
+    from PySide6.QtCore import QPoint, QPointF, Qt
+    from PySide6.QtGui import QWheelEvent
+    sc, view = w.scene, w.plotter
+    cam, ren = sc.p.camera, sc.p.renderer
+    st = w.changes.stack
+    sc.set_parallel(True, render=False)
+    sc.view("iso")
+    pump()
+    q = QPointF(view.width() * 0.3, view.height() * 0.4)
+    x, y = view._display_point(q)
+    diag = sc._diag()
+
+    def under():                                 # the world point under the cursor
+        ren.SetWorldPoint(*cam.GetFocalPoint(), 1.0)
+        ren.WorldToDisplay()
+        return sc._world_at(x, y, ren.GetDisplayPoint()[2])
+
+    def wheel(pixels, angle, phase=Qt.ScrollPhase.NoScrollPhase):
+        view.wheelEvent(QWheelEvent(q, q, QPoint(0, pixels), QPoint(0, angle), Qt.NoButton,
+                                    Qt.NoModifier, phase, False))
+
+    def settle(cond, timeout=3):
+        t = time.time()
+        while not cond() and time.time() - t < timeout:
+            app.processEvents()
+            time.sleep(0.005)
+        pump()
+
+    calls = []
+    handler = view.zoom_handler
+    view.zoom_handler = lambda f, *xy: (calls.append(f), handler(f, *xy))
+    p0, s0, n0 = under(), cam.GetParallelScale(), st.count()
+    drawn.clear()
+    wheel(0, 120)                                # one notch forward: closer, × 1.2, eased in
+    check(sc._moving or not sc.hide_edges_moving, "wheel: edges off while zooming")
+    settle(lambda: not view._glide.isActive())
+    ratio = s0 / cam.GetParallelScale()
+    check(abs(ratio - 1.2) < 1e-6 and np.linalg.norm(under() - p0) < 1e-6 * diag,
+          f"wheel notch: × {ratio:.4f}, the point under the cursor stays put")
+    check(len(calls) > 3 and 0 < len(drawn) <= len(calls),
+          f"…eased in over {len(calls)} steps, {len(drawn)} frames (one per step at most)")
+    settle(lambda: not sc._zooming, timeout=1)
+    check(not sc._moving, "edges back once the zoom has stopped")
+    check(st.count() == n0 + 1, f"a wheel zoom: one Undo step ({st.count() - n0})")
+    s1, p1 = cam.GetParallelScale(), under()
+    wheel(50, 0, Qt.ScrollPhase.ScrollUpdate)    # trackpad: continuous, right away
+    check(abs(s1 / cam.GetParallelScale() - np.exp(50 * 0.004)) < 1e-6
+          and np.linalg.norm(under() - p1) < 1e-6 * diag,
+          "trackpad scroll: zoomed at once by exp(pixels × k), toward the cursor")
+    wheel(0, -240)                               # two notches back: farther
+    settle(lambda: not view._glide.isActive())
+    check(cam.GetParallelScale() > s1, "wheel backward: farther")
+    view.zoom_handler = handler
+    sc.set_parallel(False, render=False)         # perspective: toward the point too
+    sc.view("iso")
+    pump()
+    sc.p.render_now() if hasattr(sc.p, "render_now") else None
+    p2, d2 = under(), cam.GetDistance()
+    sc.zoom_at(1.5, x, y)
+    pump()
+    look = np.asarray(cam.GetDirectionOfProjection())
+    ren.SetWorldPoint(*p2, 1.0)
+    ren.WorldToDisplay()
+    px, py, _ = ren.GetDisplayPoint()
+    check(abs(px - x) < 0.5 and abs(py - y) < 0.5 and cam.GetDistance() < d2
+          and np.allclose(look, np.asarray(cam.GetDirectionOfProjection()), atol=1e-9),
+          f"perspective: the point under the cursor stays put ({px - x:.2f}, {py - y:.2f} px), "
+          "closer, not turned")
+    sc.set_parallel(True, render=False)
+    sc.view("z")                                 # seen from +Z (as a 2D file): stays so
+    pump()
+    sc.zoom_at(2.0, x, y)
+    check(np.allclose(cam.GetDirectionOfProjection(), (0, 0, -1), atol=1e-9),
+          "zoom from +Z: still looking down Z")
+    sc.fit()
+    pump()
 
 
 if __name__ == "__main__":

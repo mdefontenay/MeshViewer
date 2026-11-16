@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 from meshviewer.core import cfd
+from meshviewer.gui.forms import link, status_mark
 
 X0, X1 = 0.1, 1000.0                  # y+ range (log)
 Y0, Y1 = 0.0, 30.0                    # u+ range
@@ -262,14 +263,10 @@ class WallHelpCard(QFrame):
             col.addWidget(lab)
             row.addLayout(col, 1)
             if set_target is not None:
-                b = QPushButton(f"Use y+ = {value:g}")
-                b.setObjectName("LinkButton")
-                b.setFlat(True)
-                b.setCursor(Qt.PointingHandCursor)
-                b.clicked.connect(lambda _=False, v=value: self._use(v))
+                b = link(f"Use y+ = {value:g}", "", lambda _=False, v=value: self._use(v))
                 row.addWidget(b, 0, Qt.AlignTop)
             lay.addLayout(row)
-        warn = QLabel("<span style='color:#ff9f0a'>⚠</span> Avoid 5 &lt; y+ &lt; 30 (the buffer "
+        warn = QLabel(f"{status_mark(False)} Avoid 5 &lt; y+ &lt; 30 (the buffer "
                       "layer): neither approach is right there — unless the solver blends "
                       "them (Fluent Enhanced Wall Treatment, STAR-CCM+ All y+, OpenFOAM "
                       "nutUSpaldingWallFunction).")
@@ -282,12 +279,8 @@ class WallHelpCard(QFrame):
         note.setObjectName("Caption")
         note.setWordWrap(True)
         lay.addWidget(note)
-        more = QPushButton("More About y+ (CFD Online) ↗")
-        more.setObjectName("LinkButton")
-        more.setFlat(True)
-        more.setCursor(Qt.PointingHandCursor)
-        more.setToolTip(YPLUS_URL)
-        more.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(YPLUS_URL)))
+        more = link("More About y+ (CFD Online) ↗", YPLUS_URL,
+                    lambda: QDesktopServices.openUrl(QUrl(YPLUS_URL)))
         lay.addWidget(more, 0, Qt.AlignLeft)
         body.setFixedWidth(600)
         self.adjustSize()

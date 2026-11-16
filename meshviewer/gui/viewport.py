@@ -15,15 +15,31 @@ Two things made the stock widget draw more than needed:
     view.render_now()    draw right away
     view.flush()         draw right away if a frame is due
 
+Zooming (as in a CAD app on the Mac): the wheel, a trackpad's two-finger scroll and its
+pinch zoom smoothly, toward the point under the cursor (the camera's `zoom_at`, through
+`zoom_handler`, set by the scene), not in VTK's fixed steps toward the middle:
+
+    trackpad scroll      continuous: exp(pixels × TRACKPAD_ZOOM) per event (and its glide)
+    pinch                exp(the gesture's magnification) per event
+    mouse wheel          each notch NOTCH_ZOOM, eased in over a few frames (GLIDE_MS ticks)
+
+Each step asks for a frame (`render`): still one frame per event or tick.
+
 make_view() gives this widget — or PyVistaQt's own, untouched, when the environment
 variable MESHVIEWER_PLAIN_VIEW is set (to compare, should a picture ever look stale).
 """
 from __future__ import annotations
 
+import math
 import os
 
-from PySide6.QtCore import QThread, QTimer
+from PySide6.QtCore import QEvent, Qt, QThread, QTimer
 from pyvistaqt import QtInteractor
+
+TRACKPAD_ZOOM = 0.004          # per pixel of trackpad scroll: 100 px -> × 1.5
+NOTCH_ZOOM = math.log(1.2)     # one wheel notch (120 / 8 degrees): × 1.2
+GLIDE_MS = 15                  # a wheel notch is eased in at this tick…
+GLIDE = 0.35                   # …taking this share of what is left each tick
 
 
 class Viewport(QtInteractor):
@@ -34,6 +50,54 @@ class Viewport(QtInteractor):
         self._due.setSingleShot(True)
         self._due.setInterval(0)                    # as soon as the event is handled
         self._due.timeout.connect(self.render_now)
+        self.zoom_handler = None                    # (factor, x, y): the scene's zoom
+        self._glide_left = 0.0                      # log of the wheel zoom still to come
+        self._glide_at = (0.0, 0.0)
+        self._glide = QTimer(self)
+        self._glide.setInterval(GLIDE_MS)
+        self._glide.timeout.connect(self._glide_tick)
+
+    # ---- zooming: wheel, trackpad, pinch ---------------------------------------------------
+    def _display_point(self, pos):
+        """A Qt position (points, from the top left) -> VTK display pixels."""
+        r = self.devicePixelRatioF()
+        return pos.x() * r, (self.height() - pos.y() - 1) * r
+
+    def wheelEvent(self, ev):
+        if getattr(self, "zoom_handler", None) is None:
+            return super().wheelEvent(ev)
+        ev.accept()
+        pixels, angle = ev.pixelDelta().y(), ev.angleDelta().y()
+        x, y = self._display_point(ev.position())
+        trackpad = not ev.pixelDelta().isNull() or ev.phase() != Qt.ScrollPhase.NoScrollPhase
+        if trackpad:                                # continuous, as the fingers move
+            dy = pixels if pixels else angle / 8
+            if dy:
+                self.zoom_handler(math.exp(dy * TRACKPAD_ZOOM), x, y)
+        elif angle:                                 # a wheel notch: eased in
+            self._glide_left += angle / 120 * NOTCH_ZOOM
+            self._glide_at = (x, y)
+            if not self._glide.isActive():
+                self._glide_tick()
+                self._glide.start()
+
+    def _glide_tick(self):
+        left = self._glide_left
+        step = left if abs(left) < 2e-3 else left * GLIDE
+        self._glide_left = left - step
+        if step and self.zoom_handler is not None:
+            self.zoom_handler(math.exp(step), *self._glide_at)
+        if not self._glide_left:
+            self._glide.stop()
+
+    def event(self, ev):
+        if (ev.type() == QEvent.Type.NativeGesture
+                and getattr(self, "zoom_handler", None) is not None
+                and ev.gestureType() == Qt.NativeGestureType.ZoomNativeGesture):
+            ev.accept()                             # pinch: its magnification, continuous
+            self.zoom_handler(math.exp(ev.value()), *self._display_point(ev.position()))
+            return True
+        return super().event(ev)
 
     # ---- one frame per event -----------------------------------------------------------
     def render(self):

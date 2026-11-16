@@ -92,6 +92,14 @@ def read_mapbc(path):
     return names
 
 
+def cell_count(path):
+    """Volume cells in the file, from its header (tetra + pyramids + prisms + hexa)."""
+    endian, isize = _ugrid_sniff(path)
+    with open(path, "rb") as f:
+        h = np.fromfile(f, dtype=np.dtype(f"{endian}i{isize}"), count=7)
+    return int(h[3:].sum()) if len(h) == 7 else None
+
+
 def read_ugrid(path, debug=True):
     """Read a UGRID file. Returns dict {bc_label: pv.PolyData}.
 

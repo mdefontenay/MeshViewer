@@ -1,5 +1,9 @@
 """Scene ▸ the mouse: a click (not a drag) picks the part, face or point under it and
-does what the current mode wants; a right-click opens the part menu."""
+does what the current mode wants; a right-click opens the part menu.
+
+2D files (meshes and drawings): their lines are a pixel or two wide, so Select ▾ Node /
+Edge and Snap to edges look for the nearest one on screen instead (`nearest_on_screen`,
+within PICK_PX; a node within NODE_SNAP_PX wins over the line through it)."""
 from __future__ import annotations
 
 import numpy as np
@@ -8,6 +12,33 @@ from PySide6.QtGui import QGuiApplication
 from vtkmodules.vtkRenderingCore import vtkCellPicker, vtkHardwarePicker
 
 from meshviewer.render.style import CLICK_TOLERANCE_PX
+
+
+def nearest_on_screen(at, nodes=None, segs=None, node_px=0.0, reach_px=0.0):
+    """The nearest node or line to display point `at`, in pixels. nodes: (n, 2) display
+    points; segs: (k, 2, 2) display segments. A node within node_px first, else the
+    nearest line within reach_px, else a node within reach_px.
+    -> ("node", i, 0.0) | ("edge", j, t along it) | None."""
+    at = np.asarray(at, dtype=float)
+    node = None
+    if nodes is not None and len(nodes):
+        d = np.linalg.norm(np.asarray(nodes, dtype=float) - at, axis=1)
+        i = int(np.argmin(d))
+        if d[i] <= node_px:
+            return "node", i, 0.0
+        node = (float(d[i]), i)
+    if segs is not None and len(segs):
+        segs = np.asarray(segs, dtype=float)
+        a, ab = segs[:, 0], segs[:, 1] - segs[:, 0]
+        dd = np.einsum("ij,ij->i", ab, ab)
+        t = np.clip(np.einsum("ij,ij->i", at - a, ab) / np.where(dd > 0, dd, 1.0), 0.0, 1.0)
+        d = np.linalg.norm(a + t[:, None] * ab - at, axis=1)
+        j = int(np.argmin(d))
+        if d[j] <= reach_px:
+            return "edge", j, float(t[j])
+    if node is not None and node[0] <= reach_px:
+        return "node", node[1], 0.0
+    return None
 
 
 class Picking:
@@ -84,6 +115,13 @@ class Picking:
             return
         m = self.measure
         if m.mode in ("distance", "point"):
+            if self.model.dim == 2:                      # 2D: snapped, or inside the axes
+                snapped = self.elements.snap_2d(x, y) if m.snap else None
+                if snapped is not None:
+                    m.add_point(snapped)
+                    return
+                if pos is None:
+                    pos = self.flat_point(x, y)
             m.add_point(pos, name, cell)
             return
         if m.mode == "angle":
@@ -100,7 +138,9 @@ class Picking:
             m._changed()
             return
         if self.elements.kind != "part":             # Select ▾: a node, an edge, a face…
-            self.elements.click(name, cell, pos, additive)
+            if not (self.model.dim == 2 and self.elements.on_screen()
+                    and self.elements.click_2d(x, y, additive)):
+                self.elements.click(name, cell, pos, additive)
             return
         if additive and name:
             self.toggle_part(name)
@@ -108,6 +148,51 @@ class Picking:
             self.select(name)
         if self.on_pick:
             self.on_pick(list(self.selected_parts))
+
+    def to_display(self, pts):
+        """World points (n, 3) -> display pixels (n, 2), as VTK's (from the bottom left)."""
+        pts = np.asarray(pts, dtype=float).reshape(-1, 3)
+        if not len(pts):
+            return np.zeros((0, 2))
+        ren = self.p.renderer
+        m = ren.GetActiveCamera().GetCompositeProjectionTransformMatrix(
+            ren.GetTiledAspectRatio(), -1, 1)
+        mat = np.array([[m.GetElement(i, j) for j in range(4)] for i in range(4)])
+        h = np.column_stack([pts, np.ones(len(pts))]) @ mat.T
+        ndc = h[:, :2] / np.where(np.abs(h[:, 3:4]) > 1e-300, h[:, 3:4], 1.0)
+        (w, ht), (ox, oy) = ren.GetSize(), ren.GetOrigin()
+        return np.column_stack([(ndc[:, 0] + 1) * 0.5 * w + ox, (ndc[:, 1] + 1) * 0.5 * ht + oy])
+
+    def pixels(self, points):
+        """Screen points -> display pixels (Retina: two per point)."""
+        try:
+            return points * float(self.p.devicePixelRatioF())
+        except Exception:                                    # noqa: BLE001 no Qt widget
+            return float(points)
+
+    def flat_point(self, x, y):
+        """2D files: the point on the plane z = 0 under display (x, y), when it is inside
+        the axes (the grid's box), else None."""
+        r = self.p.renderer
+        ends = []
+        for z in (0.0, 1.0):
+            r.SetDisplayPoint(float(x), float(y), z)
+            r.DisplayToWorld()
+            w = r.GetWorldPoint()
+            ends.append(np.array(w[:3]) / (w[3] or 1.0))
+        a, b = ends
+        if abs(b[2] - a[2]) < 1e-300:
+            return None
+        p = a + (b - a) * (-a[2] / (b[2] - a[2]))
+        grid = getattr(self, "_grid_actor", None)
+        box = grid.GetBounds() if grid is not None else None
+        if box is None or box[0] > box[1]:
+            box = self.model_bounds()
+        tol = 1e-9 * self._diag()
+        if not (box[0] - tol <= p[0] <= box[1] + tol and box[2] - tol <= p[1] <= box[3] + tol):
+            return None
+        p[2] = 0.0
+        return p
 
     def pick(self, x, y):
         """Part name under the display position (x, y), or None."""

@@ -3,8 +3,8 @@ Layers for CAD): fluid properties from an altitude / depth and a temperature, th
 Mach number, the flow direction.
 
 The panel provides the widgets — fluid, level (+ level_head, level_unit), temp
-(+ temp_label), rho, mu, a, speed, mach, length, direction — and its own _update()
-and _kind_labels()."""
+(+ temp_label), rho, mu, a (folded in props_section), speed, mach, length, direction —
+and its own _update() and _kind_labels()."""
 from __future__ import annotations
 
 import numpy as np
@@ -58,6 +58,17 @@ class FluidInputs:
         self._temp_auto = air
         self.temp.setEnabled(not air)
         return None if air else self.temp.value()
+
+    def _props_title(self):
+        """▸ Properties (288.2 K · 1.225 kg/m³ · 1.79e-5 Pa·s): the values in the title."""
+        t = (self._props or {}).get("T") or self.temp.value()
+        parts = [f"{t:.4g} K"] if t else []
+        if self.rho.value():
+            parts.append(f"{self.rho.value():.4g} kg/m³")
+        if self.mu.value():
+            parts.append(f"{self.mu.value():.3g} Pa·s")
+        self.props_section.set_title("Properties" + (f"  ({' · '.join(parts)})"
+                                                      if parts else ""))
 
     def _speed_typed(self, u):
         """a typed speed sets the Mach number (M = U / a)."""

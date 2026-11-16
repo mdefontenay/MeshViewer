@@ -1,58 +1,50 @@
-"""CFD tool ▸ "Inflation Layers" (CAD files) — the inputs of the
-inflation layer calculator. Its plots are on the Inflation page (the pill under
-the 3D view switches between the model and that page).
-laid out like the CFD section of meshes — "Flow" and "Inflation layers"
-fold, each with Formulas and Values; unit menus; the speed U can be typed; flow
-direction and arrows; the walls that get the layers (a part, or faces of one part
-picked in the 3D view) give the auto length L.
-
-the Flow group is the same as in the CFD section of meshes (fluid, altitude
-or depth, density / viscosity / sound speed locked unless Custom); the growth rate is
-kept between 1 and 2; the desired cell is a factor of the largest layer.
-plain names — First layer, Layers, Growth rate, Next cell (× max layer height).
-Temperature (empty = standard); "?" next to Target y+ (resolve the wall or wall
-functions, with the law of the wall); export_info() for Export ▸ CFD settings.
-Flow — external (length L) or internal, a pipe or duct (hydraulic diameter D).
+"""CFD tool ▸ "Inflation Layers" (CAD files) — the inputs of the inflation layer
+calculator; its plots are on the Inflation page (the pill under the 3D view switches
+between the model and that page). Laid out like the CFD tool of meshes (panels/cfd.py):
+two groups, each with Formulas and Values; unit menus; the speed U can be typed; the
+walls that get the layers (a part, or faces of one part picked in the 3D view) give the
+auto length L. Flow — external (length L) or internal, a pipe or duct (diameter D).
 
     Inflation Layers                                  (switch)
-    ⌄ Flow                                  Formulas   Values
+    Fluid & Freestream                      Formulas   Values
       Fluid            [ Air — altitude          ▾ ]
       Altitude ?       [ 3000  ] [ m      ▾ ]
-      Temperature      [ 268.7 ] [ K ▾ ]
-      Density          [ 0.909 ] [ kg/m³  ▾ ]      (locked unless Custom)
-      Viscosity        [ 1.69e-5 ] [ Pa·s ▾ ]
-      Sound speed      [ 328.6 ] [ m/s    ▾ ]
-      Mach             [ 3     ]
-      Speed U          [ 986   ] [ m/s    ▾ ]
-                          X      Y      Z
-      Direction        [ 1  ] [ 0  ] [ 0  ]
-      Show flow vectors                              (switch)
-    ⌄ Inflation layers                      Formulas   Values
-      Walls            [ ● wing — 3 faces ▾ ]
-                                            Pick faces…
-      Flow             [ External — around the walls ▾ ]   (or Internal — pipe)
+      ▸ Properties  (268.7 K · 0.909 kg/m³ · 1.69e-5 Pa·s)   folded: T, ρ, μ, a
+      Mach / Speed     [ 3 ] │ [ 986 ] [ m/s ▾ ]
+      Direction        [ 1 ] [ 0 ] [ 0 ]   Vectors (switch)
+    ───────────────────────────────────────────
+    Boundary Layer & Sizing                 Formulas   Values
+      Walls            [ ● wing — 3 faces ▾ ]   Pick…
+      Regime           [ External — around the walls ▾ ]
       Length L         [ auto: 0.3 ] [ m ▾ ]      longest distance along the flow
-                                                  (internal: Diameter D, hydraulic)
-      Target y+ ?      [ 1     ]                   (? = which y+)
-      Compressibility correction                     (switch)
+      Target y+ ?      [ 1 ]   Compressible (switch)
       First layer      [ auto  ] [ µm ▾ ]
-      Layers           [ 30    ]
-      Growth rate      [ 1.3   ]                   1 – 2
+      Layers / Rate    [ 30 ] layers │ [ 1.2 ] growth
       Next cell        [ 2     ] × max layer height
-    ✓ covers the boundary layer · ✓ smooth transition
+    ───────────────────────────────────────────
+    ✓ Stack · δ99 / ✓ Next cell · y+
+
+The Flow group is shared with the CFD tool of meshes (panels/fluid.py): density,
+viscosity and sound speed locked unless Custom; the temperature empty = standard. The
+growth rate is kept between 1 and 2; the next cell is a factor of the largest layer.
+export_info() for Export ▸ CFD Settings.
 """
 from __future__ import annotations
 
 import numpy as np
+import pyvista as pv
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QSizePolicy, QWidget
 
 from meshviewer.core import cfd
+from meshviewer.render.overlays import auto_side
 from meshviewer.gui.panels.cfd import ATMOSPHERE_URL, FLOW_FORMULAS as MESH_FLOW_FORMULAS, FLUIDS
 from meshviewer.core.units import (DENSITY_UNITS, LENGTH_UNITS, LEVEL_UNITS, SPEED_UNITS,
                                    VISCOSITY_UNITS, nice_length)
 from meshviewer.gui.panels.fluid import FluidInputs
-from meshviewer.gui.forms import _label, _grid, _row
+from meshviewer.gui.forms import (
+    _grid, _label, _row, column, group_head, link, note, pair, rule, status_mark,
+)
 from meshviewer.core.units import show_length
 from meshviewer.core.units import UNITS
 from meshviewer.gui.dialogs.wall_help import YPLUS_URL, label_with_help, wall_help_button
@@ -61,7 +53,6 @@ from meshviewer.gui.widgets import (
     TemperatureField, UnitField, ValuesButton, color_dot, help_button,
 )
 from meshviewer.core.units import CELL_UNITS
-from meshviewer.gui.forms import _link
 
 DEFAULTS = {"on": False, "yplus": 1.0, "mach": 0.3, "length": None,
             "altitude": 0.0, "temperature": None, "y_min": None, "layers": 30, "growth": 1.2,
@@ -69,6 +60,7 @@ DEFAULTS = {"on": False, "yplus": 1.0, "mach": 0.3, "length": None,
             "y_des_factor": 2.0,                                     # CFD section
             "compressible": True,
             "direction": [1.0, 0.0, 0.0], "vectors": False,
+            "thickness": False, "flip": False,    # the layers in 3D (the Inflation page)
             "kind": "external",                                     # or internal
             "walls": None, "units": {}}       # walls: {"part": name, "faces": [ids] | None}
 MODEL = "__model__"                     # Walls menu: the whole model
@@ -76,7 +68,7 @@ FACES = "__faces__"                     # Walls menu: the faces picked
 
 # the Flow formulas are the CFD section's (same fluid models)
 FLOW_FORMULAS = [it if isinstance(it, str) else
-                 (it[0].replace("in y+ estimator", "in Inflation layers"), it[1])
+                 (it[0].replace("in y+ Estimator", "in Boundary Layer & Sizing"), it[1])
                  for it in MESH_FLOW_FORMULAS]
 LAYER_FORMULAS = [
     "Wall shear (flat plate, turbulent)",
@@ -121,29 +113,28 @@ class InflationPanel(FluidInputs, QWidget):
         self._picking = False
         self._pick_part = None                 # files without CAD faces: a whole part
         self._props = None                     # air / water at the altitude / depth
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(2, 0, 2, 0)
-        lay.setSpacing(6)
+        self.show_3d = False                   # the layers' thickness in 3D (Inflation page)
+        self.flip_3d = False                   # …on the other side than the one chosen
+        self._auto_side = None                 # (walls, thickness) -> +1 / -1, the side
+        self.side = 1                          # the side shown: +1 along the normals
+        lay = column(self)
 
         # On / off: shown in the section header by the sidebar.
         self.enable = Switch()
         self.enable.setToolTip("Inflation layer calculator: its plots open under the 3D view")
         self.enable.toggled.connect(self._enabled)
-        self.hint = _label("Off — switch on for the inflation layer calculator.", "InfoLine")
-        self.hint.setWordWrap(True)
+        self.hint = note("Off — switch on for the inflation layer calculator.")
         lay.addWidget(self.hint)
 
         self.details = QWidget()
-        d = QVBoxLayout(self.details)
-        d.setContentsMargins(0, 0, 0, 0)
-        d.setSpacing(6)
+        d = column(self.details)
         lay.addWidget(self.details)
 
-        # ---- flow (a group that folds) ---------------------------------------------
-        flow = QWidget()
-        fl = QVBoxLayout(flow)
-        fl.setContentsMargins(0, 0, 0, 0)
-        fl.setSpacing(6)
+        # ---- Fluid & Freestream ---------------------------------------------------
+        self.flow_values = ValuesButton("Flow", tip="Every flow value: Re, T, p, ν, q…")
+        d.addLayout(group_head("Fluid & Freestream",
+                                     FormulasButton("Flow — formulas", FLOW_FORMULAS),
+                                     self.flow_values))
         g = _grid()                                      # as the CFD section
         self.fluid = MenuSelect()
         for key, text in FLUIDS:
@@ -164,6 +155,11 @@ class InflationPanel(FluidInputs, QWidget):
         hl.addWidget(self.level_help)
         hl.addStretch(1)
         g.addWidget(self.level_head, 1, 0)
+        d.addLayout(g)
+        # the fluid's properties, folded: their values in the title
+        props = QWidget()
+        pg = _grid()
+        props.setLayout(pg)
         self.temp = TemperatureField()                   # empty = the standard one
         self.temp.setToolTip("Free-stream temperature. Air: the standard one at the altitude\n"
                              "(U.S. Standard Atmosphere), locked like ρ, μ and a. Water: type\n"
@@ -171,37 +167,35 @@ class InflationPanel(FluidInputs, QWidget):
         self._temp_auto = False                    # showing air's standard T
         self.temp.valueChanged.connect(self._fluid_changed)
         self.temp.unitChanged.connect(self._fluid_changed)
-        self.temp_label, self.temp_unit = _row(g, 2, "Temperature", self.temp)
+        self.temp_label, self.temp_unit = _row(pg, 0, "Temperature", self.temp)
         self.rho = UnitField(DENSITY_UNITS)
         self.mu = UnitField(VISCOSITY_UNITS)
         self.a = UnitField(SPEED_UNITS)
         for r_, (text, box, tip) in enumerate((
                 ("Density", self.rho, "ρ of the free stream"),
                 ("Viscosity", self.mu, "Dynamic viscosity μ of the free stream"),
-                ("Sound speed", self.a, "Speed of sound a (speed U = Mach × a)")), start=3):
+                ("Sound speed", self.a, "Speed of sound a (speed U = Mach × a)")), start=1):
             box.setToolTip(tip)
             box.valueChanged.connect(self._update)
-            _row(g, r_, text, box)
+            _row(pg, r_, text, box)
+        self.props_section = CollapsibleSection("Properties", props, "cfdmode_props",
+                                                sub=True, start_open=False)
+        d.addWidget(self.props_section)
+        g = _grid()
         self.mach = NumberField(0.3)
         self.mach.setToolTip("Free-stream Mach number (U = Mach × a)")
-        _row(g, 6, "Mach", self.mach)
         self.u = UnitField(SPEED_UNITS)                  # typed U -> Mach
         self.u.setToolTip("Free-stream speed U (Mach = U / a)")
         self.u.valueChanged.connect(self._speed_typed)
-        _row(g, 7, "Speed U", self.u)
-        axes = QWidget()
-        al = QHBoxLayout(axes)
-        al.setContentsMargins(0, 0, 0, 0)
-        al.setSpacing(4)
+        g.addWidget(QLabel("Mach / Speed"), 0, 0)
+        g.addWidget(pair(self.mach, None, self.u, None), 0, 1)
+        g.addWidget(self.u.menu, 0, 2, 1, 2)
         dirs = QWidget()
         dl = QHBoxLayout(dirs)
         dl.setContentsMargins(0, 0, 0, 0)
         dl.setSpacing(4)
         self.direction = []
         for k, v in zip("XYZ", (1.0, 0.0, 0.0)):
-            lab = _label(k, "AxisLabel")
-            lab.setAlignment(Qt.AlignCenter)
-            al.addWidget(lab, 1)
             b_ = NumberField(v)
             b_.setMinimumWidth(0)
             b_.setAlignment(Qt.AlignCenter)
@@ -209,55 +203,51 @@ class InflationPanel(FluidInputs, QWidget):
             b_.valueChanged.connect(self._direction_changed)
             dl.addWidget(b_, 1)
             self.direction.append(b_)
-        g.addWidget(axes, 8, 1, 1, 3)
+        dl.addSpacing(8)
+        dl.addWidget(QLabel("Vectors"))
+        self.vectors = Switch()
+        self.vectors.setToolTip("Show Flow Vectors")
+        self.vectors.setAccessibleName("Show flow vectors")
+        self.vectors.toggled.connect(self._vectors_toggled)
+        dl.addWidget(self.vectors)
         lab = QLabel("Direction")
         lab.setToolTip("Flow direction X / Y / Z (any length): gives the auto length L")
-        g.addWidget(lab, 9, 0)
-        g.addWidget(dirs, 9, 1, 1, 3)
-        fl.addLayout(g)
-        r = QHBoxLayout()
-        r.addWidget(QLabel("Show flow vectors"))
-        r.addStretch(1)
-        self.vectors = Switch()
-        self.vectors.setToolTip("Small arrows before and after the walls, along the flow")
-        self.vectors.toggled.connect(self._vectors_toggled)
-        r.addWidget(self.vectors)
-        fl.addLayout(r)
-        self.flow_values = ValuesButton("Flow", tip="Every flow value: Re, T, p, ν, q…")
-        self.flow_section = CollapsibleSection(
-            "Flow", flow, "cfdmode_flow", sub=True,
-            trailing=self._tail(FormulasButton("Flow — formulas", FLOW_FORMULAS),
-                                self.flow_values))
-        d.addWidget(self.flow_section)
+        g.addWidget(lab, 1, 0)
+        g.addWidget(dirs, 1, 1, 1, 3)
+        d.addLayout(g)
+        d.addWidget(rule())
 
-        # ---- inflation layers (a group that folds) ---------------------------------
-        lw = QWidget()
-        ll = QVBoxLayout(lw)
-        ll.setContentsMargins(0, 0, 0, 0)
-        ll.setSpacing(6)
+        # ---- Boundary Layer & Sizing ------------------------------------------------
+        self.layer_values = ValuesButton("Inflation layers",
+                                         tip="Every value: Cf, τw, u*, layers, δ99…")
+        d.addLayout(group_head("Boundary Layer & Sizing",
+                                     FormulasButton("Inflation layers — formulas",
+                                                    LAYER_FORMULAS),
+                                     self.layer_values))
         g = _grid()
         self.wall_menu = MenuSelect()                    # the walls
         self.wall_menu.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.wall_menu.setToolTip("Surfaces that get the inflation layers: they give the\n"
                                   "auto length L, and are tinted in the 3D view")
         self.wall_menu.currentIndexChanged.connect(self._wall_chosen)
-        _row(g, 0, "Walls", self.wall_menu, wide=True)
-        ll.addLayout(g)
-        r = QHBoxLayout()                                # Pick faces… / picking: Apply, Cancel
-        r.setContentsMargins(0, 0, 0, 0)
-        self.pick_info = _label("", "InfoLine")
-        self.pick_info.setWordWrap(True)
-        r.addWidget(self.pick_info, 1)
-        r.addStretch(0)
-        self.pick_btn = _link("Pick Faces…", "Click faces of one part in the 3D view\n"
+        g.addWidget(QLabel("Walls"), 0, 0)
+        g.addWidget(self.wall_menu, 0, 1)
+        self.pick_btn = link("Pick…", "Click faces of one part in the 3D view\n"
                               "(⇧-click to add more), then Apply", self._start_pick)
+        g.addWidget(self.pick_btn, 0, 2, 1, 2)
+        d.addLayout(g)
+        self.pick_row = QWidget()                        # picking: what is picked, Apply, Cancel
+        r = QHBoxLayout(self.pick_row)
+        r.setContentsMargins(0, 0, 0, 0)
+        self.pick_info = note()
+        r.addWidget(self.pick_info, 1)
         self.apply_btn = QPushButton("Apply")
         self.apply_btn.clicked.connect(self._apply_pick)
         self.cancel_btn = QPushButton("Cancel")
         self.cancel_btn.clicked.connect(self._cancel_pick)
-        for b in (self.pick_btn, self.cancel_btn, self.apply_btn):
+        for b in (self.cancel_btn, self.apply_btn):
             r.addWidget(b)
-        ll.addLayout(r)
+        d.addWidget(self.pick_row)
         g = _grid()
         self.kind = MenuSelect()                         # external / internal flow
         self.kind.addItem("External — around the walls", "external")
@@ -267,49 +257,47 @@ class InflationPanel(FluidInputs, QWidget):
                              "Internal: developed pipe flow, Reynolds number on the hydraulic\n"
                              "diameter D; the entrance acts like a flat plate from the inlet")
         self.kind.currentIndexChanged.connect(self._kind_changed)
-        _row(g, 0, "Flow", self.kind, wide=True)
+        _row(g, 0, "Regime", self.kind, wide=True)
         self.length = UnitField(LENGTH_UNITS)
         self.length.setToolTip("Reference length for the Reynolds number. Empty = the longest\n"
                                "distance across the walls along the flow")
         self.length_label, _ = _row(g, 1, "Length L", self.length)
-        self.yplus = NumberField(1.0)
-        self.yplus.setToolTip("The y+ you want at the wall")
-        lab, _ = _row(g, 2, "Target y+", self.yplus)
-        lab.hide()                                       # "?" = which y+ to aim for
-        g.addWidget(label_with_help("Target y+", wall_help_button(
-            self.yplus.value, self._set_target)), 2, 0)
-        ll.addLayout(g)
-        r = QHBoxLayout()
-        r.setContentsMargins(0, 0, 0, 0)
-        r.addStretch(1)
-        self.auto_length = _link("Back to Auto Length", "Forget the typed length: use the "
+        self.auto_length = link("Back to Auto Length", "Forget the typed length: use the "
                                  "longest distance across the walls along the flow",
                                  self._auto_length)
-        r.addWidget(self.auto_length)
-        ll.addLayout(r)
-        r = QHBoxLayout()                              # same as the y+ estimator
-        r.addWidget(QLabel("Compressibility correction"))
-        r.addStretch(1)
-        self.compressible = Switch(True)
-        self.compressible.setToolTip("Lower skin friction at high Mach (Raymer):\n"
-                                     "Cf × (1 + 0.144 M²)^−0.65. Off = the plain flat-plate\n"
-                                     "Cf, as in the original calculator")
+        g.addWidget(self.auto_length, 2, 1, 1, 3, Qt.AlignRight)
+        self.yplus = NumberField(1.0)
+        self.yplus.setToolTip("The y+ you want at the wall")
+        g.addWidget(label_with_help("Target y+", wall_help_button(
+            self.yplus.value, self._set_target)), 3, 0)
+        self.compressible = Switch(True)                 # same as the y+ Estimator
+        self.compressible.setToolTip("Compressibility Correction")
+        self.compressible.setAccessibleName("Compressibility correction")
         self.compressible.toggled.connect(self._update)
-        r.addWidget(self.compressible)
-        ll.addLayout(r)
-        g = _grid()
+        yr = QWidget()
+        yl = QHBoxLayout(yr)
+        yl.setContentsMargins(0, 0, 0, 0)
+        yl.setSpacing(6)
+        yl.addWidget(self.yplus, 1)
+        yl.addSpacing(6)
+        comp = QLabel("Compressible")
+        comp.setToolTip("Lower skin friction at high Mach (Raymer):\n"
+                        "Cf × (1 + 0.144 M²)^−0.65. Off = the plain flat-plate Cf")
+        yl.addWidget(comp)
+        yl.addWidget(self.compressible)
+        g.addWidget(yr, 3, 1, 1, 3)
         self.y_min = UnitField(CELL_UNITS)
         self.y_min.setToolTip("Height of the first layer, at the wall (y_min).\n"
                               "Empty = the height that gives the target y+")
-        _row(g, 0, "First layer", self.y_min)            # plain names
+        _row(g, 4, "First layer", self.y_min)            # plain names
         self.layers = NumberField(30)
         self.layers.setToolTip("Number of inflation layers (N)")
-        _row(g, 1, "Layers", self.layers)
         self.growth = NumberField(1.2)
         self.growth.setRange(1.0, 2.0)
         self.growth.setToolTip("Growth rate G: each layer is G times taller than the one\n"
                                "below it (between 1 and 2)")
-        _row(g, 2, "Growth rate", self.growth)
+        g.addWidget(QLabel("Layers / Rate"), 5, 0)
+        g.addWidget(pair(self.layers, "layers", self.growth, "growth"), 5, 1, 1, 3)
         self.y_des = NumberField(2.0)                    # a factor of y_max
         self.y_des.setRange(1.0, 10.0)
         tip = ("Next cell: the first ordinary cell of the volume mesh above the layers,\n"
@@ -318,26 +306,18 @@ class InflationPanel(FluidInputs, QWidget):
                "mesh (no sudden jump in cell size, which hurts the solution).\n"
                "Use about the same size for the surface cells on these walls: cells\n"
                "about as wide as they are tall keep a low aspect ratio.")
-        lab, _ = _row(g, 3, "Next cell", self.y_des)
+        lab, _ = _row(g, 6, "Next cell", self.y_des)
         factor = _label("× max layer height", "AxisLabel")
-        g.addWidget(factor, 3, 2, 1, 2)
+        g.addWidget(factor, 6, 2, 1, 2)
         for w in (lab, self.y_des, factor):
             w.setToolTip(tip)
-        ll.addLayout(g)
-        self.summary = _label("", "InfoLine")
-        self.summary.setWordWrap(True)
+        d.addLayout(g)
+        d.addWidget(rule())
+        self.summary = note()                            # ✓ Stack · δ99 / ✓ Next cell · y+
         self.summary.setTextFormat(Qt.RichText)
-        ll.addWidget(self.summary)
-        self.note = _label("", "InfoLine")
-        self.note.setWordWrap(True)
-        ll.addWidget(self.note)
-        self.layer_values = ValuesButton("Inflation layers",
-                                         tip="Every value: Cf, τw, u*, layers, δ99…")
-        self.layer_section = CollapsibleSection(
-            "Inflation layers", lw, "cfdmode_layers", sub=True,
-            trailing=self._tail(FormulasButton("Inflation layers — formulas", LAYER_FORMULAS),
-                                self.layer_values))
-        d.addWidget(self.layer_section)
+        d.addWidget(self.summary)
+        self.note = note()
+        d.addWidget(self.note)
 
         for box in (self.yplus, self.mach, self.length, self.level, self.y_min, self.layers,
                     self.growth, self.y_des):
@@ -350,16 +330,6 @@ class InflationPanel(FluidInputs, QWidget):
         self._show_pick_buttons()
         self._fill_properties()
         self.details.setVisible(False)
-
-    @staticmethod
-    def _tail(*widgets):
-        w = QWidget()
-        h = QHBoxLayout(w)
-        h.setContentsMargins(0, 0, 0, 0)
-        h.setSpacing(10)
-        for x in widgets:
-            h.addWidget(x)
-        return w
 
     def _unit_fields(self):
         return {"altitude": self.level, "rho": self.rho, "mu": self.mu, "a": self.a,
@@ -392,6 +362,9 @@ class InflationPanel(FluidInputs, QWidget):
         Switch.set_silently(self.enable, bool(st["on"]))
         Switch.set_silently(self.compressible, bool(st["compressible"]))
         Switch.set_silently(self.vectors, bool(st["vectors"]))
+        self.show_3d = bool(st.get("thickness", False))
+        self.flip_3d = bool(st.get("flip", False))
+        self._auto_side = None
         self.kind.blockSignals(True)
         self.kind.setCurrentIndex(max(self.kind.findData(st.get("kind", "external")), 0))
         self.kind.blockSignals(False)
@@ -420,6 +393,7 @@ class InflationPanel(FluidInputs, QWidget):
                 "compressible": self.compressible.isChecked(),
                 "direction": [b.value() or 0.0 for b in self.direction],
                 "vectors": self.vectors.isChecked(), "walls": self.walls,
+                "thickness": self.show_3d, "flip": self.flip_3d,
                 "units": {k: b.unit() for k, b in self._unit_fields().items()}}
 
     def refresh_names(self):
@@ -591,7 +565,8 @@ class InflationPanel(FluidInputs, QWidget):
         self.cancel_btn.setVisible(p)
         sc = self.scene
         self.pick_info.setVisible(p)
-        if hasattr(self, "layer_section"):
+        self.pick_row.setVisible(p)                      # no gap when not picking
+        if hasattr(self, "summary"):
             self._relayout()
         if not p or sc is None:
             self.pick_info.setText("")
@@ -607,7 +582,7 @@ class InflationPanel(FluidInputs, QWidget):
 
     def _relayout(self):
         """Rows shown / hidden: shrink back (no gap left where the picking row was)."""
-        for w in (self.layer_section.content, self.flow_section.content):
+        for w in (self.details,):
             while w is not None:
                 if w.layout() is not None:
                     w.layout().invalidate()
@@ -629,12 +604,63 @@ class InflationPanel(FluidInputs, QWidget):
             return
         on = self.enabled
         mesh = self._wall_mesh() if on and not self._picking else None
-        sc.walls.show(mesh)
+        thick, over, lines = None, mesh, None
+        r = self.result or {}
+        if on and not self._picking and self.show_3d and r.get("ok"):
+            to_m, _ = self._to_metres()
+            names = [self.walls["part"]] if mesh is not None else \
+                [n for n in sc.names if sc.visible.get(n)]
+            if over is None:                                 # the whole model: what shows
+                shown = [sc.model.parts[n] for n in names]
+                over = pv.merge(shown) if len(shown) > 1 else (shown[0] if shown else None)
+            thick = r["y_tot"] / to_m
+            if over is not None:
+                key = (id(over) if mesh is None else (self.walls["part"],
+                       tuple(self.walls.get("faces") or ())), tuple(names), round(thick, 12))
+                if self._auto_side is None or self._auto_side[0] != key:
+                    self._auto_side = (key, auto_side(over, thick))   # fewest folds
+                self.side = self._auto_side[1] * (-1 if self.flip_3d else 1)
+                thick *= self.side
+                lines = self._wall_lines(names)
+        sc.walls.show(mesh, thick, over, lines)
         if on and self.vectors.isChecked() and np.linalg.norm(self._dir()):
             b = mesh.bounds if mesh is not None else sc.model_bounds()
             sc.flow.show(self._dir(), b)
         else:
             sc.flow.hide()
+
+    def _wall_lines(self, names):
+        """The walls' feature edges (a CAD part's face borders; only those of the picked
+        faces), to draw on the layers' shell."""
+        sc, el = self.scene, self.scene.elements
+        out = []
+        for n in names:
+            hidden = None
+            faces = (self.walls or {}).get("faces")
+            if faces:
+                f = el.features(n)
+                if f.face_ids is not None:
+                    hidden = set(int(i) for i in f.face_ids) - set(int(i) for i in faces)
+            try:
+                lines = el.feature_lines(n, hidden)
+            except Exception:                                # noqa: BLE001
+                continue
+            if lines.n_points:
+                out.append(lines)
+        if not out:
+            return None
+        return pv.merge(out) if len(out) > 1 else out[0]
+
+    def set_3d(self, show=None, flip=None):
+        """The Inflation page's Show in 3D and Flip: the layers' total thickness over the
+        walls, on the side with the fewest folds (Flip: the other)."""
+        if show is not None:
+            self.show_3d = bool(show)
+        if flip is not None:
+            self.flip_3d = bool(flip)
+        self._save()
+        self._sync_overlays()
+        self.changed.emit(self.result or {"ok": False})     # the page's switches follow
 
     # ---- handlers -----------------------------------------------------------------------
     def _enabled(self, on):
@@ -719,16 +745,16 @@ class InflationPanel(FluidInputs, QWidget):
             self.u.setValue(r["U"])
         if r.get("ok"):
             self.y_min.setPlaceholderText(f"auto: {r['y_calc'] / self.y_min.factor:.3g}")
-            ok, warn = "<span style='color:#30b350'>✓</span>", \
-                "<span style='color:#ff9f0a'>⚠</span>"
+            ok, warn = status_mark(True), status_mark(False)
             self.summary.setText(
-                f"{ok if r['covers_bl'] else warn} layers {show_length(r['y_tot'])} thick · "
-                f"{'pipe radius' if internal else 'boundary layer'} {show_length(r['d99'])}<br>"
-                f"{ok if r['smooth'] else warn} next cell {show_length(r['y_des'])} · "
+                f"{ok if r['covers_bl'] else warn} Stack: {show_length(r['y_tot'])}  ·  "
+                f"{'Pipe radius' if internal else 'δ₉₉'}: {show_length(r['d99'])}<br>"
+                f"{ok if r['smooth'] else warn} Next cell: {show_length(r['y_des'])}  ·  "
                 f"y+ ≈ {r['yplus_est']:.3g}")
         else:
             self.summary.setText("Fill in a speed, a length and the layers.")
         self._values(r)
+        self._props_title()
         self._sync_overlays()
         self.changed.emit(r)
 

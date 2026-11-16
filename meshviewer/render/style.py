@@ -16,6 +16,8 @@ FEATURE_ANGLE = 30.0        # degrees; sharper creases are drawn as feature edge
 SELECT_COLOR = "#0a84ff"    # fallback; the system accent colour is used when known
 HEAVY_OUTLINE = 300_000     # triangles; a bigger selection's outline hides while moving
 CLICK_TOLERANCE_PX = 4      # a press+release closer than this is a click, not a drag
+PICK_PX = 10                # 2D: Select ▾ Node / Edge and Snap to edges reach this far
+NODE_SNAP_PX = 7            # 2D: a node this close wins over the line through it
 AXIS_FONT_DEFAULT = 16       # grid label points (Appearance slider: 10 = original size … 28)
 EDGE_WIDTHS = {"thin": 1.0, "medium": 1.5, "thick": 2.0}   # feature edge lines, pixels
 AXES_MODES = ("off", "axes", "grid", "both")               # Display ▸ Axes

@@ -18,6 +18,7 @@ from meshviewer.core.cfd_export import FORMATS as CFD_FORMATS
 from meshviewer.core.export import FORMATS
 from meshviewer.gui.store import settings
 from meshviewer.gui.widgets import Capsule, MenuSelect, Switch
+from meshviewer.gui.forms import sheet_title
 
 CFD_NOTES = {
     "openfoam": "The addLayersControls block of snappyHexMeshDict: first layer thickness, "
@@ -45,8 +46,7 @@ class ExportDialog(QDialog):
         lay.setSizeConstraint(QLayout.SetFixedSize)
         lay.setContentsMargins(20, 18, 20, 14)
         lay.setSpacing(12)
-        title = QLabel("Export")
-        title.setStyleSheet("font-size: 15px; font-weight: 600;")
+        title = sheet_title("Export")
         head = QHBoxLayout()
         head.addWidget(title)
         head.addStretch(1)

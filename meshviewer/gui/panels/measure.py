@@ -3,88 +3,55 @@ Distance (two points; "From origin": one point from (0, 0, 0)) · Angle · Area 
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction, QActionGroup
 from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
-from meshviewer.render.measure import AXIS_COLORS
 from meshviewer.core.units import fmt
-from meshviewer.gui.widgets import Capsule, Switch
-
-
-def _exclusive(parent, names, slot):
-    group = QActionGroup(parent)
-    group.setExclusive(True)
-    actions = []
-    for key, text in names:
-        a = QAction(text, parent)
-        a.setCheckable(True)
-        a.setData(key)
-        group.addAction(a)
-        actions.append(a)
-    group.triggered.connect(lambda a: slot(a.data()))
-    return actions
-
-
-def _label(name, text=""):
-    lbl = QLabel(text)
-    lbl.setObjectName(name)
-    return lbl
+from meshviewer.gui.forms import _label, button, buttons, column, note, segmented, switch_row
+from meshviewer.gui.widgets import Switch
+from meshviewer.render.measure import AXIS_COLORS
 
 
 class MeasurePanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.measure = None
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(2, 0, 4, 0)
-        lay.setSpacing(8)
+        lay = column(self)
 
         # "Area & Volume" is just "Area" (both are shown)
-        self.mode_actions = _exclusive(self, [("distance", "Distance"),
-                                              ("angle", "Angle"), ("area", "Area")],
-                                       self._mode)
         tips = ("Click two points: the distance and ΔX, ΔY, ΔZ between them.\n"
                 "From origin: one point, its X / Y / Z and distance from (0, 0, 0)",
                 "Click two faces: the angle between them",
                 "Click parts (or CAD faces): area, and volume when they close up")
-        for a, tip in zip(self.mode_actions, tips):
-            a.setToolTip(tip)
+        modes, cap = segmented(self, [(k, t, tip) for (k, t), tip in zip(
+            (("distance", "Distance"), ("angle", "Angle"), ("area", "Area")), tips)],
+            self._mode)
+        self.mode_actions = list(modes.values())
         self.mode_actions[0].setChecked(True)
-        lay.addWidget(Capsule(self.mode_actions, name="Segmented"))
+        lay.addWidget(cap)
 
-        # Distance: snap. Area: what a click picks.
-        self.snap_row, sr = QWidget(), QHBoxLayout()
-        self.snap_row.setLayout(sr)
-        sr.setContentsMargins(0, 0, 0, 0)
-        sr.addWidget(QLabel("Snap to vertices"))
-        sr.addStretch(1)
+        # Distance: snap, from origin. Area: what a click picks.
         self.snap = Switch()
         self.snap.toggled.connect(lambda on: self.measure and setattr(self.measure, "snap", on))
-        sr.addWidget(self.snap)
+        self.snap_row = switch_row("Snap to vertices", self.snap)
         lay.addWidget(self.snap_row)
 
-        self.origin_row, orr = QWidget(), QHBoxLayout()   # distance from (0, 0, 0)
-        self.origin_row.setLayout(orr)
-        orr.setContentsMargins(0, 0, 0, 0)
-        orr.addWidget(QLabel("From origin"))
-        orr.addStretch(1)
-        self.from_origin = Switch()
-        self.from_origin.setToolTip("Each click is one point: its X / Y / Z and its distance "
-                                    "from (0, 0, 0)")
+        self.from_origin = Switch()                       # distance from (0, 0, 0)
         self.from_origin.toggled.connect(
             lambda on: self.measure and self.measure.set_from_origin(on))
-        orr.addWidget(self.from_origin)
+        self.origin_row = switch_row(
+            "From origin", self.from_origin,
+            "Each click is one point: its X / Y / Z and its distance from (0, 0, 0)")
         lay.addWidget(self.origin_row)
 
-        self.pick_row, pr = QWidget(), QHBoxLayout()
-        self.pick_row.setLayout(pr)
+        picks, cap = segmented(self, [("parts", "Parts"), ("faces", "CAD faces")], self._pick)
+        self.pick_actions = list(picks.values())
+        self.pick_actions[0].setChecked(True)
+        self.pick_row = QWidget()
+        pr = QHBoxLayout(self.pick_row)
         pr.setContentsMargins(0, 0, 0, 0)
         pr.addWidget(QLabel("Pick"))
         pr.addStretch(1)
-        self.pick_actions = _exclusive(self, [("parts", "Parts"), ("faces", "CAD faces")],
-                                       self._pick)
-        self.pick_actions[0].setChecked(True)
-        pr.addWidget(Capsule(self.pick_actions, name="Segmented"))
+        pr.addWidget(cap)
         lay.addWidget(self.pick_row)
 
         # ---- result card --------------------------------------------------------
@@ -96,15 +63,13 @@ class MeasurePanel(QWidget):
         lay.addWidget(self.card)
         self._card_widgets = []
 
-        self.units_note = _label("InfoLine", "")
-        self.units_note.setWordWrap(True)
+        self.units_note = note()
         lay.addWidget(self.units_note)
 
-        clear = QAction("Clear", self)
-        clear.triggered.connect(lambda: self.measure and self.measure.clear())
+        clear = button(self, "Clear", lambda: self.measure and self.measure.clear())
         row = QHBoxLayout()
         row.addStretch(1)
-        row.addWidget(Capsule([clear], name="Segmented"))
+        row.addWidget(buttons(clear))
         lay.addLayout(row)
         self._mode_widgets("distance")
 
@@ -117,6 +82,9 @@ class MeasurePanel(QWidget):
         self.mode_actions[1].setToolTip(
             "Click two lines (or cell edges): the angle between them" if scene.model.dim == 2
             else "Click two faces: the angle between them")
+        snap = "Snap to edges" if scene.model.dim == 2 else "Snap to vertices"
+        self.snap_row.label.setText(snap)                 # 2D: lines and their ends
+        self.snap.setAccessibleName(snap)
         self._mode_widgets(next(a.data() for a in self.mode_actions if a.isChecked()))
         self.show_result(self.measure.result())
 
@@ -159,12 +127,12 @@ class MeasurePanel(QWidget):
         top = QWidget()
         h = QHBoxLayout(top)
         h.setContentsMargins(0, 0, 0, 0)
-        h.addWidget(_label("Caption", caption))
+        h.addWidget(_label(caption, "Caption"))
         h.addStretch(1)
         if tag:
-            h.addWidget(_label("Tag", tag))
+            h.addWidget(_label(tag, "Tag"))
         self._add(top)
-        big = _label("MutedValue" if muted else "BigValue", value)
+        big = _label(value, "MutedValue" if muted else "BigValue")
         big.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self._add(big)
 
@@ -177,11 +145,11 @@ class MeasurePanel(QWidget):
         for row, ((name, v), color) in enumerate(zip(rows, AXIS_COLORS)):
             dot = QLabel("●")
             dot.setStyleSheet(f"color: {color}; font-size: 10px;")
-            val = _label("ValueLabel", fmt(v, u))
+            val = _label(fmt(v, u), "ValueLabel")
             val.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
             val.setTextInteractionFlags(Qt.TextSelectableByMouse)
             g.addWidget(dot, row, 0)
-            g.addWidget(_label("AxisLabel", name), row, 1)
+            g.addWidget(_label(name, "AxisLabel"), row, 1)
             g.addWidget(val, row, 2)
         g.setColumnStretch(2, 1)
         self._add(grid_w)
@@ -226,9 +194,7 @@ class MeasurePanel(QWidget):
                 return
             self._headline("Angle", f"{r['planes']:.2f}°", tag=f"between the {what}")
             other = "directions" if r.get("lines") else "normals"
-            note = _label("InfoLine", f"Between their {other}: {r['normals']:.2f}°")
-            note.setTextInteractionFlags(Qt.TextSelectableByMouse)
-            self._add(note)
+            self._add(note(f"Between their {other}: {r['normals']:.2f}°", selectable=True))
         elif r.get("mode") == "area":
             if not r.get("count"):
                 self._headline("Area", "—", tag="nothing selected", muted=True)
@@ -239,7 +205,7 @@ class MeasurePanel(QWidget):
             if r["count"] == 1:                                  # "1 face", "1 boundary"
                 what = what[:-3] + "y" if what.endswith("ies") else what.rstrip("s")
             on = f' on {r["n_parts"]} parts' if what.startswith("face") and r.get("n_parts", 1) > 1 else ""
-            sel = _label("SelectionCount", f'{r["count"]} {what}{on} selected')
+            sel = _label(f'{r["count"]} {what}{on} selected', "SelectionCount")
             sel.setContentsMargins(0, 0, 0, 6)
             self._add(sel)
             self._headline("Area", fmt(r["area"], sq), tag=src(r["area_exact"]))

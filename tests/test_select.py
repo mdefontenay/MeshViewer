@@ -168,6 +168,42 @@ def test(app, files):
     check(same == lines.n_lines and 0 < fewer < lines.n_lines,
           f"hidden faces: a border goes once no face beside it shows ({same}, {fewer})")
     check(sc._edges is not None and sc._edges.GetVisibility(), "STEP: feature edges drawn")
+    sc.select("box")                                     # the outline: those edges too
+    if sc._outline is not None:
+        sc._outline.GetMapper().Update()
+    out =sc._outline.GetMapper().GetInput() if sc._outline is not None else None
+    check(out is not None and out.GetNumberOfLines() >= lines.n_lines,
+          "part outline: silhouette + the feature edges")
+    sc.select(None)
+    # Measure Selected: an edge of the box (its faces at 90°), a face, a node
+    from meshviewer.render.element_details import details
+    w.set_select_kind("feature_edge")
+    _click_middle(w)
+    got = details(el)
+    rows = dict(got[1]) if got else {}
+    check(got and "Length" in rows and rows.get("Dihedral angle") == "90°"
+          and w.sidebar.selected_panel.title.text() == got[0],
+          f"Measure Selected: an edge, 90° between its faces ({rows})")
+    w.set_select_kind("feature_face")
+    _click_middle(w)
+    rows = dict(details(el)[1])
+    check({"Area", "Centroid", "Perimeter"} <= set(rows) and
+          ("Normal" in rows or "Mean normal" in rows), "Measure Selected: a face")
+    w.set_select_kind("feature_node")
+    _click_middle(w)
+    rows = dict(details(el)[1])
+    check({"Coordinates", "Distance to origin"} <= set(rows), "Measure Selected: a node")
+    from meshviewer.core import element_info as ei
+    t = np.linspace(0, np.pi, 20)
+    arc = np.column_stack([3 * np.cos(t) + 1, 3 * np.sin(t), np.zeros_like(t)])
+    c = ei.fit_circle(arc)
+    check(c and abs(c["radius"] - 3) < 1e-9 and np.allclose(c["center"], [1, 0, 0])
+          and not c["closed"], "an arc: radius 3, center (1, 0, 0)")
+    check(ei.fit_circle(np.array([[0, 0, 0], [1, 0, 0], [2, 0, 0.0]])) is None
+          and ei.straight(np.array([[0, 0, 0], [1, 0, 0], [2, 0, 0.0]])) is not None,
+          "a straight edge: no circle, a direction")
+    check(abs(ei.dihedral([0, 0, 1], [1, 0, 0]) - 90) < 1e-9
+          and abs(ei.dihedral([0, 0, 1], [0, 0, 1]) - 180) < 1e-9, "dihedral: 90°, flat 180°")
     w.set_select_kind("mesh_node")
     check(w.select_kind == "part" and w.a_select["part"].isChecked(),
           "CAD: a mesh kind falls back to Part")
@@ -183,6 +219,15 @@ def test(app, files):
         w.set_select_kind(kind)
         _click_middle(w)
         check(len(el.items) == 1 and el.actors(), f"mesh {kind}: one picked")
+    w.set_select_kind("volume_cell")                     # a volume cell, under the click
+    _click_middle(w)
+    rows = dict(details(el)[1]) if el.items else {}
+    check(len(el.items) == 1 and rows.get("Type") == "Hexahedron" and "Volume" in rows
+          and "Skewness" in rows and el.actors(),
+          f"Volume Cell: picked, its type, volume and quality ({rows})")
+    check(w.a_select["volume_cell"].isVisible(), "Volume Cell offered on a mesh with cells")
+    w.set_select_kind("feature_face")
+    _click_middle(w)
     name, face = el.items[0]
     poly = w.scene.model.parts[name]
     cells = el.features(name).face_cells(face)
@@ -192,9 +237,99 @@ def test(app, files):
     check(not el.items, "a click on nothing clears")
     w.set_select_kind("mesh_cell")
     w.close()
-    w = open_file(app, files["dxf"])                     # a drawing: no Select ▾
-    check(not w._select_shown and not w.m_select.menuAction().isVisible(),
-          "drawing: no Select")
+    # a 2D mesh: mesh cells (quads), no feature face; its boundaries are lines
+    w = open_file(app, files["fluent2d"])
+    shown = [a.text() for a in w.a_select.values() if a.isVisible()]
+    check(shown == ["Part", "Mesh Node", "Mesh Edge", "Mesh Cell", "Feature Node",
+                    "Feature Edge"], f"2D mesh: its kinds ({shown})")
+    el, sc = w.scene.elements, w.scene
+    for kind, word in (("mesh_cell", "mesh cell"), ("feature_edge", "feature edge"),
+                       ("feature_node", "feature node"), ("mesh_edge", "mesh edge")):
+        w.set_select_kind(kind)
+        _click_middle(w)
+        check(len(el.items) == 1 and w.sidebar.sel_label.text() == f"1 {word} selected",
+              f"2D {kind}: one picked ({w.sidebar.sel_label.text()})")
+    lines = [n for n, p in sc.model.parts.items() if not p.GetNumberOfPolys()]
+    zone = next(n for n in sc.model.parts if n not in lines)
+    check(all(len(el.features(n).seg) == sc.model.parts[n].n_cells for n in lines),
+          "2D boundaries: their lines are feature edges")
+    w.set_select_kind("mesh_cell")
+    pt = sc.model.parts[lines[0]].points[0]
+    check(el._cell_beside(pt) is not None and el._cell_beside(pt)[0] == zone,
+          "Mesh Cell on a boundary line: the cell beside it")
+    w.set_select_kind("feature_face")
+    check(w.select_kind == "part", "2D mesh: no feature face")
+    w.close()
+    w = open_file(app, files["dxf"])                     # a drawing: Edge and Node
+    shown = [a.text() for a in w.a_select.values() if a.isVisible()]
+    check(sorted(shown) == ["Edge", "Node"] and w.scene.elements.kind == "feature_edge",
+          f"drawing: Select ▸ Edge, Node ({shown}, {w.scene.elements.kind})")
+    sc = w.scene
+    poly = sc.model.parts["PROFILE"]
+    p = (np.asarray(poly.points[0]) + np.asarray(poly.points[1])) / 2
+    r = sc.p.renderer
+    r.SetWorldPoint(*p, 1.0)
+    r.WorldToDisplay()
+    x, y, _ = r.GetDisplayPoint()
+    sc.click(int(x), int(y))
+    sp = w.sidebar.selected_panel                       # open for drawings (no parts list)
+    keys = lambda: [c.text() for c in sp._cells[::2]]   # noqa: E731
+    check(w.sidebar.is_open("selected") and len(sc.elements.items) == 1
+          and sp.title.text().startswith("Edge") and "Length" in keys(),
+          f"drawing: a click picks an edge, Measure Selected says so ({sp.title.text()})")
+    w.set_select_kind("feature_node")
+    sc.click(int(x), int(y))
+    check(sp.title.text().startswith("Node"), f"drawing: a node ({sp.title.text()})")
+    # 2D: Node / Edge reach the nearest one on screen (PICK_PX), a node before its line
+    def at(p, dx=0.0, dy=0.0):                          # display pixels, offset in points
+        r.SetWorldPoint(*p, 1.0)
+        r.WorldToDisplay()
+        px, py, _ = r.GetDisplayPoint()
+        return int(round(px + sc.pixels(dx))), int(round(py + sc.pixels(dy)))
+    w.set_select_kind("feature_edge")
+    w.sidebar.selected_section.set_expanded(False)
+    sc.click(*at((20.0, 0.0, 0.0), dy=-6))
+    el = sc.elements
+    picked = el.items and np.asarray(poly.points)[
+        el.features(el.items[0][0]).curve_segments(el.items[0][1]).reshape(-1)]
+    check(len(el.items) == 1 and np.allclose(picked[:, 1], 0.0),
+          f"2D: a line 6 points away picked ({el.items})")
+    check(w.sidebar.is_open("selected"), "a pick opens Measure Selected")
+    sc.click(*at((20.0, 0.0, 0.0), dy=-20))
+    check(not el.items, f"2D: nothing 20 points away ({el.items})")
+    w.set_select_kind("feature_node")
+    sc.click(*at((40.0, 20.0, 0.0), dx=5, dy=-5))
+    check(len(el.items) == 1 and np.allclose(poly.points[el.items[0][1]], (40, 20, 0)),
+          f"2D: the corner node near the click ({el.items})")
+    w.set_select_kind("feature_edge")
+    # the Measuring Tool on a 2D file: a point anywhere inside the axes
+    w.sidebar.show_section("measure", expand=True)
+    m = sc.measure
+    m.set_mode("distance")
+    mp = w.sidebar.measure_panel
+    check(mp.snap_row.label.text() == "Snap to edges", "2D: Snap to edges")
+    m.snap = True                                    # a line, then a corner over its line
+    sc.click(*at((12.0, 20.0, 0.0), dy=6))
+    sc.click(*at((0.0, 0.0, 0.0), dx=4, dy=-4))
+    check(len(m.points) == 2 and abs(m.points[0][1] - 20) < 1e-9 and abs(m.points[0][0] - 12) < 0.5
+          and np.allclose(m.points[1], 0.0),
+          f"2D: snapped to the line and the corner ({[list(np.round(q, 3)) for q in m.points]})")
+    m.snap = False
+    m.set_mode("distance")
+    for px in ((5.0, 5.0), (25.0, 15.0)):
+        r.SetWorldPoint(px[0], px[1], 0.0, 1.0)
+        r.WorldToDisplay()
+        dx, dy, _ = r.GetDisplayPoint()
+        sc.click(int(dx), int(dy))
+    check(len(m.points) == 2 and abs(m.points[0][0] - 5) < 0.2 and abs(m.points[1][1] - 15) < 0.2,
+          f"2D: two points in empty space ({[list(np.round(q, 2)) for q in m.points]})")
+    r.SetWorldPoint(500.0, 500.0, 0.0, 1.0)
+    r.WorldToDisplay()
+    check(sc.flat_point(*r.GetDisplayPoint()[:2]) is None, "2D: not outside the axes")
+    m.set_mode("off")
+    w.close()
+    w = open_file(app, files["step"])
+    check(w.select_kind == "part", "after a drawing: the window's kind as before")
     w.close()
 
 

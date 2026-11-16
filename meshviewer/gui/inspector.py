@@ -79,8 +79,13 @@ class Inspector(QWidget):
     def current(self):
         return self._current
 
+    def enable_tabs(self, keys):
+        """Only these tabs can be chosen (a drawing: Measure); the others are grayed."""
+        for k, a in self.tab_actions.items():
+            a.setEnabled(k in keys)
+
     def show_tab(self, key):
-        if key not in self.pages:
+        if key not in self.pages or not self.tab_actions[key].isEnabled():
             return
         a = self.tab_actions[key]
         if not a.isChecked():

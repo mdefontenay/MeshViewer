@@ -1,11 +1,14 @@
 """The Info tool — what's in the file, at a glance.
 
+    File unit      [ Millimeters        ▾ ]
+    ───────────────────────────────────────
     Extent                       mm         <- the unit, or "file units"
          from        to        size
     X    −20         100       120
     Y    −10         30        40
     Z    0           35        35
 
+    ───────────────────────────────────────
     Faces           3,650
                     3,100 triangles · 550 quads
     Points          1,122
@@ -20,14 +23,15 @@ from __future__ import annotations
 
 import numpy as np
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import (
-    QApplication, QGridLayout, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget,
-)
+from PySide6.QtWidgets import QApplication, QGridLayout, QSizePolicy, QWidget
 
 from meshviewer.core.mesh.volume import NAMES
 from meshviewer.core.polys import edge_lengths, faces_by_size
 from meshviewer.core.units import fmt
 from meshviewer.gui.dialogs.units import FILE_UNITS
+from meshviewer.gui.forms import (
+    _grid, _label, _row, column, group_head, link, readout, readout_grid, rule,
+)
 from meshviewer.gui.widgets import MenuSelect
 
 KINDS = {3: ("triangle", "triangles"), 4: ("quad", "quads")}
@@ -35,12 +39,6 @@ KINDS = {3: ("triangle", "triangles"), 4: ("quad", "quads")}
 
 def _n(v):
     return fmt(v) if v is not None else "—"
-
-
-def _label(text, name):
-    lab = QLabel(text)
-    lab.setObjectName(name)
-    return lab
 
 
 class InfoPanel(QWidget):
@@ -51,31 +49,25 @@ class InfoPanel(QWidget):
         self.scene = None
         self._active = False
         self._edges = None                     # cached (shortest, longest) edge
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(2, 0, 2, 0)
-        lay.setSpacing(10)
+        lay = column(self, spacing=8)
 
         # ---- the file's unit (asked the first time the file is opened) -----------------
-        fu = QHBoxLayout()
-        fu.addWidget(_label("File unit", "ValueLabel"))
-        fu.addStretch(1)
+        g = _grid()
         self.file_unit = MenuSelect()
         for key, text in FILE_UNITS:
             self.file_unit.addItem(text, key)
+        self.file_unit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.file_unit.setToolTip("File Unit")
         self.file_unit.currentIndexChanged.connect(
             lambda _i: self.scene is not None and self.file_unit_changed.emit(
                 self.file_unit.currentData()))
-        fu.addWidget(self.file_unit)
-        lay.addLayout(fu)
+        _row(g, 0, "File unit", self.file_unit, wide=True)
+        lay.addLayout(g)
+        lay.addWidget(rule())
 
         # ---- extent: a small table, one row per axis ----------------------------
-        head = QHBoxLayout()
-        head.addWidget(_label("Extent", "Caption"))
-        head.addStretch(1)
         self.unit = _label("", "AxisLabel")
-        head.addWidget(self.unit)
-        lay.addLayout(head)
+        lay.addLayout(group_head("Extent", self.unit))
         g = QGridLayout()
         g.setContentsMargins(0, 0, 0, 0)
         g.setHorizontalSpacing(10)
@@ -100,36 +92,18 @@ class InfoPanel(QWidget):
         g.setColumnStretch(3, 1)
         lay.addLayout(g)
 
-        # ---- counts: big number + a grey line explaining it ------------------------
-        g = QGridLayout()
-        g.setContentsMargins(0, 0, 0, 0)
-        g.setHorizontalSpacing(10)
-        g.setVerticalSpacing(1)
+        # ---- counts: the number + a gray line explaining it -------------------------
+        lay.addWidget(rule())
+        g = readout_grid()
         self.rows = {}
-        r = 0
-        for key, text in (("faces", "Faces"), ("points", "Points"), ("edges", "Edge length"),
-                          ("cells", "Volume cells")):
-            name = _label(text, "ValueLabel")
-            value = _label("—", "ValueLabel")
-            value.setAlignment(Qt.AlignRight)
-            value.setTextInteractionFlags(Qt.TextSelectableByMouse)
-            note = _label("", "InfoLine")
-            note.setAlignment(Qt.AlignRight)
-            note.setWordWrap(True)
-            g.addWidget(name, r, 0)
-            g.addWidget(value, r, 1)
-            g.addWidget(note, r + 1, 0, 1, 2)
-            self.rows[key] = (name, value, note)
-            r += 2
-        g.setColumnStretch(1, 1)
+        for i, (key, text) in enumerate((("faces", "Faces"), ("points", "Points"),
+                                         ("edges", "Edge length"), ("cells", "Volume cells"))):
+            self.rows[key] = readout(g, 2 * i, text, with_note=True)
         lay.addLayout(g)
 
-        self.read = QPushButton("Count Volume Cells")
-        self.read.setObjectName("LinkButton")
-        self.read.setFlat(True)
-        self.read.setCursor(Qt.PointingHandCursor)
-        self.read.setToolTip("Read the 3D cells from the file (can take a moment)")
-        self.read.clicked.connect(self._read_volume)
+        self.read = link("Count Volume Cells",
+                         "Read the 3D cells from the file (can take a moment)",
+                         self._read_volume)
         lay.addWidget(self.read, 0, Qt.AlignRight)
 
     def bind(self, scene):

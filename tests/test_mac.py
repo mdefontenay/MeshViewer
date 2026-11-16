@@ -44,11 +44,13 @@ def test(app, files):
     # window); elsewhere they are in the window's File menu
     app_menu = ({a.text() for top in app._global_menu.actions() if top.menu() is not None
                  for a in top.menu().actions()} if sys.platform == "darwin" else set(m["File"]))
-    check({"Inspector", "View Tools", "Measure Tools", "Analyze Tools", "Units", "Show",
+    check({"Left Sidebar", "Right Sidebar", "Rotate Camera 90° Left", "Hide Toolbar",
+           "View Tools", "Measure Tools", "Analyze Tools", "Units", "Show",
            "Customize Toolbar…"} <= set(m["View"]) and "Settings…" in app_menu
           and (sys.platform != "darwin" or "Settings…" not in m["File"])
           and "Tools" not in m["View"],
-          "View ▸ Inspector, its tabs, Units, Customize Toolbar…; Settings… (app menu on macOS)")
+          "View ▸ Left / Right Sidebar, its tabs, Units, Rotate, Hide Toolbar, Customize "
+          "Toolbar…; Settings… (app menu on macOS)")
     in_menus = set()
 
     def walk(menu):
@@ -102,6 +104,54 @@ def test(app, files):
     w.a_redo.trigger()
     check("Renamed" in sc.names, "redo rename")
     w.a_undo.trigger()
+
+    # ---- undo: the selection and the camera (moves one after another: one step) -------------
+    def frames():
+        for _ in range(4):
+            sc.p.render()
+            app.processEvents()
+    frames()
+    n0 = st.index()                                      # (a redo left above goes)
+    sc.set_selection([names[0]], notify=True)
+    check(w.a_undo.text() == "Undo Selection", f"a selection: {w.a_undo.text()!r}")
+    start = sc.camera_snapshot()
+    w.a_views[1].trigger()
+    frames()
+    w.a_views[2].trigger()
+    frames()
+    w.a_rotate_left.trigger()
+    frames()
+    check(w.a_undo.text() == "Undo Camera Change" and st.count() == st.index() == n0 + 2,
+          f"three camera moves: one step ({st.index() - n0})")
+    w.a_undo_tb.trigger()
+    frames()
+    check(sc.same_camera(sc.camera_snapshot(), start) and sc.selected_parts == [names[0]],
+          "toolbar Undo: the camera back, the selection kept")
+    w.a_undo_tb.trigger()
+    check(sc.selected_parts == [] and w.a_redo_tb.isEnabled(), "Undo: the selection back")
+    w.a_redo_tb.trigger()
+    w.a_redo_tb.trigger()
+    frames()
+    check(sc.selected_parts == [names[0]] and not sc.same_camera(sc.camera_snapshot(), start)
+          and st.count() == st.index() == n0 + 2, "Redo both, nothing new recorded")
+    sc.set_selection([], notify=True)
+    # a pause over 0.8 s, or another kind of move, starts a new camera step
+    import time
+    n1 = st.index()
+    w.a_views[1].trigger()
+    frames()
+    time.sleep(0.9)
+    w.a_views[2].trigger()
+    frames()
+    check(st.index() == n1 + 2, f"a pause: two camera steps ({st.index() - n1})")
+    n2 = st.index()
+    cx, cy = (v // 2 for v in sc.p.renderer.GetSize())
+    for _ in range(2):
+        sc.wheel_zoom(1.2, cx, cy)
+        frames()
+    w.a_views[1].trigger()
+    frames()
+    check(st.index() == n2 + 2, f"a zoom, then a view: two camera steps ({st.index() - n2})")
 
     # ---- undo: the Edit tool ------------------------------------------------------------------
     from meshviewer.core import transform as xf

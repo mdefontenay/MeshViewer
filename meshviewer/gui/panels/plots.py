@@ -12,7 +12,12 @@
         │ Plot ──────────────────────────────────────  │
         │ Values     [ Pressure coefficient cp ▾ ]    │
         │ Along      [ X | Z ]        [ Normalize ]   │
-        │ Negative up                       (switch)  │
+        │ ▸ Axes          X        Y                  │
+        │   Min        [auto]   [auto]                │
+        │   Max        [auto]   [auto]                │
+        │   Log          ○        ○                   │
+        │   Flip         ○        ●  (cp: y flipped)  │
+        │                              Fit            │
         │ Points ─────────────── [ Import… | Export… ]│
         └─────────────────────────────────────────────┘
                                       [ Rename… | Delete ]
@@ -23,6 +28,8 @@ named by the user. The kind of plot picks its editor: EDITORS (only "section"
 for now; a new kind adds an editor here and an entry in core/plots.py KINDS).
 The panel computes the plots (core.plots.compute) and says so with `changed`.
 The plots live on the scene (scene.plots: a list of dicts, remembered per file).
+Axes (and the plot itself: the wheel zooms, a drag pans, a double-click fits) only
+change how the plot is drawn: `view_changed`, no new cut.
 """
 from __future__ import annotations
 
@@ -32,37 +39,24 @@ import numpy as np
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QActionGroup
 from PySide6.QtWidgets import (
-    QDialog, QDialogButtonBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QLayout, QLineEdit,
+    QDialog, QDialogButtonBox, QFrame, QGridLayout, QHBoxLayout, QLayout, QLineEdit,
     QPushButton, QSizePolicy, QVBoxLayout, QWidget,
 )
 
 from meshviewer.core import plots
-from meshviewer.core.fields import SPEED
 from meshviewer.core.units import nice_num
 from meshviewer.gui.access import name_controls
 from meshviewer.gui.panels.section import edit_plane_action
-from meshviewer.gui.forms import _grid, _label, _link, rule, segmented
+from meshviewer.gui.forms import (
+    _grid, _label, button, buttons, caption, group_head, link, note, rule, segmented,
+    label_width, sheet_title, xyz_fields,
+)
 from meshviewer.gui.sheets import ask_open, ask_save, ask_text, save_folder
 from meshviewer.gui.widgets import (
     Capsule, CollapsibleSection, IconToggle, MenuSelect, NoWheelSlider, NumberField, Switch,
 )
 
 SLIDER_STEPS = 1000
-
-
-def _switch_row(text, tip, slot):
-    w = QWidget()
-    h = QHBoxLayout(w)
-    h.setContentsMargins(0, 0, 0, 0)
-    lab = QLabel(text)
-    lab.setToolTip(tip)
-    h.addWidget(lab)
-    h.addStretch(1)
-    sw = Switch()
-    sw.setToolTip(tip)
-    sw.toggled.connect(slot)
-    h.addWidget(sw)
-    return w, sw
 
 
 def value_label(v):
@@ -77,6 +71,7 @@ def value_label(v):
 class SectionEditor(QWidget):
     """Settings of one section plot; edits its dict in place."""
     changed = Signal()
+    view_changed = Signal()            # Axes: only how it is drawn
 
     def __init__(self, panel, m):
         super().__init__()
@@ -96,7 +91,7 @@ class SectionEditor(QWidget):
         lay.addWidget(card)
 
         # -- where the plane cuts (laid out like the Section section)
-        cl.addWidget(_label("Plane", "Caption"))
+        cl.addWidget(caption("Plane"))
         g = _grid()
         self.axis, cap = segmented(self, [(a, a.upper(), f"The plane is normal to {a.upper()}")
                                            for a in plots.AXES], self._axis)
@@ -106,7 +101,7 @@ class SectionEditor(QWidget):
         row = QHBoxLayout()
         row.setSpacing(6)
         row.addWidget(cap)
-        row.addWidget(Capsule([self.edit_plane], name="Segmented"))
+        row.addWidget(buttons(self.edit_plane))
         row.addStretch(1)
         g.addWidget(_label("Normal to"), 0, 0)
         g.addLayout(row, 0, 1, 1, 3)
@@ -123,28 +118,15 @@ class SectionEditor(QWidget):
         self.slider.setToolTip("Slide the plane across the model")
         self.slider.valueChanged.connect(self._slid)
         g.addWidget(self.slider, 3, 1, 1, 3)
-        self.advanced = QWidget()                      # origin / normal, as in Section
-        ag = QGridLayout(self.advanced)
-        ag.setContentsMargins(0, 2, 0, 0)
-        ag.setHorizontalSpacing(4)
-        ag.setVerticalSpacing(4)
-        ag.setColumnMinimumWidth(0, QLabel("Sound speed").sizeHint().width())
-        for c, axis in enumerate("XYZ", start=1):
-            lbl = _label(axis, "AxisLabel")
-            lbl.setAlignment(Qt.AlignCenter)
-            ag.addWidget(lbl, 0, c)
         self.origin = [NumberField() for _ in range(3)]
         self.normal = [NumberField() for _ in range(3)]
-        for r, (text, boxes, tip, slot) in enumerate((
-                ("Origin", self.origin, "A point on the plane", self._origin_typed),
-                ("Normal", self.normal, "The direction the plane faces (any length)",
-                 self._normal_typed)), start=1):
-            ag.addWidget(_label(text), r, 0)
-            for c, b in enumerate(boxes, start=1):
-                b.setToolTip(tip)
-                b.setMinimumWidth(40)
-                b.valueChanged.connect(slot)
-                ag.addWidget(b, r, c)
+        self.advanced = xyz_fields((                   # origin / normal, as in Section
+            ("Origin", self.origin, "A point on the plane"),
+            ("Normal", self.normal, "The direction the plane faces (any length)")))
+        for b in self.origin:
+            b.valueChanged.connect(self._origin_typed)
+        for b in self.normal:
+            b.valueChanged.connect(self._normal_typed)
         self.advanced.setVisible(False)
         self.edit_plane.toggled.connect(self.advanced.setVisible)
         g.addWidget(self.advanced, 1, 0, 1, 4)         # right under Normal to
@@ -152,7 +134,7 @@ class SectionEditor(QWidget):
         cl.addWidget(rule())
 
         # -- what is plotted
-        cl.addWidget(_label("Plot", "Caption"))
+        cl.addWidget(caption("Plot"))
         g = _grid()
         self.value = MenuSelect()
         self.value.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -182,44 +164,32 @@ class SectionEditor(QWidget):
         g.addWidget(_label("Along"), 1, 0)
         g.addWidget(self.along_box, 1, 1, 1, 3)
         cl.addLayout(g)
-        row, self.flip = _switch_row(
-            "Negative up", "Negative values at the top (as cp is usually plotted)", self._flip)
-        cl.addWidget(row)
+        cl.addWidget(self._build_axes())
         cl.addWidget(rule())
 
         # -- compare and save
-        top = QHBoxLayout()
-        top.addWidget(_label("Points", "Caption"))
-        top.addStretch(1)
-        imp = QAction("Import…", self)
-        imp.setToolTip("Reference points from a CSV (test data, another solver): the first\n"
-                       "two numbers of each row are x and the value")
-        imp.triggered.connect(self.import_csv)
-        exp = QAction("Export…", self)
-        exp.setToolTip("The plotted points to a CSV: part, x, value, X, Y, Z")
-        exp.triggered.connect(self.export_csv)
-        top.addWidget(Capsule([imp, exp], name="Segmented"))
-        cl.addLayout(top)
+        imp = button(self, "Import…", self.import_csv,
+                     "Reference points from a CSV (test data, another solver): the first\n"
+                     "two numbers of each row are x and the value")
+        exp = button(self, "Export…", self.export_csv,
+                     "The plotted points to a CSV: part, x, value, X, Y, Z")
+        cl.addLayout(group_head("Points", buttons(imp, exp)))
         refl = QHBoxLayout()
-        self.ref_label = _label("", "InfoLine")
-        self.ref_label.setWordWrap(True)
+        self.ref_label = note()
         refl.addWidget(self.ref_label, 1)
-        self.ref_remove = _link("Remove", "Remove the reference points", self._remove_ref)
+        self.ref_remove = link("Remove", "Remove the reference points", self._remove_ref)
         refl.addWidget(self.ref_remove, 0, Qt.AlignTop)
         cl.addLayout(refl)
-        self.status = _label("", "InfoLine")               # only when something is wrong
-        self.status.setWordWrap(True)
+        self.status = note()                               # only when something is wrong
         cl.addWidget(self.status)
 
         # -- rename / delete, under the card (like Undo · Reset in Edit)
         bottom = QHBoxLayout()
         bottom.addStretch(1)
-        ren = QAction("Rename…", self)
-        ren.triggered.connect(lambda: self.panel.rename(self.m["id"]))
-        dele = QAction("Delete", self)
-        dele.setToolTip("Delete this plot and its tab")
-        dele.triggered.connect(lambda: self.panel.remove(self.m["id"]))
-        bottom.addWidget(Capsule([ren, dele], name="Segmented"))
+        ren = button(self, "Rename…", lambda: self.panel.rename(self.m["id"]))
+        dele = button(self, "Delete", lambda: self.panel.remove(self.m["id"]),
+                      "Delete this plot and its tab")
+        bottom.addWidget(buttons(ren, dele))
         lay.addLayout(bottom)
         self.sync()
 
@@ -247,6 +217,8 @@ class SectionEditor(QWidget):
             a.setChecked(straight and k == main)
 
     def sync(self):
+        if hasattr(self, "axis_range"):
+            self.sync_axes()
         m = self.m
         self.sync_axis()
         self.value.blockSignals(True)
@@ -287,6 +259,8 @@ class SectionEditor(QWidget):
         self.slider.setValue(int(round(frac * SLIDER_STEPS)))
         self.slider.blockSignals(False)
         o, n = plots.section_plane(self.m, self.scene.model.parts, self._names())
+        if self.m.get("normal") is not None:
+            n = np.asarray(self.m["normal"], dtype=float)     # as typed, as in Section
         for boxes, vals in ((self.origin, o * s), (self.normal, n)):
             for b, v in zip(boxes, vals):
                 b.blockSignals(True)
@@ -302,7 +276,7 @@ class SectionEditor(QWidget):
         """After a compute: which way the x axis runs, flip, how many points."""
         for k, a in self.along.items():
             a.setChecked(k == r["along"])
-        Switch.set_silently(self.flip, r["flip"])
+        Switch.set_silently(self.axis_flip["y"], r["flip"])
         self.status.setText("The plane misses the visible boundaries (or they don't "
                             "carry this value)." if r["empty"] else "")
         self.status.setVisible(bool(r["empty"]))
@@ -379,8 +353,72 @@ class SectionEditor(QWidget):
     def _chord(self, on):
         self._set(chord=bool(on))
 
-    def _flip(self, on):
-        self._set(flip=bool(on))
+    # ---- Axes: ranges, log, flip (how the plot is drawn) -------------------------------
+    def _build_axes(self):
+        """▸ Axes: Min / Max (empty = auto), Log and Flip for X and Y; Fit."""
+        w = QWidget()
+        g = QGridLayout(w)
+        g.setContentsMargins(0, 0, 0, 0)
+        g.setHorizontalSpacing(6)
+        g.setVerticalSpacing(5)
+        g.setColumnMinimumWidth(0, label_width())        # as the form grids above
+        g.setColumnStretch(1, 1)
+        g.setColumnStretch(2, 1)
+        for c, k in enumerate("XY", start=1):
+            h = _label(k, "AxisLabel")
+            h.setAlignment(Qt.AlignCenter)
+            g.addWidget(h, 0, c)
+        self.axis_range, self.axis_log, self.axis_flip = {}, {}, {}
+        for r, (text, end) in enumerate((("Min", "min"), ("Max", "max")), start=1):
+            g.addWidget(_label(text), r, 0)
+            for c, k in enumerate("xy", start=1):
+                f = NumberField(None)
+                f.setPlaceholderText("auto")
+                f.setToolTip(f"{k.upper()} {end} (empty = auto)")
+                f.valueChanged.connect(lambda v, key=f"{k}_{end}": self._view(**{key: v}))
+                g.addWidget(f, r, c)
+                self.axis_range[f"{k}_{end}"] = f
+        for r, (text, store, attr) in enumerate((("Log", "log", self.axis_log),
+                                                 ("Flip", "flip", self.axis_flip)),
+                                                start=3):
+            g.addWidget(_label(text), r, 0)
+            for c, k in enumerate("xy", start=1):
+                sw = Switch()
+                sw.setToolTip(f"{text} {k.upper()}")
+                sw.setAccessibleName(f"{text} {k.upper()}")
+                key = "flip" if (store, k) == ("flip", "y") else f"{k}_{store}"
+                sw.toggled.connect(lambda on, key=key: self._view(**{key: bool(on)}))
+                g.addWidget(sw, r, c, Qt.AlignCenter)
+                attr[k] = sw
+        fit = link("Fit", "Back to the whole plot (auto ranges)", self.fit_view)
+        g.addWidget(fit, 5, 2, Qt.AlignRight)
+        self.axes_section = CollapsibleSection("Axes", w, "plot_axes", sub=True,
+                                               start_open=False)
+        return self.axes_section
+
+    def _view(self, **kw):
+        """Only how it is drawn: no new cut."""
+        self.m.update(kw)
+        self.view_changed.emit()
+
+    def fit_view(self):
+        self.set_ranges(None, None, None, None)
+
+    def set_ranges(self, x0, x1, y0, y1):
+        """The plot zoomed / panned (or Fit): its ranges, the fields follow."""
+        self.m.update(x_min=x0, x_max=x1, y_min=y0, y_max=y1)
+        self.sync_axes()
+        self.view_changed.emit()
+
+    def sync_axes(self):
+        for key, f in self.axis_range.items():
+            f.blockSignals(True)
+            v = self.m.get(key)
+            f.setValue(None if v is None else float(f"{v:.6g}"))
+            f.blockSignals(False)
+        for k in "xy":
+            Switch.set_silently(self.axis_log[k], bool(self.m.get(f"{k}_log")))
+        Switch.set_silently(self.axis_flip["x"], bool(self.m.get("x_flip")))
 
     def _remove_ref(self):
         self.m["ref"] = None
@@ -442,9 +480,7 @@ class NewPlotDialog(QDialog):
         lay.setSizeConstraint(QLayout.SetFixedSize)
         lay.setContentsMargins(20, 18, 20, 14)
         lay.setSpacing(10)
-        t = QLabel("New Plot")
-        t.setStyleSheet("font-size: 15px; font-weight: 600;")
-        lay.addWidget(t)
+        lay.addWidget(sheet_title("New Plot"))
         g = _grid()
         self.name = QLineEdit(name)
         self.name.selectAll()
@@ -457,8 +493,7 @@ class NewPlotDialog(QDialog):
         g.addWidget(_label("Type"), 1, 0)
         g.addWidget(self.kind, 1, 1, 1, 3)
         lay.addLayout(g)
-        note = _label("Its plot opens in a tab under the 3D view.", "InfoLine")
-        lay.addWidget(note)
+        lay.addWidget(note("Its plot opens in a tab under the 3D view."))
         b = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         b.accepted.connect(self.accept)
         b.rejected.connect(self.reject)
@@ -577,6 +612,7 @@ class PlotsPanel(QWidget):
     def _editor(self, m, expanded):
         ed = EDITORS[m["kind"]](self, m)
         ed.changed.connect(lambda i=m["id"]: self._compute(i))
+        ed.view_changed.connect(lambda i=m["id"]: self.changed.emit(i))   # redraw only
         eye = IconToggle(("eye", "eye_off"), "Show this cut in the 3D view",
                          checked=m.get("show", True), eye=True)
         eye.toggled.connect(lambda on, mm=m: (mm.__setitem__("show", bool(on)),

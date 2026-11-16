@@ -29,7 +29,7 @@ FORMATS = {   # key: (menu text, file extension)
     "obj": ("OBJ — one group per part, with colors", ".obj"),
     "ply": ("PLY — binary, merged, with colors", ".ply"),
     "vtu": ("VTU — volume + boundaries (ParaView)", ".vtu"),
-    "ugrid": ("UGRID + .mapbc — FUN3D / AFLR3", ".lb8.ugrid"),
+    "ugrid": ("UGRID + .mapbc — boundary names", ".lb8.ugrid"),
 }
 
 

@@ -37,8 +37,9 @@ conventions) and CHANGELOG.md (history) before changing code.
 ## Versions
 
 - 2.X only for a new stage (few, on purpose); everything else is 2.X.Y.
-- 2.5 = "organized the macOS way", in beta: `__version__ = "2.5bN"` in
-  `meshviewer/__init__.py`, shown "2.5 beta N", tag `v2.5bN`, `--prerelease`.
+- 2.5 = "organized the macOS way", released as `__version__ = "2.5"` (tag `v2.5`,
+  not a pre-release) after betas 2.5b1–b5 (rolled into CHANGELOG ▸ 2.5). Next: 2.5.Y;
+  a new stage can again start with betas (`"2.Xb1"`, shown "2.X beta 1", `--prerelease`).
 - Each release: a CHANGELOG entry (table of files → what changed) and
   `docs/release-notes-<version>.md` (renamed from the previous one, new section on top).
 
@@ -55,6 +56,8 @@ conventions) and CHANGELOG.md (history) before changing code.
 - Questions are sheets (`gui/sheets.py`), errors `feedback.show_error`, background
   work `run_job(..., busy=(window, "…"))`.
 - STEP meshes are for display: speed and few triangles over pretty meshes.
+- Tools are built from `gui/forms.py` (`column`, `_row`, `switch_row`, `group_head`,
+  `readout`, `note`…), laid out as ARCHITECTURE.md ▸ Conventions ▸ A tool's layout.
 
 ## Tests
 
@@ -75,13 +78,18 @@ The tests use a scratch settings file (`MESHVIEWER_SETTINGS`), never the real on
 - **Don't use `git stash` here**: the folder is in iCloud Documents, and a stash pop
   once left `panels/plots.py` renamed to `plots` (no extension).
 
-## Where things stand (2.5 beta 4, not yet committed or released)
+## Where things stand (2.5, not yet committed or released)
 
-- Released: 2.5 beta 3 (`v2.5b3`). 2.5 beta 4 is in the working tree: `__version__`
-  is "2.5b4", its CHANGELOG entry and `docs/release-notes-2.5b4.md` list everything.
-  More changes before the user releases it go into the same entry and notes.
+- Released: 2.5 beta 4 (`v2.5b4`). 2.5 is in the working tree (beta 5 was never
+  released on its own): `__version__` is "2.5", CHANGELOG ▸ 2.5 (its first table is
+  the release's own changes, then the betas) and `docs/release-notes-2.5.md`. FEA and
+  transient results are left for a later version.
+- 2D files: Select ▾ Node / Edge and Snap to edges take the nearest on screen
+  (`render/elements.py` `click_2d` / `snap_2d`, `render/picking.py` `nearest_on_screen`).
+  Camera undo: one step per gesture kind, cut by a 0.8 s pause (`gui/undo.py`
+  `CAMERA_PAUSE`, `render/camera.py` `camera_gesture`).
 - Layout: parts list on the left, the inspector on the right with View (Meshing
-  Control, Section, Edit) · Measure (Info, Measure) · Analyze (CFD, Cell Quality,
+  Control, Section, Edit) · Measure (Info, Measuring Tool, Measure Selected) · Analyze (CFD, Cell Quality,
   Results, Plots) tabs (`gui/inspector.py`, `gui/sidebar.py`, `gui/sections.py`);
   light toolbar with View ▸ Customize Toolbar… (`gui/window_bars.py`).
 - Results (`gui/panels/results.py`): the field (Field, Unit in file, Shown in, a note

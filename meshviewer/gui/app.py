@@ -35,6 +35,9 @@ def _axis_font(v) -> int:
         return AXIS_FONT_DEFAULT
 
 
+CAD_MEDIUM = 2                       # CAD_QUALITY_NAMES[2] == "Medium"
+
+
 def _pref_quality(v):
     """Settings ▸ CAD meshing control: "last" or a level number."""
     try:
@@ -76,10 +79,13 @@ class MeshViewerApp(QApplication):
             # Display ▸ Axes (off / axes / grid / both) replaces the Grid switch
             # and Appearance's Grid lines / Axis lines switches
             "axes": st.value("appearance/axes", _old_axes_setting(st)),
+            # drawings (DXF) have their own, off by default: a sheet, not a model in space
+            "drawing_axes": st.value("appearance/drawing_axes", "off"),
         }
         # Settings ▸ General / Units
         self.prefs = {
-            "cad_quality": _pref_quality(st.value("prefs/cad_quality", "last")),
+            # STEP / IGES / BREP open at Medium unless Settings says otherwise
+            "cad_quality": _pref_quality(st.value("prefs/cad_quality", CAD_MEDIUM)),
             "shown_unit": st.value("prefs/shown_unit", "file"),   # "file": the file's own
             "unit_mesh": st.value("prefs/unit_mesh", "m"),         # files that don't say
             "unit_cad": st.value("prefs/unit_cad", "mm"),

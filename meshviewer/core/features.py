@@ -19,7 +19,11 @@ and Feature Node pick. No Qt, no drawing.
   (aligned) or in the plane of the first three (coplanar), and it does not turn by
   more than the feature angle; the next mesh edge starts another feature edge. And
   where another feature edge meets it partway — of this part or of another part of
-  the file (`cut_at_junctions`) — it is cut in two there.
+  the file (`cut_at_junctions`) — it is cut in two there; also where another part's
+  feature edge lying on it ends (a 2D mesh's outline, where one boundary gives way
+  to the next).
+- A part made of **lines** only (a 2D mesh's boundaries) has its lines as feature
+  edges, and no feature faces.
 - A **feature node** is a point where a feature edge ends.
 
 Points at the same place are taken as one (CAD faces are meshed each with their own
@@ -409,18 +413,9 @@ class Features:
         self._node_places = np.zeros(0, dtype=np.int64)
         self.flat = "face_id" not in poly.cell_data              # a mesh: straight / planar
         self.face_ids = None                                     # CAD: each face's face_id
-        polys = poly.GetPolys()
-        if polys is None or polys.GetNumberOfCells() == 0 or not len(pts):
+        self._ends = np.zeros((0, 2), dtype=np.int64)            # mesh edges (places)
+        if not len(pts):
             return
-        off = np.array(vtk_to_numpy(polys.GetOffsetsArray()), dtype=np.int64)
-        conn = np.array(vtk_to_numpy(polys.GetConnectivityArray()), dtype=np.int64)
-        first = poly.GetNumberOfVerts() + poly.GetNumberOfLines()   # cell id of polygon 0
-        n_poly = len(off) - 1
-        sizes = np.diff(off)
-        cell_of = np.repeat(np.arange(n_poly), sizes)              # polygon of each corner
-        nxt = np.arange(len(conn)) + 1
-        nxt[off[1:] - 1] = off[:-1]                                 # last corner -> first
-
         # one id per place: points at the same spot are one
         if tol is None:
             tol = float(np.ptp(pts, axis=0).max() or 1.0) * 1e-7
@@ -430,6 +425,18 @@ class Features:
         rep = np.zeros(len(keys), dtype=np.int64)
         rep[same] = np.arange(len(pts))                             # a point of each place
         self._same, self._rep, self._keys = same, rep, keys
+        polys = poly.GetPolys()
+        if polys is None or polys.GetNumberOfCells() == 0:
+            self._lines_only(poly)
+            return
+        off = np.array(vtk_to_numpy(polys.GetOffsetsArray()), dtype=np.int64)
+        conn = np.array(vtk_to_numpy(polys.GetConnectivityArray()), dtype=np.int64)
+        first = poly.GetNumberOfVerts() + poly.GetNumberOfLines()   # cell id of polygon 0
+        n_poly = len(off) - 1
+        sizes = np.diff(off)
+        cell_of = np.repeat(np.arange(n_poly), sizes)              # polygon of each corner
+        nxt = np.arange(len(conn)) + 1
+        nxt[off[1:] - 1] = off[:-1]                                 # last corner -> first
 
         a, b = same[conn], same[conn[nxt]]
         ok = a != b
@@ -495,6 +502,25 @@ class Features:
         self._ends = np.stack([e_lo[feat], e_hi[feat]], axis=1)      # places
         self.seg = rep[self._ends]
         self.seg_faces = np.stack([r_min[feat], r_max[feat]], axis=1)
+        self._build()
+
+    def _lines_only(self, poly):
+        """A part made of lines (a 2D mesh's boundaries): its lines are its feature
+        edges, cut into straight or planar runs; no feature faces."""
+        lines = poly.GetLines()
+        if lines is None or lines.GetNumberOfCells() == 0:
+            return
+        off = np.array(vtk_to_numpy(lines.GetOffsetsArray()), dtype=np.int64)
+        conn = np.array(vtk_to_numpy(lines.GetConnectivityArray()), dtype=np.int64)
+        if len(conn) < 2:
+            return
+        cell_of = np.repeat(np.arange(len(off) - 1), np.diff(off))
+        a, b = self._same[conn[:-1]], self._same[conn[1:]]
+        ok = (cell_of[:-1] == cell_of[1:]) & (a != b)            # within one polyline
+        ends = np.unique(np.sort(np.stack([a[ok], b[ok]], axis=1), axis=1), axis=0)
+        self._ends = ends
+        self.seg = self._rep[ends]
+        self.seg_faces = np.full((len(ends), 2), -1, dtype=np.int64)
         self._build()
 
     # ---- feature edges and nodes ---------------------------------------------------
@@ -657,6 +683,9 @@ def cut_at_junctions(features):
     edges = np.unique(np.concatenate(pairs), axis=0)       # every mesh edge once
     deg = np.bincount(edges.reshape(-1), minlength=gid.max() + 1)
     meet = deg > 2                                          # three or more ways out
+    for g in pairs:                                         # or one part's edges end
+        own = np.bincount(g.reshape(-1), minlength=len(meet))   # (a 2D mesh's boundary
+        meet |= own == 1                                        # ends along the outline)
     at = 0
     for f, k in zip(feats, keys):
         g = gid[at:at + len(k)]

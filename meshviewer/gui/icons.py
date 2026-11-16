@@ -40,6 +40,9 @@ SF = {   # icon name -> SF Symbol
     "chevron_down": "chevron.down",        # pull-downs and pop-up menus
     "checkmark": "checkmark",              # what is on, in menus with icons
     "pencil": "pencil",                    # Edit Plane: the origin and normal
+    "undo": "arrow.uturn.backward", "redo": "arrow.uturn.forward",
+    "rotate_left": "rotate.left",          # the view turned 90° to the left
+    "filter_menu": "line.3.horizontal.decrease",   # the parts list's options
 }
 _sf_cache = {}
 
@@ -389,7 +392,53 @@ def _rounded(rect, r):
     return path
 
 
+def _arc_arrow(p, back):
+    """A U-turn arrow (undo: back = True, pointing left; redo: right)."""
+    s = 1 if back else -1
+    x0 = 9 - s * 5.5
+    path = QPainterPath(QPointF(x0, 7))
+    path.lineTo(QPointF(9 + s * 2.5, 7))
+    path.arcTo(QRectF(9 + s * 2.5 - 4, 7, 8, 8), 90, -s * 180)
+    path.lineTo(QPointF(9 - s * 1, 15))
+    p.drawPath(path)
+    _line(p, (x0 + s * 3, 4), (x0, 7), (x0 + s * 3, 10))
+
+
+def _draw_undo(p):
+    _arc_arrow(p, True)
+
+
+def _draw_redo(p):
+    _arc_arrow(p, False)
+
+
+def _draw_rotate_left(p):
+    """A square with a curved arrow turning left over it (like "rotate.left")."""
+    p.drawRoundedRect(QRectF(3, 8, 9, 7.5), 1.5, 1.5)
+    path = QPainterPath(QPointF(15, 10))
+    path.arcTo(QRectF(7, 2.5, 8, 9), 0, 110)
+    p.drawPath(path)
+    _line(p, (7.4, 1.8), (9.6, 3.4), (8.2, 5.8))
+
+
+def _draw_filter_menu(p):
+    _line(p, (2.5, 5), (15.5, 5))
+    _line(p, (5, 9), (13, 9))
+    _line(p, (7.5, 13), (10.5, 13))
+
+
+def _draw_tetra(p):
+    """A tetrahedron (like icons/cell.svg): the fallback for Volume Cell."""
+    _line(p, (9, 2), (16, 11.5), (9, 15.5), (2, 11.5), (9, 2))
+    _line(p, (2, 11.5), (16, 11.5))
+
+
 DRAWINGS = {
+    "filter_menu": _draw_filter_menu,
+    "pick_volume_cell": _draw_tetra,
+    "undo": _draw_undo,
+    "redo": _draw_redo,
+    "rotate_left": _draw_rotate_left,
     "pick_part": _draw_cube,
     "pick_mesh_node": _draw_pick_mesh_node,
     "pick_mesh_edge": _draw_pick_mesh_edge,
@@ -444,7 +493,7 @@ FILES = {
     "pick_part": "part.svg", "pick_mesh_node": "mesh_node.svg",
     "pick_mesh_edge": "mesh_edge.svg", "pick_mesh_cell": "mesh_face.svg",
     "pick_feature_node": "feature_node.svg", "pick_feature_edge": "feature_edge.svg",
-    "pick_feature_face": "feature_face.svg",
+    "pick_feature_face": "feature_face.svg", "pick_volume_cell": "cell.svg",
 }
 FILE_SCALE = 0.86            # as big as an SF Symbol looks in the same square
 _file_cache = {}

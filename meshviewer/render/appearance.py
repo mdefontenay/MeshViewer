@@ -77,12 +77,18 @@ class Appearance:
         for a in self._origin_actors:
             layer.AddActor(a)
 
+    @property
+    def bbox_color(self):
+        """The bounding box: gray like the grid; on a drawing, the lines' color (white in
+        dark mode, black in light mode) — the drawing's frame, on by default."""
+        return self.line_color if self.is_drawing else THEMES[self._dark]["grid"]
+
     def set_bbox(self, on, render=True):
-        on = on and not self.is_drawing             # drawings: lines only
         self.state["bbox"] = bool(on)
         if on and self._bbox_actor is None:
-            self._bbox_actor = self.p.add_bounding_box(color=THEMES[self._dark]["grid"],
+            self._bbox_actor = self.p.add_bounding_box(color=self.bbox_color,
                                                        line_width=1, reset_camera=False)
+            self._bbox_actor.PickableOff()
         if self._bbox_actor is not None:
             self._bbox_actor.SetVisibility(bool(on))
         if render:
@@ -187,8 +193,11 @@ class Appearance:
         return "back" if self.grid_lines else False
 
     def _corner_axes(self, plotter, **kw):
-        """The X / Y / Z arrows in the corner; 2D files: X and Y only (Z points at you)."""
-        ax = plotter.add_axes(viewport=self._axes_viewport(), **kw)
+        """The X / Y / Z arrows in the corner; 2D files: X and Y only (Z points at you).
+        The label size makes the letters bigger, not the arrows: they stay in place."""
+        grow = min((self.axis_font / 10) ** 0.5, 1.6)              # 10 pt = as made
+        ax = plotter.add_axes(viewport=self._axes_viewport(),
+                              label_size=(0.25 * grow, 0.1 * grow), **kw)
         if self.model.dim == 2 and ax is not None:
             ax.SetZAxisLabelText("")
             for prop in (ax.GetZAxisShaftProperty(), ax.GetZAxisTipProperty()):
@@ -196,8 +205,9 @@ class Appearance:
         return ax
 
     def _axes_viewport(self):
-        """XYZ corner widget grows a little with the label size."""
-        side = min(0.16 * (self.axis_font / 10) ** 0.5, 0.26)     # 10 pt = original 0.16
+        """Where the XYZ arrows are: the bottom-right corner, the same for any label size
+        (it grew with the labels, so the arrows moved when the size changed)."""
+        side = 0.16
         return (1.0 - side * 0.875, 0.0, 1.0, side)
 
     # ---- 3D background chosen in Appearance -----------------------------------
@@ -240,7 +250,7 @@ class Appearance:
         self.p.hide_axes()
         self._corner_axes(self.p, line_width=3, color=t["grid"])
         if self._bbox_actor is not None:
-            self._bbox_actor.GetProperty().SetColor(rgb(t["grid"]))
+            self._bbox_actor.GetProperty().SetColor(rgb(self.bbox_color))
         if self.state.get("origin"):
             self._build_origin()                   # dot colour follows the background
         self.section.restyle()                     # cut mesh + outline colours

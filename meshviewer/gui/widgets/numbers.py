@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QFrame, QGridLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout
+from PySide6.QtWidgets import (
+    QAbstractSpinBox, QFrame, QGridLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout,
+)
 
+from meshviewer.gui.widgets.basics import NoWheelSpinBox
 from meshviewer.gui.widgets.select import MenuSelect
 
 # ---------------------------------------------------------------------------
@@ -63,6 +66,23 @@ class NumberField(QLineEdit):
         NumberField.setValue(self, v)
         if changed:
             self.valueChanged.emit(self.value())
+
+
+class SpinField(NoWheelSpinBox):
+    """A number box with a step (↑ / ↓ keys), no arrows, that shows no trailing zeros
+    ("90°", "2.5 mm"). For values that step: an angle, a threshold, a plane's origin."""
+
+    def __init__(self, lo, hi, decimals, suffix="", parent=None):
+        super().__init__(parent)
+        self.setRange(lo, hi)
+        self.setDecimals(decimals)
+        self.setSuffix(suffix)
+        self.setButtonSymbols(QAbstractSpinBox.NoButtons)
+        self.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+
+    def textFromValue(self, v):
+        t = f"{v:.{self.decimals()}f}".rstrip("0").rstrip(".")
+        return "0" if t in ("", "-0") else t
 
 
 class UnitField(NumberField):

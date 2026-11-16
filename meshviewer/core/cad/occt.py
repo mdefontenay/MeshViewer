@@ -8,6 +8,11 @@ A CadFile holds the B-rep shapes in memory and turns them into
 assembly placements come from the file's assembly tree when it has one
 (STEP, IGES); repeated instances keep their own names and positions.
 The triangulation is for display only: curved faces become facets.
+
+`CadFile.part_info[name]`: what the file says about each part — "path" (the names of
+the assemblies it sits in, from the top), "color" ("#rrggbb" or None: the instance's,
+the part's, or its faces' most common), "material" ({"name", "description", "density",
+"density_unit"} or None).
 """
 from __future__ import annotations
 
@@ -38,6 +43,8 @@ try:
     from OCP.TopLoc import TopLoc_Location
     from OCP.TopoDS import TopoDS
     from OCP.XCAFDoc import XCAFDoc_DocumentTool, XCAFDoc_ShapeTool
+    from OCP.XCAFDoc import XCAFDoc_ColorTool, XCAFDoc_ColorType, XCAFDoc_Material
+    from OCP.Quantity import Quantity_Color
 except ImportError as exc:  # only needed for STEP / IGES / BREP files
     raise MissingDependency("cadquery-ocp", "STEP, IGES and BREP files") from exc
 
@@ -92,20 +99,90 @@ def _label_name(label) -> str:
     return ""
 
 
-def _collect_leaves(label, loc, inst_name, out):
+_COLOR_TYPES = ("XCAFDoc_ColorSurf", "XCAFDoc_ColorGen")
+
+
+def _label_color(label):
+    """"#rrggbb" set on a label (surface color first), or None."""
+    c = Quantity_Color()
+    for t in _COLOR_TYPES:
+        if XCAFDoc_ColorTool.GetColor_s(label, getattr(XCAFDoc_ColorType, t), c):
+            return "#%02x%02x%02x" % tuple(round(255 * max(0.0, min(1.0, v)))
+                                          for v in (c.Red(), c.Green(), c.Blue()))
+    return None
+
+
+def _shape_color(labels):
+    """The first color among `labels` (the instance, then the part), else the most
+    common color of the part's sub-shapes (files that color faces only)."""
+    for lab in labels:
+        if lab is not None and not lab.IsNull():
+            c = _label_color(lab)
+            if c:
+                return c
+    found = {}
+    for lab in labels[-1:]:
+        subs = TDF_LabelSequence()
+        if lab is not None and not lab.IsNull() and XCAFDoc_ShapeTool.GetSubShapes_s(lab, subs):
+            for i in range(1, subs.Length() + 1):
+                c = _label_color(subs.Value(i))
+                if c:
+                    found[c] = found.get(c, 0) + 1
+    return max(found, key=found.get) if found else None
+
+
+def _text(h):
+    try:
+        return h.ToCString().strip() if h is not None else ""
+    except Exception:                                       # noqa: BLE001
+        return ""
+
+
+def _label_material(label):
+    """The material a label points to (STEP's physical material): name, description,
+    density and its unit, or None."""
+    try:
+        from OCP.TDataStd import TDataStd_TreeNode
+        from OCP.XCAFDoc import XCAFDoc
+        if label is None or label.IsNull():
+            return None
+        # (FindAttribute with this tree's id crashes in OCP; Set_s finds the node, or
+        # adds an empty one to this document in memory, which is never saved)
+        node = TDataStd_TreeNode.Set_s(label, XCAFDoc.MaterialRefGUID_s())
+        if not node.HasFather():
+            return None
+        mat = XCAFDoc_Material()
+        if not node.Father().Label().FindAttribute(XCAFDoc_Material.GetID_s(), mat):
+            return None
+        out = {"name": _text(mat.GetName()), "description": _text(mat.GetDescription()),
+               "density": float(mat.GetDensity()), "density_unit": _text(mat.GetDensName())}
+        return out if out["name"] or out["description"] or out["density"] else None
+    except Exception:                                       # noqa: BLE001
+        return None
+
+
+def _collect_leaves(label, loc, inst_name, out, path=(), comp=None, materials=False):
+    """Leaves of the assembly tree: (name, located shape, info) — info: "path" (the
+    assemblies above, by name), "color", "material" (looked for when the file has
+    `materials`)."""
     if XCAFDoc_ShapeTool.IsAssembly_s(label):
+        here = path + ((inst_name or _label_name(label) or "Assembly"),)
         comps = TDF_LabelSequence()
         XCAFDoc_ShapeTool.GetComponents_s(label, comps, False)
         for i in range(1, comps.Length() + 1):
-            comp = comps.Value(i)
+            c = comps.Value(i)
             ref = TDF_Label()
-            XCAFDoc_ShapeTool.GetReferredShape_s(comp, ref)
-            comp_loc = loc.Multiplied(XCAFDoc_ShapeTool.GetLocation_s(comp))
-            _collect_leaves(ref, comp_loc, _label_name(comp) or _label_name(ref), out)
+            XCAFDoc_ShapeTool.GetReferredShape_s(c, ref)
+            comp_loc = loc.Multiplied(XCAFDoc_ShapeTool.GetLocation_s(c))
+            _collect_leaves(ref, comp_loc, _label_name(c) or _label_name(ref), out, here, c,
+                            materials)
     else:
         shape = XCAFDoc_ShapeTool.GetShape_s(label)
         if not shape.IsNull():
-            out.append((inst_name or _label_name(label), shape.Moved(loc)))
+            info = {"path": path, "color": _shape_color([comp, label]),
+                    "material": (_label_material(label) or _label_material(comp))
+                    if materials else None}
+            out.append((inst_name or _label_name(label), shape.Moved(loc), info))
 
 
 def _split_solids(name, shape):
@@ -249,15 +326,21 @@ def read_xcaf(path, reader_cls, label):
     doc = TDocStd_Document(TCollection_ExtendedString("MDTV-XCAF"))
     reader = reader_cls()
     reader.SetNameMode(True)
+    for mode in ("SetColorMode", "SetMatMode"):           # colors, materials (STEP)
+        if hasattr(reader, mode):
+            getattr(reader, mode)(True)
     if reader.ReadFile(str(path)) != IFSelect_RetDone:
         raise RuntimeError(f"OpenCASCADE could not read this {label} file")
     reader.Transfer(doc)
     shape_tool = XCAFDoc_DocumentTool.ShapeTool_s(doc.Main())
     roots = TDF_LabelSequence()
     shape_tool.GetFreeShapes(roots)
+    mats = TDF_LabelSequence()
+    XCAFDoc_DocumentTool.MaterialTool_s(doc.Main()).GetMaterialLabels(mats)
     leaves = []
     for i in range(1, roots.Length() + 1):
-        _collect_leaves(roots.Value(i), TopLoc_Location(), "", leaves)
+        _collect_leaves(roots.Value(i), TopLoc_Location(), "", leaves,
+                        materials=mats.Length() > 0)
     return leaves, doc
 
 
@@ -293,12 +376,15 @@ class CadFile:
 
     def __init__(self, path, leaves, keepalive=None, debug=True):
         self.path = path
-        self.leaves = leaves
+        # (name, shape) from BREP, (name, shape, info) from STEP / IGES
+        self.leaves = [lf[:2] for lf in leaves]
+        self._leaf_info = [lf[2] if len(lf) > 2 else {} for lf in leaves]
+        self.part_info = {}                 # part name -> path, color, material
         self._keepalive = keepalive         # e.g. the XCAF document owning the shapes
         self.debug = debug
         self._areas = _PerShape()           # exact area of each face, as asked
         box = Bnd_Box()
-        for _, s in leaves:
+        for _, s in self.leaves:
             BRepBndLib.Add_s(s, box)
         if leaves and not box.IsVoid():
             lo, hi = box.CornerMin(), box.CornerMax()   # works on OCP 7.x and 8.x
@@ -323,8 +409,10 @@ class CadFile:
         parts, loose = {}, []
         whole, free = _PerShape(), _PerShape()         # triangles of each distinct shape
         self.part_faces, self.part_solids = {}, {}     # for exact area / volume
+        self.part_info.clear()                         # (the Model keeps this dict)
         single = len(self.leaves) == 1
         for i, (leaf_name, shape) in enumerate(self.leaves, 1):
+            self._info = self._leaf_info[i - 1]
             has_solid = TopExp_Explorer(shape, TopAbs_SOLID).More()
             if not leaf_name and not has_solid and not single:
                 loose.append(shape)          # unnamed bare surfaces (typical of IGES)
@@ -341,6 +429,7 @@ class CadFile:
                           _instance_poly(shapes[0], free_only, free if free_only else whole),
                           solids=None if free_only else shapes)
         if loose:                           # ...grouped into one part, not hundreds
+            self._info = {}
             self._add(parts, "Surfaces", _faces_to_poly(loose, False))
         if self.debug:
             n = sum(p.n_cells for p in parts.values())
@@ -353,6 +442,10 @@ class CadFile:
             name = _unique(name, parts)
             parts[name] = poly
             self.part_faces[name] = faces
+            info = getattr(self, "_info", None) or {}
+            self.part_info[name] = {"path": tuple(info.get("path", ())),
+                                    "color": info.get("color"),
+                                    "material": info.get("material")}
             if solids:
                 self.part_solids[name] = solids
 

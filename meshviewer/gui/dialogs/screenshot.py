@@ -7,11 +7,12 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QActionGroup
 from PySide6.QtWidgets import (
-    QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout, QLabel, QLayout, QVBoxLayout, QWidget,
+    QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout, QLayout, QVBoxLayout, QWidget,
 )
 
 from meshviewer.gui.store import settings
 from meshviewer.gui.widgets import Capsule, MenuSelect
+from meshviewer.gui.forms import sheet_title
 
 BACKGROUNDS = (("current", "As Shown"), ("transparent", "Transparent"))
 
@@ -27,8 +28,7 @@ class ScreenshotDialog(QDialog):
         lay.setSizeConstraint(QLayout.SetFixedSize)
         lay.setContentsMargins(20, 18, 20, 14)
         lay.setSpacing(12)
-        title = QLabel("Save Screenshot")
-        title.setStyleSheet("font-size: 15px; font-weight: 600;")
+        title = sheet_title("Save Screenshot")
         lay.addWidget(title)
 
         form = QFormLayout()

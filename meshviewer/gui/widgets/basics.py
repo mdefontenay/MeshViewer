@@ -105,6 +105,14 @@ def section_header(text):
     return lbl
 
 
+def rule():
+    """A thin line between two groups of controls (or two tools)."""
+    line = QFrame()
+    line.setObjectName("Divider")
+    line.setFixedHeight(1)
+    return line
+
+
 @lru_cache(maxsize=512)
 def color_dot(hex_color, size=12):
     """A round colour swatch (one icon per colour: lists ask for hundreds)."""

@@ -11,6 +11,9 @@ from meshviewer.core.plots import KINDS
 from meshviewer.gui.widgets import Capsule, Menu
 
 
+BAR_ROOM = 6           # under the pill, for the scrollbar; the bar's margins even it out
+
+
 class TabScroll(QScrollArea):
     """The tabs under the view (3D model · Inflation layers · plots), scrolling sideways
     when they don't fit: thin bar, the wheel / trackpad scrolls them, the chosen tab is
@@ -39,7 +42,8 @@ class TabScroll(QScrollArea):
         for b in getattr(capsule, "buttons", []):
             b.ensurePolished()
         capsule.adjustSize()
-        self.setFixedHeight(capsule.sizeHint().height() + 10)   # + the thin scrollbar
+        # + the thin scrollbar's room (6 px): as much as the bar has above the pill
+        self.setFixedHeight(capsule.sizeHint().height() + BAR_ROOM)
         QTimer.singleShot(0, lambda: capsule.adjustSize() if shiboken6.isValid(capsule) else None)
 
     def show_current(self):
@@ -119,7 +123,8 @@ class Pages:
             a.setText(m["name"])
             a.setToolTip(f"{m['name']} ({KINDS[m['kind']]['title']})")
         acts = self.view_bar_actions()
-        self._pages_cap = Capsule(acts, name="Segmented")
+        self._pages_cap = Capsule(acts, name="Segmented", dividers=False)   # same gaps
+        self._pages_cap.layout().setSpacing(2)
         plot_of = {a: i for i, a in self._plot_acts.items()}
         for b in self._pages_cap.buttons:              # right-click a plot's tab
             ident = plot_of.get(b.defaultAction())

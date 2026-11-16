@@ -6,14 +6,6 @@ from PySide6.QtCore import QEvent, QSize, Qt, QTimer
 from PySide6.QtWidgets import QFrame, QScrollArea, QSizePolicy
 
 
-
-def divider():
-    line = QFrame()
-    line.setObjectName("Divider")
-    line.setFixedHeight(1)
-    return line
-
-
 class FitScroll(QScrollArea):
     """A scroll area exactly as tall as its content, so no empty scrollbar track shows;
     it only shrinks (and scrolls) when the window is too short for everything."""

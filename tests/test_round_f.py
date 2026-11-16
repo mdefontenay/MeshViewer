@@ -34,8 +34,39 @@ def test(app, files):
     sb = w.sidebar
     tip = sb.inflation_panel.y_des.toolTip()
     check("smooth" in tip and "aspect ratio" in tip, "Next cell hover text")
-    # F2: no y+ along the flow tab
-    check(set(w.inflation_view.tabs) == {"plot", "section"}, f"tabs {sorted(w.inflation_view.tabs)}")
+    # the Inflation page: one plot, no tabs (the Section tab went); the layers in 3D
+    check(not hasattr(w.inflation_view, "tabs") and w.inflation_view.plot.LEFT0 > 0,
+          "Inflation page: the layer sizes and their stack, no tabs")
+    from meshviewer.render.overlays import thickness_shell
+    import pyvista as pv
+    box = pv.Box((-20, 20, -10, 10, -5, 5)).triangulate()
+    shell = thickness_shell(box, 1.0)
+    b0 = np.reshape(box.bounds, (3, 2))
+    b1 = np.reshape(shell.bounds, (3, 2))
+    check(np.allclose(b1[:, 0], b0[:, 0] - 1.0, atol=0.05) and
+          np.allclose(b1[:, 1], b0[:, 1] + 1.0, atol=0.05),
+          f"thickness in 3D: the box grown by the thickness ({b1.tolist()})")
+    ip = sb.inflation_panel
+    ip.enable.setChecked(True)
+    ip.u.setValue(50.0)
+    ip._update()
+    iv = w.inflation_view
+    iv.show_3d.setChecked(True)                          # the Inflation page's switch
+    check(len(w.scene.walls.actors()) >= 2 and ip.settings()["thickness"] and ip.show_3d,
+          "Show in 3D (Inflation page): the shell over the walls, its feature lines")
+    side = ip.side
+    iv.flip.setChecked(True)
+    check(ip.side == -side and ip.settings()["flip"], "Flip: the other side")
+    iv.flip.setChecked(False)
+    from meshviewer.render.overlays import auto_side
+    check(auto_side(box, 1.0) == 1 and auto_side(box.flip_faces() if hasattr(box, "flip_faces")
+                                                  else box, 1.0) in (1, -1),
+          "auto side: a box grows out (no folds)")
+    thin = pv.Box((-50, 50, -0.2, 0.2, -10, 10)).triangulate()
+    check(auto_side(thin, 1.0) == 1, "a thin plate: out, not into itself")
+    ip.set_3d(False, False)
+    check(not iv.show_3d.isChecked(), "the page's switch follows the panel")
+    ip.enable.setChecked(False)
     w.close()
     # F7: Distance, one point = from the origin; two = between them
     w = open_file(app, files["cgns"])

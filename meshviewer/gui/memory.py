@@ -71,11 +71,18 @@ def capture(scene):
         "camera": [list(map(float, v)) for v in scene.p.camera_position],
         "parallel_scale": float(cam.parallel_scale),
         "parallel": scene.state["parallel"],
-        "toggles": {k: bool(scene.state.get(k)) for k in TOGGLES},
+        "toggles": {**{k: bool(scene.state.get(k)) for k in TOGGLES},
+                    # a drawing's bounding box (its frame): its own key, on unless turned off
+                    # (saves before it could be shown on a drawing say off)
+                    **({"drawing_bbox": bool(scene.state.get("bbox"))} if scene.is_drawing
+                       else {})},
         "unit": scene.measure.display_unit,
         "file_unit": scene.model.units or None,
         "renames": dict(alias),
-        "colors": {orig.get(n, n): scene.colors[n] for n in scene.names},
+        "quality": scene.model.quality if scene.can_retessellate else None,   # Meshing Control
+        "group_names": dict(getattr(scene, "group_names", {}) or {}),   # assemblies
+        "colors": {orig.get(n, n): scene.colors[n] for n in scene.names    # chosen ones
+                   if scene.colors[n] != scene.default_colors.get(orig.get(n, n))},
         "hidden": [orig.get(n, n) for n in scene.names if not scene.visible[n]],
         "cfd": scene.cfd_settings,
         "inflation": scene.inflation_settings,                    # Inflation Layers
@@ -98,14 +105,22 @@ def restore(scene, state):
     for old, new in state.get("renames", {}).items():
         if old in scene.model.parts and new not in scene.model.parts:
             scene.rename_part(old, new)
+    scene.group_names = dict(state.get("group_names") or {})
     current = lambda n: scene._alias.get(n, n)               # noqa: E731
+    native = {n for n, i in (scene.model.part_info or {}).items() if i.get("color")}
+    # (files saved every color: one that is just the palette's gives way to the file's)
     colors = {current(n): c for n, c in state.get("colors", {}).items()
-              if current(n) in scene.colors}
+              if current(n) in scene.colors
+              and not (n in native and c == scene._palette.get(n))}
     for name, c in colors.items():
         scene.set_color([name], c, render=False)
     hidden = [current(n) for n in state.get("hidden", []) if current(n) in scene.visible]
     scene.set_visible(hidden, False, render=False)
-    t = state.get("toggles", {})
+    t = dict(state.get("toggles", {}))
+    if scene.is_drawing:
+        t.pop("bbox", None)
+        if "drawing_bbox" in t:
+            t["bbox"] = t["drawing_bbox"]
     for key, method in (("mesh_edges", "set_mesh_edges"), ("feature_edges", "set_feature_edges"),
                         ("faces", "set_faces"), ("bbox", "set_bbox"), ("origin", "set_origin")):
         if key in t and bool(t[key]) != bool(scene.state.get(key)):

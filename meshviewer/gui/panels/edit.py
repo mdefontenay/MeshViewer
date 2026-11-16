@@ -4,58 +4,37 @@ fill it in, Apply.
     Transform  [ Rotate               ▾ ]     Rotate · Mirror · Move by X, Y, Z
     Axis       [  X  |  Y  |  Z  ]            (Rotate, Mirror)
     Angle      [                90° ]         (Rotate: any angle)
-    Pivot      [ Origin | Centre ]            (Rotate, Mirror)
+    Pivot      [ Origin | Center ]            (Rotate, Mirror)
     X / Y / Z  [            0 mm ]            (Move)
     [                 Apply                ]
+    ───────────────────────────────────────
     Changes (2)                 [ Undo | Reset ]
       1  Rotate 90° about Z
       2  Move 10, 0, 0 mm
     Show original edges                (switch)
 
-Exact CAD (STEP, IGES, BREP) only shows a grey note instead.
+Exact CAD (STEP, IGES, BREP): the tool's gray reason instead (gui/sections.py).
 """
 from __future__ import annotations
 
 import numpy as np
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QAction
-from PySide6.QtWidgets import (
-    QAbstractSpinBox, QGridLayout, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout,
-    QWidget,
-)
+from PySide6.QtWidgets import QLabel, QPushButton, QSizePolicy, QWidget
 
 from meshviewer.core import transform as xf
-from meshviewer.gui.forms import segmented
-from meshviewer.gui.widgets import Capsule, MenuSelect, NoWheelSpinBox, Switch
+from meshviewer.gui.forms import (
+    _grid, _row, button, buttons, column, group_head, note, rule, segmented, switch_row,
+)
+from meshviewer.gui.widgets import MenuSelect, SpinField, Switch
 
 KINDS = (("rotate", "Rotate"), ("mirror", "Mirror"), ("move", "Move by X, Y, Z"))
 HISTORY_SHOWN = 8          # older changes fold into "… n earlier"
 
 
-class _Number(NoWheelSpinBox):
-    """Value shown without trailing zeros ("90°", "2.5 mm")."""
-
-    def textFromValue(self, v):
-        t = f"{v:.{self.decimals()}f}".rstrip("0").rstrip(".")
-        return "0" if t in ("", "-0") else t
-
-
 def _number(lo, hi, decimals, suffix=""):
-    b = _Number()
-    b.setRange(lo, hi)
-    b.setDecimals(decimals)
-    b.setSuffix(suffix)
-    b.setButtonSymbols(QAbstractSpinBox.NoButtons)
-    b.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+    b = SpinField(lo, hi, decimals, suffix)
     b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
     return b
-
-
-def _info(text=""):
-    lab = QLabel(text)
-    lab.setObjectName("InfoLine")
-    lab.setWordWrap(True)
-    return lab
 
 
 class EditPanel(QWidget):
@@ -67,31 +46,20 @@ class EditPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.scene = None
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(8)
-
-        self.unsupported = _info()                 # exact CAD: just a note
-        lay.addWidget(self.unsupported)
+        lay = column(self)
 
         # ---- the transform being set up -------------------------------------------
         self.tools = QWidget()
-        g = QGridLayout(self.tools)
-        g.setContentsMargins(2, 0, 2, 0)
-        g.setHorizontalSpacing(8)
-        g.setVerticalSpacing(6)
-        g.setColumnStretch(1, 1)
+        g = _grid()
+        self.tools.setLayout(g)
         lay.addWidget(self.tools)
         self._rows = {}                            # key -> (label, widget), shown per kind
 
         def row(key, label, widget, tip=""):
-            r = g.rowCount()
-            lab = QLabel(label)
-            lab.setToolTip(tip)
             if tip and not widget.toolTip():
                 widget.setToolTip(tip)
-            g.addWidget(lab, r, 0)
-            g.addWidget(widget, r, 1)
+            lab, _ = _row(g, g.rowCount(), label, widget, wide=True)
+            lab.setToolTip(tip)
             self._rows[key] = (lab, widget)
 
         self.kind = MenuSelect()
@@ -125,8 +93,8 @@ class EditPanel(QWidget):
             self.move.append(b)
             row(f"move_{k}", k.upper(), b, f"Distance along {k.upper()}")
 
-        self.hint = _info()                        # what Mirror does, in words
-        g.addWidget(self.hint, g.rowCount(), 1)
+        self.hint = note()                         # what Mirror does, in words
+        g.addWidget(self.hint, g.rowCount(), 1, 1, 3)
 
         self.apply = QPushButton("Apply")
         self.apply.setObjectName("ApplyButton")
@@ -138,43 +106,28 @@ class EditPanel(QWidget):
             b.lineEdit().returnPressed.connect(self._apply)
 
         # ---- what has been done ---------------------------------------------------
-        hrow = QHBoxLayout()
-        hrow.setContentsMargins(2, 4, 2, 0)
-        self.history_title = QLabel("Changes")
-        self.history_title.setObjectName("AxisLabel")
-        hrow.addWidget(self.history_title, 1)
-        self.undo = QAction("Undo", self)
-        self.undo.setToolTip("Undo the last change")
-        self.undo.triggered.connect(self.undo_requested.emit)
-        self.reset = QAction("Reset", self)
-        self.reset.setToolTip("Back to the file as opened")
-        self.reset.triggered.connect(self.reset_requested.emit)
-        self.undo_capsule = Capsule([self.undo, self.reset], name="Segmented")   # like Clear
-        hrow.addWidget(self.undo_capsule)
+        lay.addWidget(rule())
+        self.undo = button(self, "Undo", self.undo_requested.emit, "Undo the last change")
+        self.reset = button(self, "Reset", self.reset_requested.emit, "Back to the file as opened")
+        self.undo_capsule = buttons(self.undo, self.reset)
+        hrow = group_head("Changes", self.undo_capsule)
+        self.history_title = hrow.itemAt(0).widget()
         self.history_head = QWidget()
         self.history_head.setLayout(hrow)
         lay.addWidget(self.history_head)
 
         self.history = QWidget()
-        self.history_lay = QVBoxLayout(self.history)
-        self.history_lay.setContentsMargins(4, 0, 2, 0)
-        self.history_lay.setSpacing(2)
+        self.history_lay = column(self.history, spacing=2)
         lay.addWidget(self.history)
-        self.status = _info("No changes yet")      # also the empty list
+        self.status = note("No changes yet")      # also the empty list
         self.history_lay.addWidget(self.status)
         self._history_rows = []
 
         self.original = Switch()
-        self.original.setToolTip("Gray feature edges of the file as it was opened, to compare")
+        self.original_row = switch_row(
+            "Show original edges", self.original,
+            "Gray feature edges of the file as it was opened, to compare")
         self.original.toggled.connect(self.original_toggled.emit)
-        orow = QHBoxLayout()
-        orow.setContentsMargins(2, 2, 2, 0)
-        self.original_label = QLabel("Show original edges")
-        orow.addWidget(self.original_label)
-        orow.addStretch(1)
-        orow.addWidget(self.original)
-        self.original_row = QWidget()
-        self.original_row.setLayout(orow)
         lay.addWidget(self.original_row)
 
         self._kind_changed()
@@ -185,13 +138,6 @@ class EditPanel(QWidget):
         self.scene = scene
         m = scene.model
         self._flat = m.dim == 2                    # 2D: stays in the XY plane
-        ok = m.editable
-        for w in (self.tools, self.apply, self.history_head, self.history, self.original_row):
-            w.setVisible(ok)
-        self.unsupported.setVisible(not ok)
-        self.unsupported.setText(
-            "" if ok else f"Editing isn't available for {m.fmt} files: they hold exact CAD "
-                          f"geometry. Export as STL, open that file, and edit it.")
         step = 10 ** np.floor(np.log10(max(scene.section.diag, 1e-9) / 20))
         unit = f" {m.units}" if m.units else ""
         for k, b in zip("XYZ", self.move):

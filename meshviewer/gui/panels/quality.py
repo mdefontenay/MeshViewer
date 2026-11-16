@@ -1,12 +1,13 @@
 """The Cell Quality tool (mesh files only).
 
-    Measure            [ Skewness              ▾ ]
+    Metric             [ Skewness              ▾ ]
     ▁▂▅█▇▅▃▂▁ ▏         histogram, coloured like the 3D view; click / drag to
     0        mean 0.14   0.97                     set the threshold
     Bad if  >  [ 0.9 ]
     132 bad cells (0.4 %)                          Zoom
     Show bad cells                                 (switch)
-    Colour by quality                              (switch)
+    Color by quality                               (switch)
+    ───────────────────────────────────────
     ✓ No inverted cells
     2,750 volume cells checked
 
@@ -18,14 +19,15 @@ from __future__ import annotations
 import numpy as np
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QPainter, QPalette, QPen
-from PySide6.QtWidgets import (
-    QAbstractSpinBox, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget,
-)
+from PySide6.QtWidgets import QHBoxLayout, QSizePolicy, QWidget
 
 from meshviewer.core import quality as Q
+from meshviewer.gui.forms import (
+    _grid, _label, _row, column, link, note, rule, set_state, switch_row,
+)
 from meshviewer.gui.jobs import run_job
-from meshviewer.gui.style import accent
-from meshviewer.gui.widgets import MenuSelect, NoWheelSpinBox, Switch
+from meshviewer.gui.style import STATUS, accent
+from meshviewer.gui.widgets import MenuSelect, SpinField, Switch
 
 DECIMALS = {"skew": 3, "aspect": 1, "jacobian": 3, "size": 9}
 RANGES = {"skew": (0, 1), "aspect": (1, 1e12), "jacobian": (-1, 1), "size": (-1e12, 1e12)}
@@ -41,12 +43,6 @@ def _num(v):
     if a >= 1e5 or a < 1e-3:
         return f"{v:.2g}"
     return f"{v:.3g}"
-
-
-class _Threshold(NoWheelSpinBox):
-    def textFromValue(self, v):
-        t = f"{v:.{self.decimals()}f}".rstrip("0").rstrip(".")
-        return "0" if t in ("", "-0") else t
 
 
 class Histogram(QWidget):
@@ -106,7 +102,8 @@ class Histogram(QWidget):
             p.drawRect(QRectF(1 + i * w + 0.5, self.HEIGHT - 2 - h, max(w - 1, 1), h))
         if self.threshold is not None and np.isfinite(self.threshold):
             x = float(np.clip(self._x(self.threshold), 0, self.width()))
-            shade = QColor(255, 69, 58, 34)
+            shade = QColor(STATUS["bad"])
+            shade.setAlpha(34)
             p.setBrush(shade)
             if self.bad_side == ">":
                 p.drawRect(QRectF(x, 0, self.width() - x, self.HEIGHT))
@@ -149,46 +146,31 @@ class QualityPanel(QWidget):
         self._pending = None
         self._active = False
         self._stats = None
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(2, 0, 2, 0)
-        lay.setSpacing(6)
+        lay = column(self)
 
-        row = QHBoxLayout()
-        row.addWidget(QLabel("Measure"))
+        g = _grid()
         self.metric = MenuSelect()
         for key, m in Q.METRICS.items():
             self.metric.addItem(m["label"], key)
         self.metric.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.metric.currentIndexChanged.connect(self._metric_changed)
-        row.addWidget(self.metric, 1)
-        lay.addLayout(row)
+        _row(g, 0, "Metric", self.metric, wide=True)
+        lay.addLayout(g)
 
         self.hist = Histogram()
         self.hist.threshold_picked.connect(self._picked)
         lay.addWidget(self.hist)
 
-        row = QHBoxLayout()
-        self.bad_label = QLabel("Bad if >")
-        row.addWidget(self.bad_label)
-        self.threshold = _Threshold()
-        self.threshold.setButtonSymbols(QAbstractSpinBox.NoButtons)
-        self.threshold.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.threshold.setFixedWidth(80)
+        g = _grid()
+        self.threshold = SpinField(0, 1, 3)
         self.threshold.valueChanged.connect(self._threshold_changed)
-        row.addWidget(self.threshold)
-        row.addStretch(1)
-        lay.addLayout(row)
+        self.bad_label, _ = _row(g, 0, "Bad if >", self.threshold)
+        lay.addLayout(g)
 
         row = QHBoxLayout()                         # "1,250 bad cells (45 %)     Zoom"
-        self.count = QLabel("")
-        self.count.setObjectName("ValueLabel")
+        self.count = _label("", "ValueLabel")
         row.addWidget(self.count, 1)
-        self.zoom = QPushButton("Zoom")
-        self.zoom.setObjectName("LinkButton")
-        self.zoom.setFlat(True)
-        self.zoom.setCursor(Qt.PointingHandCursor)
-        self.zoom.setToolTip("Zoom onto the bad cells")
-        self.zoom.clicked.connect(self._zoom)
+        self.zoom = link("Zoom", "Zoom onto the bad cells", self._zoom)
         row.addWidget(self.zoom)
         lay.addLayout(row)
 
@@ -197,25 +179,16 @@ class QualityPanel(QWidget):
                 ("bad", "Show bad cells", "Bad cells in red; the model turns see-through"),
                 ("color", "Color by quality", "Volume meshes: colors the section cut.\n"
                                                "Surface meshes: colors the faces.")):
-            r = QHBoxLayout()
-            lab = QLabel(text)
-            lab.setToolTip(tip)
-            r.addWidget(lab)
-            r.addStretch(1)
             sw = Switch()
-            sw.setToolTip(tip)
             sw.toggled.connect(lambda on, k=key: self._switched(k, on))
-            r.addWidget(sw)
-            lay.addLayout(r)
+            lay.addWidget(switch_row(text, sw, tip))
             self.switches[key] = sw
 
-        self.inverted = QLabel("")
-        self.inverted.setObjectName("InfoLine")
-        self.inverted.setWordWrap(True)
+        lay.addWidget(rule())
+        self.inverted = note()                       # volume meshes only
+        self.inverted.hide()
         lay.addWidget(self.inverted)
-        self.status = QLabel("")
-        self.status.setObjectName("InfoLine")
-        self.status.setWordWrap(True)
+        self.status = note()
         lay.addWidget(self.status)
 
         self._redraw_later = QTimer(self, singleShot=True, interval=250)
@@ -234,7 +207,8 @@ class QualityPanel(QWidget):
         self.hist.clear()
         self.count.setText("")
         self.inverted.setText("")
-        self.status.setText("Open this tool to check the cells.")
+        self.inverted.hide()
+        self.status.setText("")
         self._metric_changed()
         if self._active:
             self._compute()
@@ -333,7 +307,8 @@ class QualityPanel(QWidget):
             n_inv = int(np.count_nonzero(size <= 0))
             self.inverted.setText(f"⚠ {n_inv:,} inverted cells (volume ≤ 0)" if n_inv
                                   else "✓ No inverted cells")
-            self.inverted.setStyleSheet("color: #ff453a;" if n_inv else "")
+            set_state(self.inverted, "bad" if n_inv else None)
+            self.inverted.show()
         what = "volume cells" if qv.is_volume else "surface faces (no volume cells in the file)"
         self.status.setText(f"{s['n']:,} {what} checked")
         if redraw_now:

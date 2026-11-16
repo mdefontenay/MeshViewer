@@ -1,4 +1,108 @@
-## What's new in 2.5 beta 4
+## What's new in 2.5
+
+Mesh Viewer 2.5 is organized the macOS way, with everything from the five betas below.
+
+- **A Mac app through and through**: a full menu bar, Undo / Redo for every change (the
+  camera and the selection too), Settings (⌘,), sheets, a toolbar you can customize,
+  the parts list on the left and the tools on the right in View · Measure · Analyze tabs.
+- **CAD assemblies**: STEP files show their assembly tree, colors and materials; sort
+  and filter parts by name, size or volume; Meshing Control per file.
+- **Meshes and results**: CGNS, UGRID, Gmsh / Fluent .msh, volume cells cut by the
+  section, CFD results with usual field names and units, log scales, section plots.
+- **Inflation Layers**: the layer stack to scale and the total thickness drawn in 3D.
+- **Select ▾ and Measure Selected**: pick nodes, edges, faces or cells and read their
+  numbers; the Measuring Tool for distances, angles, areas and volumes.
+- **DXF drawings** with their text, dimensions and arrowheads; smooth zoom toward the
+  pointer on a trackpad or a mouse.
+
+New since 2.5 beta 5:
+
+- **2D files: clicking a line or a node is easier.** Select ▾ Node and Edge pick the
+  nearest one within about 10 points of the pointer, so thin lines no longer need a
+  pixel-perfect click.
+- **Snap to edges** (Measuring Tool, 2D files): a point snaps to the nearest line, or
+  to a line's end or corner.
+- **⌘Z steps back through the camera in pieces**: a pause of about a second, or
+  switching from turning to panning or zooming, starts a new step.
+- **Measure Selected opens by itself** when you pick something with Select ▾.
+
+## In 2.5 beta 5
+
+- **Plots**: each plot has **Axes** — min, max, log and flip for X and Y — and the plot
+  zooms with the wheel, pans with a drag, fits with a double-click. *Negative up* is
+  gone: cp starts with Y flipped, showing its true values.
+- Each STEP / IGES / BREP file **keeps its meshing level**.
+- **Measure Selected** (Measure tab): what you picked with Select ▾, in numbers — a
+  node's coordinates, an edge's length, ends, angle between its faces and, for a
+  circle or an arc, its radius and diameter (it can draw them), a face's area, normal
+  and perimeter, a cell's quality.
+- **Select ▸ Volume Cell** on meshes with volume cells (CGNS, UGRID, .msh).
+- The Measure tool is now the **Measuring Tool**; on 2D files it measures between any
+  two points inside the axes.
+- **Inflation Layers**, rearranged: *Fluid & Freestream* and *Boundary Layer & Sizing*,
+  the fluid's properties folded. The Inflation page shows the layers stacked on the
+  wall, to scale (its Section tab is gone), and **Show in 3D** draws their total
+  thickness over the walls, with the walls' edges, on the side where it doesn't fold
+  over itself (**Flip** for the other) — no more spikes at a sharp trailing edge.
+- **Rename a group** in the parts list (its parts, or a STEP assembly).
+- **STEP files show their assemblies and colors**: the parts list follows the file's
+  tree (assemblies, then the usual groups inside), and parts take the colors the file
+  gives them. Right-click ▸ **Material…** shows a part's material, when the file has one.
+- **Sort the parts list** (the button right of the filter) by name, size or volume, and
+  **filter by size or volume**: `size > 20`, `volume < 1000`, with a name or not. The
+  same menu picks **File Color** or **Randomized Color**, and **Isolate McMaster Parts**
+  (now off by default: McMaster parts stay in their places).
+- The parts tree is more compact, and the part menu groups Rename…, Color… and Material…
+- The line under the parts list counts **parts** for STEP files and **cells** for
+  CGNS / UGRID files.
+- CAD files open at **Medium** meshing control.
+- **DXF drawings, lighter**: no left sidebar, only the Measure tab, and a click picks an
+  **Edge** or a **Node** (Info gives its length or coordinates).
+- **DXF drawings show their text, dimensions and arrowheads**: TEXT and MTEXT as the
+  letters' outlines, dimensions with their lines, arrows and values, filled arrowheads
+  (SOLID, TRACE, 3DFACE) as outlines — also inside blocks. Text in a font that isn't on the Mac
+  (Onshape's Noto Sans) uses one that has its letters.
+- **Smoother zoom, toward the pointer**: the mouse wheel, a trackpad's two-finger scroll
+  and a pinch zoom smoothly toward what is under the pointer — a wheel notch eases in
+  over a few frames instead of jumping, the trackpad follows your fingers.
+- **Drawings open with their bounding box** (white in dark mode, black in light mode) and
+  **without grid or axes**; drawings keep their own grid / axes choice, apart from 3D files.
+- **Undo and Redo in the toolbar**, and they now also step back through the **parts
+  you selected** and the **camera**: turning, zooming, the views… several camera
+  moves in a row are one step.
+- **Rotate Camera 90° Left** (⌘L) in the views' pill: the picture turns a quarter turn.
+- **Export and Screenshot** share one pill in the toolbar.
+- **Left Sidebar** and **Right Sidebar** are the new names of the sidebar and the
+  inspector. View ▸ Hide Toolbar (⌥⌘T) hides the toolbar until the window closes; the
+  app always starts with it shown.
+- **Color the boundaries** is now the switch in the Results title.
+- **Every tool in one layout**: labels and fields in the same columns, switches on the
+  right, group titles with their buttons, computed numbers as gray names with the
+  value on the right. The **CFD** tool for meshes is laid out like Inflation Layers —
+  *Fluid & Freestream* (the fluid's properties folded, Mach / Speed on one row, the
+  flow vectors beside the direction) and *y+ Estimator* (Target y+ with its
+  Compressible switch).
+- **Tools that don't apply to the open file have a lighter name**, so the ones that do
+  stand out; Plots' reason sits on a card like the others'.
+- **DXF drawings open Info and Measure Selected**: a click on an edge or a node shows
+  its numbers there.
+- Cell Quality's menu is **Metric** (it was *Measure*, the name of a tab).
+- No solver is named on screen any more.
+- **2D meshes in Select ▾**: Part, Mesh Node, Mesh Edge, **Mesh Cell** (triangles and
+  quads), Feature Node and Feature Edge. A feature edge is a boundary from one end to
+  the next (symmetry, wall, outlet…). **Fixed**: picking a feature edge or node on a 2D
+  mesh gave an error.
+- **A selected part's outline follows its feature edges** (a CAD part's face borders,
+  a mesh's sharp and smooth edges), not bits of the triangles.
+- **Plots**: hovering a line follows it between the points; **Negative up** plots the
+  opposite of the values and the axis says so (*−cp*); the normal you type in Edit
+  Plane stays as typed, as in Section.
+- The **Parts / Boundaries list** stays open (it no longer folds).
+- **Fixed**: a bigger axis label size moved the XYZ arrows in the corner; now only the
+  letters grow.
+- The tabs under the 3D view are evenly padded.
+
+## In 2.5 beta 4
 
 - **Select ▾** in the toolbar (also Edit ▸ Select) chooses what a click picks: the
   **Part**, or on a mesh a **Mesh Node**, **Mesh Edge** or **Mesh Triangle**, or on
@@ -332,7 +436,7 @@ Faster and smoother — nothing new to learn.
 
 ## Install
 
-1. Download **Mesh Viewer 2.17.dmg** below.
+1. Download **Mesh Viewer 2.5.dmg** below.
 2. Open it and drag **Mesh Viewer** onto **Applications**.
 3. **First launch:** the app isn't notarized by Apple, so macOS blocks it the first
    time. Try to open it once, then go to **System Settings → Privacy & Security**

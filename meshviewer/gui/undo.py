@@ -1,12 +1,15 @@
-"""Edit ▸ Undo / Redo: every change to the model, one stack per window.
+"""Edit ▸ Undo / Redo (and the toolbar's Undo / Redo): one stack per window.
 
-What can be undone is what changes the model or how its parts look: showing and
-hiding parts, their colors, their names, hidden CAD faces, and the Edit tool's
-rotations, mirrors and moves. The camera, the selection and the tools' settings are
-not (as in other Mac apps, they are the view, not the document).
+What can be undone: showing and hiding parts, their colors, their names, hidden CAD
+faces, the Edit tool's rotations, mirrors and moves — and the parts selected and the
+camera. Camera moves of one kind (turning, panning, zooming, the view buttons), one
+after another with no pause over CAMERA_PAUSE s, are one step (`_Done.mergeWith`; the
+scene names the gesture: `camera_gesture`). The tools' settings are not.
 
 Each change is a command that holds the state before and after it; the stack runs
-redo() when it is pushed, so the change itself happens there.
+redo() when it is pushed, so the change itself happens there — except for a selection
+or a camera move, already made when it is recorded (`_Done`). While a command is
+applied, the selection and camera changes it causes are not recorded (`_applying`).
 
     changes = Changes(window)
     changes.visibility(["Wing"], False)        # Edit ▸ Undo Hide Wing
@@ -15,6 +18,7 @@ redo() when it is pushed, so the change itself happens there.
 from __future__ import annotations
 
 import copy
+import time
 
 import numpy as np
 from PySide6.QtGui import QUndoCommand, QUndoStack
@@ -32,10 +36,54 @@ class _Command(QUndoCommand):
         self._apply(self._before)
 
 
+class _Done(QUndoCommand):
+    """A change already made (a click, a camera move): pushing it doesn't redo it.
+    `merge`: changes with the same id one after another are one (the camera), while
+    `gesture` = (kind, serial, time) allows it: the same gesture (serial), or the same
+    kind with no pause over CAMERA_PAUSE s."""
+
+    def __init__(self, text, apply, before, after, merge=-1, same=None, gesture=None):
+        super().__init__(text)
+        self._apply, self._before, self._after = apply, before, after
+        self._merge, self._same, self._fresh = merge, same, True
+        self._gesture = gesture
+
+    def id(self):
+        return self._merge
+
+    def mergeWith(self, other):
+        if self._merge < 0 or other.id() != self._merge:
+            return False
+        if self._gesture is not None and other._gesture is not None:
+            (kind, serial, t), (k2, s2, t2) = self._gesture, other._gesture
+            if serial != s2 and (kind != k2 or t2 - t > CAMERA_PAUSE):
+                return False                       # another gesture: its own step
+            self._gesture = other._gesture
+        self._after = other._after
+        if self._same is not None and self._same(self._before, self._after):
+            self.setObsolete(True)                 # back where it was: no step
+        return True
+
+    def redo(self):
+        if self._fresh:
+            self._fresh = False
+            return
+        self._apply(self._after)
+
+    def undo(self):
+        self._apply(self._before)
+
+
+CAMERA = 1                                         # the camera's merge id
+CAMERA_PAUSE = 0.8                                 # s: a pause longer ends the step
+
+
 class Changes:
     def __init__(self, window):
         self.w = window
         self.stack = QUndoStack(window)
+        self._busy = False                         # applying a command
+        self._watched = None                       # the scene whose clicks / camera count
 
     @property
     def scene(self):
@@ -48,10 +96,61 @@ class Changes:
     def clear(self):
         """A new file, or new parts (another mesh quality): nothing to go back to."""
         self.stack.clear()
+        if self.scene is not None:
+            self.scene._cam_base = None            # where the camera is now: the start
+
+    def watch(self, scene):
+        """Record this scene's selection and camera moves (a file just opened)."""
+        old = self._watched
+        if old is not None and old is not scene:
+            old.on_selection = old.on_camera = None
+        self._watched = scene
+        scene.on_selection = self._selection_made
+        scene.on_camera = self._camera_moved
+        scene._cam_base = None
+
+    def _applying(self, apply, state):
+        self._busy = True
+        try:
+            apply(state)
+        finally:
+            self._busy = False
+            if self.scene is not None:
+                self.scene._cam_base = None        # a camera it moved is part of it
+
+    def _cmd(self, text, apply, before, after):
+        return _Command(text, lambda s: self._applying(apply, s), before, after)
 
     def _push(self, text, apply, before, after):
         if before != after:                        # nothing changes: nothing to undo
-            self.stack.push(_Command(text, apply, before, after))
+            self.stack.push(self._cmd(text, apply, before, after))
+
+    # ---- the selection and the camera (already done when recorded) -----------------
+    def _selection_made(self, before, after):
+        if self._busy or self.scene is None:
+            return
+        self.stack.push(_Done("Selection", lambda s: self._applying(self._set_selection, s),
+                              list(before), list(after)))
+
+    def _set_selection(self, names):
+        sc = self.scene
+        sc.set_selection([n for n in names if n in sc.visible], notify=True)
+
+    def _camera_moved(self, before, after):
+        if self._busy or self.scene is None:
+            return
+        kind, serial = getattr(self.scene, "camera_gesture", ("move", 0))
+        self.stack.push(_Done("Camera Change",
+                              lambda s: self._applying(self._set_camera, s),
+                              before, after, merge=CAMERA, same=self.scene.same_camera,
+                              gesture=(kind, serial, time.monotonic())))
+
+    def _set_camera(self, snap):
+        self.scene.set_camera_snapshot(snap)
+        a = self.w.a_parallel                      # Perspective follows
+        a.blockSignals(True)
+        a.setChecked(not self.scene.state["parallel"])
+        a.blockSignals(False)
 
     def _label(self, names, verb):
         """ "Hide Wing", "Hide 3 Parts" (the file's own word for its parts)."""
@@ -114,13 +213,40 @@ class Changes:
 
     # ---- names ----------------------------------------------------------------------------
     def rename(self, old, new):
-        self.stack.push(_Command(f"Rename {old}", self._rename, (new, old), (old, new)))
+        self.stack.push(self._cmd(f"Rename {old}", self._rename, (new, old), (old, new)))
 
     def _rename(self, pair):
         old, new = pair
         if self.scene.rename_part(old, new):
             self.sidebar.refresh_parts()
             self.sidebar.renamed.emit()
+
+    def rename_group(self, pairs, label):
+        """A group of the parts list renamed: every part in it, one step."""
+        if pairs:
+            back = [(n, o) for o, n in reversed(pairs)]
+            self.stack.push(self._cmd(f"Rename {label}", self._rename_many, back, list(pairs)))
+
+    def _rename_many(self, pairs):
+        done = [self.scene.rename_part(o, n) for o, n in pairs]
+        if any(done):
+            self.sidebar.refresh_parts()
+            self.sidebar.renamed.emit()
+
+    def assembly_name(self, original, new):
+        """An assembly row renamed (the file's tree): shown under its new name."""
+        sc = self.scene
+        before = sc.group_names.get(original)
+        self._push(f"Rename {sc.group_names.get(original, original)}", self._set_assembly,
+                   (original, before), (original, new if new != original else None))
+
+    def _set_assembly(self, state):
+        original, name = state
+        if name is None:
+            self.scene.group_names.pop(original, None)
+        else:
+            self.scene.group_names[original] = name
+        self.sidebar.refresh_parts()
 
     # ---- the Edit tool: rotate, mirror, move --------------------------------------------------
     def _edit_state(self):
@@ -136,7 +262,7 @@ class Changes:
             return False
         r0, t0, hist = self._edit_state()
         r1, t1 = xf.compose((r, t), (r0, t0))
-        self.stack.push(_Command(label, self._set_edit, (r0, t0, hist),
+        self.stack.push(self._cmd(label, self._set_edit, (r0, t0, hist),
                                  (r1, t1, hist + [((r0, t0), label)])))
         return True
 
@@ -145,7 +271,7 @@ class Changes:
         r0, t0, hist = self._edit_state()
         if hist:
             (r1, t1), label = hist[-1]
-            self.stack.push(_Command(f"Remove {label}", self._set_edit, (r0, t0, hist),
+            self.stack.push(self._cmd(f"Remove {label}", self._set_edit, (r0, t0, hist),
                                      (np.array(r1, float), np.array(t1, float), hist[:-1])))
 
     def reset_edits(self):
@@ -153,7 +279,7 @@ class Changes:
         from meshviewer.core import transform as xf
         r0, t0, hist = self._edit_state()
         if self.scene.model.edited:
-            self.stack.push(_Command("Reset Edits", self._set_edit, (r0, t0, hist),
+            self.stack.push(self._cmd("Reset Edits", self._set_edit, (r0, t0, hist),
                                      (xf.identity(), np.zeros(3), [])))
 
     def _set_edit(self, state):

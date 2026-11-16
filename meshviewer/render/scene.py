@@ -53,11 +53,15 @@ class Scene(Picking, Camera, Editing, Appearance, Screenshots):
         self.accent = accent        # selection outline + section plane colour
         self.model = model
         self._set_names(sorted(model.parts, key=str.lower))
-        self.colors = {n: PART_COLORS[i % len(PART_COLORS)] for i, n in enumerate(self.names)}
+        self._palette = {n: PART_COLORS[i % len(PART_COLORS)] for i, n in enumerate(self.names)}
+        self.color_mode = "file"                     # the file's own colors (STEP) first
+        self.default_colors = self._defaults()
+        self.colors = dict(self.default_colors)
         self.visible = {n: True for n in self.names}
         self.selected_parts: list[str] = []          # multi-selection (parts)
         self.selected_faces: dict[str, set] = {}     # CAD faces (measure mode)
         self.on_pick = None          # UI hook: called with the selected part list after a click
+        self.on_selection = None     # UI hook (undo): (before, after) when the parts picked change
         self.hidden_faces: dict[str, set] = {}       # right-click ▸ Hide Face
         self._display = {}                           # part -> block drawn (normals)
         self.face_pick = None        # Inflation Layers picks walls: (part, face id, additive)
@@ -66,7 +70,7 @@ class Scene(Picking, Camera, Editing, Appearance, Screenshots):
         # Defaults: meshes show element edges, CAD shows sharp (feature) edges.
         self.state = dict(grid=True, parallel=True, mesh_edges=not model.is_cad,
                           feature_edges=model.is_cad and model.file_type != "drawing",
-                          bbox=False, origin=False,
+                          bbox=False, origin=False,          # bbox: drawings, below
                           original=False, shading=True, faces=True)
         self._dark = dark
         self._ui_dark = dark
@@ -77,6 +81,7 @@ class Scene(Picking, Camera, Editing, Appearance, Screenshots):
         self._edit_history = []                   # [((R, t) before, label)]
         self._original_actor = None               # grey edges of the file as opened
         self._alias = {}                          # file's part name -> new name
+        self.group_names = {}                     # file's assembly name -> its new name
         self._last_view = None                    # (view, flipped?, camera)
         self._bg_image = None                     # ImageBackground when a picture is shown
         self.axis_font = AXIS_FONT_DEFAULT        # set by Appearance
@@ -101,6 +106,8 @@ class Scene(Picking, Camera, Editing, Appearance, Screenshots):
 
         vtkMapper.SetResolveCoincidentTopologyToPolygonOffset()  # edges drawn over faces
         self._build_surfaces()
+        if self.is_drawing:
+            self.set_bbox(True, render=False)      # a drawing's frame: on by default
         self.section = Section(self)
         self.quality = QualityView(self)          # Cell quality overlays
         self.flow = FlowView(self)                # CFD ▸ Show flow vectors
@@ -272,6 +279,32 @@ class Scene(Picking, Camera, Editing, Appearance, Screenshots):
         if render:
             self.p.render()
 
+    def _defaults(self):
+        """Each part's color unless you chose one: the file's ("file" mode, when it
+        has one) or the palette's (keyed by the file's part names)."""
+        info = (self.model.part_info or {}) if self.color_mode == "file" else {}
+        return {n: (info.get(n) or {}).get("color") or self._palette[n] for n in self._palette}
+
+    def set_color_mode(self, mode, render=True):
+        """File Color / Randomized Color: parts still in their default color take the
+        new mode's; colors you chose stay. Returns the (current) names recolored."""
+        mode = mode if mode in ("file", "random") else "file"
+        if mode == self.color_mode:
+            return []
+        old = self.default_colors
+        self.color_mode = mode
+        self.default_colors = self._defaults()
+        changed = {}
+        for n in self.names:
+            o = self.original(n)
+            if self.colors[n] == old.get(o) and old.get(o) != self.default_colors.get(o):
+                changed.setdefault(self.default_colors[o], []).append(n)
+        for c, names in changed.items():
+            self.set_color(names, c, render=False)
+        if render:
+            self.p.render()
+        return [n for ns in changed.values() for n in ns]
+
     def set_visible(self, names, on, render=True):
         """Show or hide a part, or a list of parts in one go."""
         names = [names] if isinstance(names, str) else list(names)
@@ -303,6 +336,40 @@ class Scene(Picking, Camera, Editing, Appearance, Screenshots):
         poly = self.model.parts[name]
         return f"{poly.n_cells:,} faces · {poly.n_points:,} points"
 
+    # ---- what the file says about a part, its size and volume (the parts list) ------
+    def original(self, name):
+        """The file's name of a part (renamed parts: `_alias` maps it to the new one)."""
+        return next((k for k, v in self._alias.items() if v == name), name)
+
+    def part_meta(self, name):
+        """{"path", "color", "material"} from the file (STEP / IGES), or {}."""
+        return (self.model.part_info or {}).get(self.original(name)) or {}
+
+    def part_size(self, name):
+        """The part's size: its bounding box's diagonal (model units)."""
+        b = np.asarray(self.model.parts[name].bounds, dtype=float).reshape(3, 2)
+        return float(np.linalg.norm(b[:, 1] - b[:, 0]))
+
+    def part_volume(self, name):
+        """The volume the part encloses (model units³): exact for CAD solids, else from
+        its triangles when they close up; None when it encloses none. Kept per part."""
+        poly = self.model.parts[name]
+        cache = self.__dict__.setdefault("_volumes", {})
+        hit = cache.get(name)
+        if hit is not None and hit[0] is poly:
+            return hit[1]
+        src, v = self.model.source, None
+        if src is not None and hasattr(src, "exact_volume"):
+            v = src.exact_volume(self.original(name))
+        if v is None and poly.GetNumberOfPolys():
+            try:
+                v = self.measure._mesh_volume([(name, None)])
+            except Exception:                                  # noqa: BLE001
+                v = None
+        v = abs(float(v)) if v is not None else None
+        cache[name] = (poly, v)
+        return v
+
     def _after_visibility_change(self):
         rv = getattr(self, "results", None)                 # only visible boundaries
         self.elements.refresh(render=False, notify=False)   # picks of hidden parts go
@@ -327,9 +394,11 @@ class Scene(Picking, Camera, Editing, Appearance, Screenshots):
         self.set_selection([name] if name else [], render=render)
 
     def set_selection(self, names, render=True, notify=False):
-        old = set(self.selected_parts)
+        was = list(self.selected_parts)
+        old = set(was)
         self.selected_parts = [n for n in dict.fromkeys(names) if n in self.visible]
-        self._apply_blocks(old ^ set(self.selected_parts))
+        if old != set(self.selected_parts) and getattr(self, "on_selection", None):
+            self.on_selection(was, list(self.selected_parts))    # Edit ▸ Undo        self._apply_blocks(old ^ set(self.selected_parts))
         self._refresh_highlights()
         self.results.show_selection(render=False)       # tint shows over result colours
         if self.measure.mode == "area":
@@ -359,9 +428,11 @@ class Scene(Picking, Camera, Editing, Appearance, Screenshots):
         self.p.render()
 
     def _refresh_highlights(self):
-        """The accent outline (silhouette + sharp edges) of the selected, visible parts:
-        one actor for all of them, rebuilt only when that set changes. VTK works the
-        silhouette out again for every camera position."""
+        """The accent outline of the selected, visible parts: their silhouette and their
+        feature edges — the same lines as Show ▸ Feature Edges (a mesh's sharp and smooth
+        edges, a CAD part's face borders), not the triangles bending over the feature
+        angle. One actor for all of them, rebuilt only when that set changes. VTK works
+        the silhouette out again for every camera position."""
         want = tuple(n for n in self.selected_parts if self.visible.get(n))
         if want == self._outlined:
             return
@@ -370,16 +441,23 @@ class Scene(Picking, Camera, Editing, Appearance, Screenshots):
         self._outline, self._outlined = None, want
         if not want:
             return
-        parts = vtkAppendPolyData()
+        parts, lines = vtkAppendPolyData(), vtkAppendPolyData()
+        own = False                                   # the parts' own sharp edges
         for n in want:
-            parts.AddInputData(bare(self.model.parts[n]))
+            part = self.model.parts[n]
+            parts.AddInputData(bare(part))
+            if self._has_feature_lines(part):
+                lines.AddInputData(self.elements.feature_lines(n, self.hidden_faces.get(n)))
+            else:
+                own = True
         edges = vtkPolyDataSilhouette()
         edges.SetInputConnection(parts.GetOutputPort())
         edges.SetCamera(self.p.renderer.GetActiveCamera())
-        edges.SetEnableFeatureAngle(True)
+        edges.SetEnableFeatureAngle(own)               # 2D zones, drawings: as before
         edges.SetFeatureAngle(FEATURE_ANGLE)
+        lines.AddInputConnection(edges.GetOutputPort())
         m = vtkPolyDataMapper()
-        m.SetInputConnection(edges.GetOutputPort())
+        m.SetInputConnection(lines.GetOutputPort())
         m.ScalarVisibilityOff()
         m.SetResolveCoincidentTopologyToPolygonOffset()       # over result / y+ colours too
         m.SetRelativeCoincidentTopologyLineOffsetParameters(-4, -4)
@@ -505,6 +583,11 @@ class Scene(Picking, Camera, Editing, Appearance, Screenshots):
         if render:
             self.p.render()
 
+    def _has_feature_lines(self, part):
+        """Feature edges from `elements.feature_lines`: 3D meshes and CAD parts."""
+        return self.model.file_type == "mesh" or (
+            self.model.file_type == "cad" and "face_id" in part.cell_data)
+
     def _build_edges(self):
         flat = self.model.file_type == "mesh2d"
         edges = []
@@ -513,8 +596,7 @@ class Scene(Picking, Camera, Editing, Appearance, Screenshots):
             if flat and not part.GetNumberOfPolys():
                 edges.append(pv.PolyData())          # 2D boundary lines: drawn already
                 continue
-            if self.model.file_type == "mesh" or (
-                    self.model.file_type == "cad" and "face_id" in part.cell_data):
+            if self._has_feature_lines(part):
                 # meshes: sharp and smooth edges; CAD: the borders of its faces (as in
                 # the CAD program) — what Select picks
                 edges.append(self.elements.feature_lines(n, self.hidden_faces.get(n)))

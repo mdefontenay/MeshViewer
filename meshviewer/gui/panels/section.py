@@ -13,13 +13,12 @@ from __future__ import annotations
 import numpy as np
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup
-from PySide6.QtWidgets import (
-    QAbstractSpinBox, QApplication, QGridLayout, QHBoxLayout, QLabel, QVBoxLayout,
-    QWidget,
-)
+from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QWidget
 
-from meshviewer.gui.forms import _grid, caption, rule
-from meshviewer.gui.widgets import Capsule, NoWheelSlider, NoWheelSpinBox, Switch
+from meshviewer.gui.forms import (
+    _grid, button, buttons, caption, column, note, rule, segmented, switch_row, xyz_fields,
+)
+from meshviewer.gui.widgets import NoWheelSlider, SpinField, Switch
 
 SLIDER_STEPS = 1000
 CAPS_DELAY_MS = 150      # recompute the filled cut this long after the last change
@@ -35,13 +34,9 @@ def edit_plane_action(parent):
     return a
 
 
-def _spin(lo, hi, step, decimals):
-    s = NoWheelSpinBox()
-    s.setRange(lo, hi)
+def _spin(lo, hi, step):
+    s = SpinField(lo, hi, 3)
     s.setSingleStep(step)
-    s.setDecimals(decimals)
-    s.setButtonSymbols(QAbstractSpinBox.NoButtons)
-    s.setAlignment(Qt.AlignRight)
     s.setKeyboardTracking(False)          # update on Enter / focus out, not each keystroke
     s.setMinimumWidth(56)
     return s
@@ -54,52 +49,38 @@ class SectionPanel(QWidget):
         self._caps_timer = QTimer(self, singleShot=True, interval=CAPS_DELAY_MS)
         self._caps_timer.timeout.connect(self._update_caps)
 
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(6)
+        lay = column(self)
 
         # On/off switch: shown in the collapsible header by the sidebar.
         self.enable = Switch()
         self.enable.setToolTip("Cut the model with a plane")
         self.enable.toggled.connect(self._enable)
-        self.hint = QLabel("Off — switch on to cut the model with a plane.")
-        self.hint.setObjectName("InfoLine")
-        self.hint.setWordWrap(True)
+        self.hint = note("Off — switch on to cut the model with a plane.")
         lay.addWidget(self.hint)
 
         # ---- details (only shown when the section is on) -----------------
         # Same layout as a section plot: Plane (normal to, position), then the
         # exact numbers, then what is shown.
         self.details = QWidget()
-        d = QVBoxLayout(self.details)
-        d.setContentsMargins(0, 0, 0, 0)
-        d.setSpacing(6)
+        d = column(self.details)
 
         d.addWidget(caption("Plane"))
         g = _grid()
-        group = QActionGroup(self)
-        group.setExclusionPolicy(QActionGroup.ExclusionPolicy.ExclusiveOptional)
-        self.axis_actions = []
-        for i, axis in enumerate("XYZ"):
-            a = QAction(axis, self)
-            a.setCheckable(True)
-            a.setToolTip(f"Normal along +{axis}, through the center")
-            a.triggered.connect(lambda _=False, k=i: self._axis(k))
-            group.addAction(a)
-            self.axis_actions.append(a)
-        flip = QAction("Flip", self)
-        flip.setToolTip("Show the other half")
-        flip.triggered.connect(lambda: self._do(lambda s: s.flip()))
-        center = QAction("Center", self)
-        center.setToolTip("Move the plane to the model center")
-        center.triggered.connect(lambda: self._do(lambda s: s.set_plane(origin=s.center)))
+        axes, cap = segmented(self, [(i, axis, f"Normal along +{axis}, through the center")
+                                     for i, axis in enumerate("XYZ")], self._axis)
+        next(iter(axes.values())).actionGroup().setExclusionPolicy(
+            QActionGroup.ExclusionPolicy.ExclusiveOptional)
+        self.axis_actions = list(axes.values())
+        flip = button(self, "Flip", lambda: self._do(lambda s: s.flip()), "Show the other half")
+        center = button(self, "Center", lambda: self._do(lambda s: s.set_plane(origin=s.center)),
+                        "Move the plane to the model center")
         self.edit_plane = edit_plane_action(self)        # ✎: origin and normal, any way
         row = QHBoxLayout()
         row.setSpacing(6)
-        row.addWidget(Capsule(self.axis_actions, name="Segmented"))
-        row.addWidget(Capsule([self.edit_plane], name="Segmented"))
+        row.addWidget(cap)
+        row.addWidget(buttons(self.edit_plane))
         row.addStretch(1)
-        row.addWidget(Capsule([flip], name="Segmented"))
+        row.addWidget(buttons(flip))
         g.addWidget(QLabel("Normal to"), 0, 0)
         g.addLayout(row, 0, 1, 1, 3)
         self.slider = NoWheelSlider(Qt.Horizontal)
@@ -109,34 +90,18 @@ class SectionPanel(QWidget):
         row = QHBoxLayout()
         row.setSpacing(6)
         row.addWidget(self.slider, 1)
-        row.addWidget(Capsule([center], name="Segmented"))
+        row.addWidget(buttons(center))
         g.addWidget(QLabel("Position"), 2, 0)
         g.addLayout(row, 2, 1, 1, 3)
 
-        self.advanced = QWidget()                  # the exact plane, any direction
-        grid = QGridLayout(self.advanced)
-        grid.setContentsMargins(0, 2, 0, 0)
-        grid.setHorizontalSpacing(4)
-        grid.setVerticalSpacing(4)
-        grid.setColumnMinimumWidth(0, QLabel("Sound speed").sizeHint().width())
-        for c, axis in enumerate("XYZ", start=1):
-            lbl = QLabel(axis)
-            lbl.setObjectName("AxisLabel")
-            lbl.setAlignment(Qt.AlignCenter)
-            grid.addWidget(lbl, 0, c)
-        self.origin = [_spin(-1e9, 1e9, 1.0, 3) for _ in range(3)]
+        self.origin = [_spin(-1e9, 1e9, 1.0) for _ in range(3)]
         # any length (not rescaled to 1): only the direction matters
-        self.normal = [_spin(-1e9, 1e9, 0.1, 3) for _ in range(3)]
-        for row_i, (label, boxes, tip) in enumerate((
-                ("Origin", self.origin, "A point on the plane"),
-                ("Normal", self.normal, "Direction the plane faces — that half is hidden"))):
-            lbl = QLabel(label)
-            lbl.setToolTip(tip)
-            grid.addWidget(lbl, row_i + 1, 0)
-            for c, box in enumerate(boxes, start=1):
-                box.setToolTip(tip)
-                box.valueChanged.connect(self._typed)
-                grid.addWidget(box, row_i + 1, c)
+        self.normal = [_spin(-1e9, 1e9, 0.1) for _ in range(3)]
+        self.advanced = xyz_fields((     # the exact plane, any direction
+            ("Origin", self.origin, "A point on the plane"),
+            ("Normal", self.normal, "Direction the plane faces — that half is hidden")))
+        for box in self.origin + self.normal:
+            box.valueChanged.connect(self._typed)
         self.advanced.setVisible(False)
         self.edit_plane.toggled.connect(self.advanced.setVisible)
         g.addWidget(self.advanced, 1, 0, 1, 4)     # right under Normal to
@@ -152,14 +117,9 @@ class SectionPanel(QWidget):
         for text, sw, tip in (("Fill cut faces", self.fill, "Solid color on the cut"),
                               ("Show plane", self.handle,
                                "Show the plane; drag it or its arrow in the 3D view")):
-            row = QHBoxLayout()
-            lbl = QLabel(text)
-            lbl.setToolTip(tip)
-            self._labels[sw] = lbl
-            row.addWidget(lbl)
-            row.addStretch(1)
-            row.addWidget(sw)
-            d.addLayout(row)
+            row = switch_row(text, sw, tip)
+            self._labels[sw] = row.label
+            d.addWidget(row)
 
         lay.addWidget(self.details)
         self.details.setVisible(False)

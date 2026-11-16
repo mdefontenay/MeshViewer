@@ -15,12 +15,14 @@ and the open tools are remembered per file (scene.inspector_state).
 """
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QPalette
+from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtGui import QAction, QActionGroup, QPalette
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSizePolicy, QVBoxLayout, QWidget,
+    QFrame, QHBoxLayout, QLabel, QLineEdit, QSizePolicy, QToolButton,
+    QVBoxLayout, QWidget,
 )
 
+from meshviewer.gui.forms import link
 from meshviewer.gui.icons import icon
 from meshviewer.gui.inspector import Inspector
 from meshviewer.gui.panels.cfd import CfdPanel
@@ -28,15 +30,18 @@ from meshviewer.gui.panels.edit import EditPanel
 from meshviewer.gui.panels.inflation import InflationPanel
 from meshviewer.gui.panels.info import InfoPanel
 from meshviewer.gui.panels.measure import MeasurePanel
+from meshviewer.gui.panels.meshing import MeshingPanel
 from meshviewer.gui.panels.parts import PartTree
 from meshviewer.gui.panels.plots import PlotsPanel
 from meshviewer.gui.panels.quality import QualityPanel
 from meshviewer.gui.panels.results import ResultsPanel
 from meshviewer.gui.panels.section import SectionPanel
-from meshviewer.gui.sections import BY_KEY, default_open, default_tab
-from meshviewer.gui.sidebar_layout import Box, divider
+from meshviewer.gui.panels.selected import SelectedPanel
+from meshviewer.gui.sections import BY_KEY, default_open, default_tab, tabs_for
+from meshviewer.gui.sidebar_layout import Box
 from meshviewer.gui.sidebar_menu import PartMenu
-from meshviewer.gui.widgets import CollapsibleSection, NoWheelSlider
+from meshviewer.gui.store import settings
+from meshviewer.gui.widgets import CollapsibleSection, Menu, rule
 from meshviewer.render.scene import Scene
 
 
@@ -78,6 +83,7 @@ class Sidebar(PartMenu, QWidget):
         v.setSpacing(0)
         note = QLabel("")
         note.setObjectName("UnavailableNote")
+        note.setProperty("card", not card)          # its own card (the panel has none)
         note.setWordWrap(True)
         note.setVisible(False)
         v.addWidget(note)
@@ -92,7 +98,7 @@ class Sidebar(PartMenu, QWidget):
             bl.setSpacing(8)
             box = self._boxes[key] = Box(w)
             self.inspector.add(BY_KEY[key].tab, w)
-            box.divider = divider()                  # between this tool and the one above
+            box.divider = rule()                     # between this tool and the one above
             bl.addWidget(box.divider)
             bl.addWidget(sec)
         else:
@@ -119,6 +125,8 @@ class Sidebar(PartMenu, QWidget):
 
         self.measure_panel = MeasurePanel()            # measuring while this is open
         self.measure_section = self._add("measure", self.measure_panel)
+        self.selected_panel = SelectedPanel()          # what Select ▾ picked, in numbers
+        self.selected_section = self._add("selected", self.selected_panel)
 
         # CFD: the y+ estimate for meshes, Inflation Layers for CAD files
         self.cfd_panel = CfdPanel()
@@ -136,35 +144,18 @@ class Sidebar(PartMenu, QWidget):
         self.cfd_panel.measured.connect(self.info_panel.refresh)     # volume row
 
         self.results_panel = ResultsPanel()
-        self.results_section = self._add("results", self.results_panel)
+        self.results_section = self._add("results", self.results_panel,   # its switch: in
+                                         trailing=self.results_panel.colour_on)  # the header
 
         self.plots_panel = PlotsPanel()                # plots -> tabs under the view
         self.plots_section = self._add("plots", self.plots_panel, card=False)
 
     def _build_quality(self):
-        quality = QWidget()
-        ql = QVBoxLayout(quality)
-        ql.setContentsMargins(2, 0, 2, 0)
-        ql.setSpacing(4)
-        row = QHBoxLayout()
-        coarse, fine = QLabel("Coarse"), QLabel("Fine")
-        coarse.setObjectName("SmallLabel")
-        fine.setObjectName("SmallLabel")
-        self.quality = NoWheelSlider(Qt.Horizontal)
-        self.quality.setPageStep(1)
-        self.quality.setToolTip("How finely curved CAD faces are triangulated for display")
-        self.quality.valueChanged.connect(self._quality_moved)
-        self.quality.sliderReleased.connect(self._quality_released)
-        row.addWidget(coarse)
-        row.addWidget(self.quality, 1)
-        row.addWidget(fine)
-        ql.addLayout(row)
-        self.quality_label = QLabel("")
-        self.quality_label.setObjectName("InfoLine")
-        ql.addWidget(self.quality_label)
-        self.quality_value = QLabel("")             # level name, in the header
-        self.quality_value.setObjectName("ValueLabel")
-        self.quality_section = self._add("quality", quality, trailing=self.quality_value)
+        self.meshing_panel = MeshingPanel()          # its level: in the header
+        self.meshing_panel.level_requested.connect(self.quality_requested)
+        self.quality = self.meshing_panel.slider
+        self.quality_section = self._add("quality", self.meshing_panel,
+                                         trailing=self.meshing_panel.value)
 
     # ---- tabs, open tools, what is in view -------------------------------------------------
     ACTIVE = ("info", "measure", "cfd", "cells", "plots")   # tools that work only in view
@@ -244,10 +235,12 @@ class Sidebar(PartMenu, QWidget):
                     first = False
 
     def _apply_support(self, scene):
-        """Grey note instead of the controls where a section doesn't fit the file."""
+        """Gray reason instead of the controls where a tool doesn't fit the file; its
+        name lighter, so the tools that apply stand out at a glance."""
         for key, box in self._boxes.items():
             reason = BY_KEY[key].unavailable(scene)
             for sec, note, panel, trailing in box.parts:
+                sec.set_unavailable(bool(reason))
                 note.setText(reason or "")
                 note.setVisible(bool(reason))
                 panel.setVisible(not reason)
@@ -264,11 +257,17 @@ class Sidebar(PartMenu, QWidget):
         pl.setContentsMargins(0, 0, 0, 0)
         pl.setSpacing(6)
         self.filter = QLineEdit()
-        self.filter.setPlaceholderText("Filter")
+        self.filter.setPlaceholderText("Name, size > 10, volume < 5")
+        self.filter.setToolTip("Filter")
         self.filter.setClearButtonEnabled(True)
         self.filter.addAction(icon("search", QPalette.PlaceholderText), QLineEdit.LeadingPosition)
         self.filter.textChanged.connect(self._apply_filter)
-        pl.addWidget(self.filter)
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(4)
+        row.addWidget(self.filter, 1)
+        row.addWidget(self._build_options())
+        pl.addLayout(row)
 
         # "3 parts selected · Clear", always shown (greyed at 0) so selecting
         # something doesn't push the list down
@@ -281,16 +280,14 @@ class Sidebar(PartMenu, QWidget):
         self.sel_label.setObjectName("SelectionCount")
         sbl.addWidget(self.sel_label)
         sbl.addStretch(1)
-        self.sel_clear = QPushButton("Clear")
-        self.sel_clear.setObjectName("LinkButton")
-        self.sel_clear.setCursor(Qt.PointingHandCursor)
-        self.sel_clear.setFlat(True)
-        self.sel_clear.clicked.connect(self._clear_selection)
+        self.sel_clear = link("Clear", "", self._clear_selection)
         sbl.addWidget(self.sel_clear)
         pl.addWidget(self.sel_bar)
 
         # a tree — parts sharing a base name fold into one group row
         self.list = PartTree()
+        self.list.sort_by, self.list.reverse = self._sort_start
+        self.list.mcmaster = self._mcmaster_start
         self.list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.list.setMinimumHeight(24)                # drag the line above down to here
         self.list.visibility_changed.connect(self._visibility_changed)
@@ -299,6 +296,7 @@ class Sidebar(PartMenu, QWidget):
         self.list.isolate_requested.connect(self._isolate)
         self.list.context_requested.connect(self.part_menu)
         self.list.rename_requested.connect(self._rename)
+        self.list.group_rename_requested.connect(self._rename_group)
         pl.addWidget(self.list, 1)
 
         links = QWidget()
@@ -306,13 +304,9 @@ class Sidebar(PartMenu, QWidget):
         ll.setContentsMargins(0, 0, 0, 0)
         ll.setSpacing(8)
         for text, on in (("Show All", True), ("Hide All", False)):
-            b = QPushButton(text)
-            b.setObjectName("LinkButton")
-            b.setCursor(Qt.PointingHandCursor)
-            b.setFlat(True)
-            b.clicked.connect(lambda _=False, v=on: self._set_all(v))
-            ll.addWidget(b)
-        self.parts_section = CollapsibleSection("Parts", parts, "parts", trailing=links)
+            ll.addWidget(link(text, "", lambda _=False, v=on: self._set_all(v)))
+        self.parts_section = CollapsibleSection("Parts", parts, "parts", trailing=links,
+                                                 locked=True)      # always open
         lay.addWidget(self.parts_section, 1)
 
         self.info = QLabel("")
@@ -326,10 +320,11 @@ class Sidebar(PartMenu, QWidget):
         if self.changes is not None:
             self.changes.clear()                    # a new file: nothing to undo
         scene.on_pick = self.show_selection
-        scene.elements.on_changed = lambda: self._show_info(scene.selected_parts)
+        scene.elements.on_changed = lambda: self._elements_changed(scene)
         self.section_panel.bind(scene.section)
         self.edit_panel.bind(scene)
         self.measure_panel.bind(scene)
+        self.selected_panel.bind(scene)
         self.cell_panel.bind(scene)
         self.info_panel.bind(scene)
         self.cfd_panel.bind(scene)
@@ -341,11 +336,7 @@ class Sidebar(PartMenu, QWidget):
         m = scene.model
         self._no_parts = m.file_type == "drawing"   # drawings: one color, no layer list
         self.parts_section.setVisible(not self._no_parts)
-        if scene.can_retessellate:
-            self.quality.blockSignals(True)
-            self.quality.setRange(0, len(m.quality_levels) - 1)
-            self.quality.setValue(m.quality)
-            self.quality.blockSignals(False)
+        self.meshing_panel.bind(scene)
         self.refresh_parts_of(scene)
 
         state = getattr(scene, "inspector_state", None) or {}
@@ -363,7 +354,9 @@ class Sidebar(PartMenu, QWidget):
                     sec.set_expanded(key in opened)
         self._update_dividers()
         self.scene = scene
-        self.inspector.show_tab(tab if tab in ("view", "measure", "analyze") else "view")
+        tabs = tabs_for(scene)                       # a drawing: Measure only
+        self.inspector.enable_tabs(tabs)
+        self.inspector.show_tab(tab if tab in tabs else tabs[0])
         self.setEnabled(True)
         self.inspector.setEnabled(True)
         self._tools_changed()
@@ -386,11 +379,16 @@ class Sidebar(PartMenu, QWidget):
         n_faces = sum(p.n_cells for p in m.parts.values())
         kt = m.kind_title                              # "2D mesh", "CAD" stay as they are
         kt = kt if kt[0].isdigit() or kt.isupper() else kt.lower()
-        self.summary = f"{m.fmt} {kt} · {n_faces:,} {m.cell_word}"
+        if m.source is not None:                       # STEP, IGES, BREP: its parts
+            n = len(scene.names)
+            count = f"{n:,} {'part' if n == 1 else 'parts'}"
+        elif m.n_cells:                                # CGNS, UGRID: the volume cells
+            count = f"{m.n_cells:,} cells"
+        else:
+            count = f"{n_faces:,} {m.cell_word}"
+        self.summary = f"{m.fmt} {kt} · {count}"
         if scene.can_retessellate:
-            self.quality_value.setText(m.quality_levels[m.quality])
-            self.quality_label.setText(f"{n_faces:,} triangles")
-            self.quality.setEnabled(True)
+            self.meshing_panel.refresh(n_faces)
         self._show_info(scene.selected_parts)
 
     # ---- selection (multi: ⌘/⇧-click in the list or in 3D) ---------------
@@ -401,6 +399,14 @@ class Sidebar(PartMenu, QWidget):
             self.filter.clear()
             self.list.set_selected(names)
         self._show_info(names)
+
+    def _elements_changed(self, scene):
+        """Select ▾ picked or cleared: Info and Measure Selected follow; something picked
+        opens Measure Selected (its Measure tab in front, when the inspector is shown)."""
+        self._show_info(scene.selected_parts)
+        self.selected_panel.refresh()
+        if scene.elements.items and not self.inspector.isHidden():
+            self.show_section("selected", expand=True)
 
     def _selection_changed(self, names):
         if self.scene:
@@ -445,26 +451,8 @@ class Sidebar(PartMenu, QWidget):
             self.measure_section.set_expanded(False)
 
     # ---- mesh quality ----------------------------------------------
-    def _quality_moved(self, level):
-        if self.scene and not self.quality.isSliderDown():   # keyboard / click on track
-            self._request_quality(level)
-        elif self.scene:
-            self.quality_value.setText(self.scene.model.quality_levels[level])
-
-    def _quality_released(self):
-        self._request_quality(self.quality.value())
-
-    def _request_quality(self, level):
-        if level != self.scene.model.quality:
-            self.quality.setEnabled(False)
-            self.quality_value.setText(self.scene.model.quality_levels[level])
-            self.quality_label.setText("Re-meshing…")
-            self.quality_requested.emit(level)
-
     def quality_failed(self):
-        self.quality.blockSignals(True)
-        self.quality.setValue(self.scene.model.quality)
-        self.quality.blockSignals(False)
+        self.meshing_panel.failed()
         self.refresh_parts()
 
     # ---- list behaviour ----------------------------------------------
@@ -511,8 +499,105 @@ class Sidebar(PartMenu, QWidget):
     # ---- right-click menu (part list and 3D view) ------------------------
     # --- part colour ------------------------------------------------------
     # --- rename a part ---------------------------------------------------
-    def _apply_filter(self, text):
-        self.list.apply_filter(text)
+    def _apply_filter(self, text=None):
+        text = self.filter.text() if text is None else text
+        s = self.scene.measure.unit_scale()[0] if self.scene is not None else 1.0
+        self.list.apply_filter(text, s)
+
+    # ---- the filter menu: order, colors, McMaster ---------------------------------------
+    def _choices(self, menu, title, items, current, slot):
+        """A gray header, then one-of-many checkable items: {key: QAction}."""
+        head = menu.addAction(title)
+        head.setEnabled(False)
+        group = QActionGroup(self)
+        group.setExclusive(True)
+        acts = {}
+        for key, text in items:
+            a = QAction(text, self)
+            a.setCheckable(True)
+            a.setChecked(key == current)
+            a.triggered.connect(lambda _=False, k=key: slot(k))
+            group.addAction(a)
+            menu.addAction(a)
+            acts[key] = a
+        return acts
+
+    def _build_options(self):
+        """The button right of the filter (SF Symbol line.3.horizontal.decrease), a menu:
+        Sort By Name / Size / Volume, Reverse Order · Colors: File Color / Randomized
+        Color · Isolate McMaster Parts. Kept for every file (settings "parts/…")."""
+        st = settings()
+        by = st.value("parts/sort", "name")
+        by = by if by in ("name", "size", "volume") else "name"
+        reverse = st.value("parts/reverse", False, type=bool)
+        self._sort_start = (by, reverse)            # (the list is made after this row)
+        self._mcmaster_start = st.value("parts/mcmaster", False, type=bool)
+        mode = st.value("parts/colors", "file")
+        self.color_mode = mode if mode in ("file", "random") else "file"
+        menu = Menu(self)
+        self.sort_actions = self._choices(
+            menu, "Sort By", (("name", "Name"), ("size", "Size"), ("volume", "Volume")),
+            by, self.set_sort)
+        self.sort_reverse = QAction("Reverse Order", self)
+        self.sort_reverse.setCheckable(True)
+        self.sort_reverse.setChecked(reverse)
+        self.sort_reverse.toggled.connect(lambda on: self.set_sort(reverse=on))
+        menu.addAction(self.sort_reverse)
+        menu.addSeparator()
+        self.color_actions = self._choices(
+            menu, "Colors", (("file", "File Color"), ("random", "Randomized Color")),
+            self.color_mode, self.set_color_mode)
+        menu.addSeparator()
+        self.mcmaster_action = QAction("Isolate McMaster Parts", self)
+        self.mcmaster_action.setCheckable(True)
+        self.mcmaster_action.setChecked(self._mcmaster_start)
+        self.mcmaster_action.toggled.connect(self.set_mcmaster)
+        menu.addAction(self.mcmaster_action)
+        b = QToolButton()
+        b.setObjectName("FilterButton")
+        b.setIcon(icon("filter_menu"))
+        b.setToolTip("Filter Options")
+        b.setAccessibleName("Filter Options")
+        b.setPopupMode(QToolButton.InstantPopup)
+        b.setIconSize(QSize(14, 14))
+        b.setMenu(menu)
+        self.options_button = b
+        return b
+
+    def set_color_mode(self, mode):
+        """"file": the file's own colors (STEP), the palette for the others; "random":
+        the palette for every part. Colors you chose stay."""
+        self.color_mode = mode if mode in ("file", "random") else "file"
+        self.color_actions[self.color_mode].setChecked(True)
+        settings().setValue("parts/colors", self.color_mode)
+        if self.scene is None:
+            return
+        for n in self.scene.set_color_mode(self.color_mode, render=False):
+            self.list.set_color(n, self.scene.colors[n])
+        self.cfd_panel.refresh_colors()                # Boundary menu dots
+        self.inflation_panel.refresh_colors()          # Walls menu dots
+        self.scene.p.render()
+
+    def set_mcmaster(self, on):
+        """Isolate McMaster Parts: all of them in one section on top (whatever the size /
+        volume limits), or in their places like any part (default)."""
+        self.list.mcmaster = bool(on)
+        settings().setValue("parts/mcmaster", self.list.mcmaster)
+        if self.scene is not None:
+            self.refresh_parts()
+
+    def set_sort(self, key=None, reverse=None):
+        """Sort the parts list by "name", "size" (bounding-box diagonal) or "volume"."""
+        if key is not None:
+            self.list.sort_by = key
+            self.sort_actions[key].setChecked(True)
+        if reverse is not None:
+            self.list.reverse = bool(reverse)
+        st = settings()
+        st.setValue("parts/sort", self.list.sort_by)
+        st.setValue("parts/reverse", self.list.reverse)
+        if self.scene is not None:
+            self.refresh_parts()
 
     def _sync_checks(self):
         self.list.sync_checks(self.scene.visible)

@@ -208,6 +208,22 @@ def _extract_zone_cgns(zname, zone, debug):
     return bcs
 
 
+def cell_count(path):
+    """Cells in the file, from each zone's size (unstructured: its second number;
+    structured: the product of its cell counts)."""
+    total = 0
+    with h5py.File(str(path), "r") as f:
+        for _, base in _kids(f, "CGNSBase_t"):
+            for _, zone in _kids(base, "Zone_t"):
+                size = _cgns_data(zone)
+                if size is None:
+                    continue
+                size = np.asarray(size).reshape(-1)
+                n = len(size) // 3
+                total += int(size[n:2 * n].prod()) if n > 1 else int(size[1])
+    return total or None
+
+
 def read_cgns(path, debug=True):
     bcs = {}
     with h5py.File(str(path), "r") as f:

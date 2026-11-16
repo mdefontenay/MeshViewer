@@ -67,7 +67,11 @@ def _section_defaults(model):
     field = lower.get("cp") or (fields[0] if fields else COORD + AXES[int(np.argmin(span))])
     return {"axis": AXES[int(np.argmax(span))],          # a wing: across the span
             "pos": None, "normal": None, "value": field, "along": None, "chord": False,
-            "flip": None, "ref": None, "show": True}
+            "flip": None, "ref": None, "show": True,
+            # the plot's axes (Axes under each plot): typed ranges (None = auto, in the
+            # units shown), log scales, reversed x; "flip" above reverses y (cp: by default)
+            "x_min": None, "x_max": None, "y_min": None, "y_max": None,
+            "x_log": False, "y_log": False, "x_flip": False}
 
 
 def in_plane(axis):
@@ -112,7 +116,8 @@ def _loops(lines):
 
 
 def plane_normal(m):
-    """Unit normal: the one typed (Advanced), else the axis'."""
+    """Unit normal: the one typed (Edit Plane; kept as typed, any length), else the
+    axis'."""
     n = m.get("normal")
     if n is not None:
         n = np.asarray(n, dtype=float)
@@ -152,16 +157,20 @@ def section_plane(m, parts, names):
 
 
 def set_plane(m, origin=None, normal=None, parts=None, names=None):
-    """Advanced: a new origin and / or normal (the other kept); X / Y / Z buttons follow."""
+    """Edit Plane: a new origin and / or normal (the other kept); X / Y / Z buttons
+    follow. The normal is kept as typed (not rescaled to length 1), as in Section;
+    exactly X, Y or Z (1 along it) is that axis."""
     o0, n0 = section_plane(m, parts, names)
     o = o0 if origin is None else np.asarray(origin, dtype=float)
-    n = n0 if normal is None else np.asarray(normal, dtype=float)
-    if np.linalg.norm(n) < 1e-300:
-        return
-    n = n / np.linalg.norm(n)
-    m["axis"] = main_axis(n)
-    m["normal"] = None if np.max(np.abs(n)) > 1 - 1e-12 and n[AXES.index(m["axis"])] > 0 \
-        else [float(v) for v in n]
+    if normal is not None:
+        raw = np.asarray(normal, dtype=float)
+        if np.linalg.norm(raw) < 1e-300:
+            return
+        n = raw / np.linalg.norm(raw)
+        m["axis"] = main_axis(n)
+        axis = np.zeros(3)
+        axis[AXES.index(m["axis"])] = 1.0
+        m["normal"] = None if np.array_equal(raw, axis) else [float(v) for v in raw]
     m["pos"] = float(plane_normal(m) @ o)
     if m.get("along") == m["axis"]:
         m["along"] = None

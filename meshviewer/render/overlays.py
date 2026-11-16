@@ -144,17 +144,108 @@ class YplusView:
 WALL_COLOR = "#00b5ad"
 
 
+def offset_field(mesh, thickness):
+    """(surface, displacement per point) moving the walls out by `thickness` (model
+    units; < 0: the other side). Points at the same place are merged first (no cracks
+    between CAD faces). Each point goes along its angle-weighted normal, far enough that
+    the faces at it move out by the thickness (a box grows by exactly that), at most
+    twice the thickness (a thin trailing edge: no spikes)."""
+    surf = mesh.extract_surface().triangulate().clean(tolerance=1e-9, absolute=False)
+    pts = np.asarray(surf.points, dtype=float)
+    tri = np.asarray(surf.faces).reshape(-1, 4)[:, 1:]
+    p0, p1, p2 = pts[tri[:, 0]], pts[tri[:, 1]], pts[tri[:, 2]]
+    cn = np.cross(p1 - p0, p2 - p0)
+    area = np.linalg.norm(cn, axis=1)
+    ok = area > 0
+    tri, cn = tri[ok], cn[ok] / area[ok][:, None]
+    pn = np.zeros_like(pts)
+    for k in range(3):                          # the angle of each triangle at the point
+        a = pts[tri[:, k]]
+        u = pts[tri[:, (k + 1) % 3]] - a
+        v = pts[tri[:, (k + 2) % 3]] - a
+        cos = np.einsum("ij,ij->i", u, v) / np.maximum(
+            np.linalg.norm(u, axis=1) * np.linalg.norm(v, axis=1), 1e-300)
+        np.add.at(pn, tri[:, k], cn * np.arccos(np.clip(cos, -1, 1))[:, None])
+    pn /= np.maximum(np.linalg.norm(pn, axis=1), 1e-300)[:, None]
+    lean = np.ones(len(pts))
+    for k in range(3):
+        np.minimum.at(lean, tri[:, k], np.einsum("ij,ij->i", pn[tri[:, k]], cn))
+    d = pn * (float(thickness) / np.clip(lean, 0.5, 1.0))[:, None]
+    return surf, d
+
+
+def thickness_shell(mesh, thickness):
+    """The walls moved out along their normals by `thickness`: a quick picture of how
+    thick the inflation layers are (`offset_field`)."""
+    surf, d = offset_field(mesh, thickness)
+    shell = surf.copy()
+    shell.points = np.asarray(surf.points) + d
+    return shell
+
+
+def _folded(surf, d):
+    """Share of the area whose triangles turn over when the points move by d."""
+    tri = np.asarray(surf.faces).reshape(-1, 4)[:, 1:]
+    p = np.asarray(surf.points, dtype=float)
+    q = p + d
+    n0 = np.cross(p[tri[:, 1]] - p[tri[:, 0]], p[tri[:, 2]] - p[tri[:, 0]])
+    n1 = np.cross(q[tri[:, 1]] - q[tri[:, 0]], q[tri[:, 2]] - q[tri[:, 0]])
+    a = np.linalg.norm(n0, axis=1)
+    bad = np.einsum("ij,ij->i", n0, n1) <= 0
+    return float(a[bad].sum() / max(a.sum(), 1e-300))
+
+
+def auto_side(mesh, thickness):
+    """+1 (along the normals) or −1: the side where the layers fold over themselves
+    least — the fluid side of a wing's skin, not into its thin trailing edge."""
+    surf, d = offset_field(mesh, abs(float(thickness)))
+    return 1 if _folded(surf, d) <= _folded(surf, -d) else -1
+
+
+def offset_lines(lines, surf, d):
+    """Feature lines moved with the surface they lie on (each point as the nearest
+    point of `surf`)."""
+    from vtkmodules.vtkCommonDataModel import vtkStaticPointLocator
+    loc = vtkStaticPointLocator()
+    loc.SetDataSet(surf)
+    loc.BuildLocator()
+    pts = np.asarray(lines.points, dtype=float)
+    idx = np.fromiter((loc.FindClosestPoint(x) for x in pts), dtype=np.int64, count=len(pts))
+    out = lines.copy()
+    out.points = pts + d[idx]
+    return out
+
+
 class WallView:
-    """The chosen walls tinted in the 3D view (Inflation Layers)."""
+    """The chosen walls tinted in the 3D view (Inflation Layers), and, when asked, the
+    layers' total thickness over them as a see-through shell."""
 
     def __init__(self, scene):
         self.scene = scene
         self.p = scene.p
         self._actors = []
 
-    def show(self, mesh):
-        """mesh: the wall surface (PolyData) or None to hide."""
+    def show(self, mesh, thickness=None, over=None, lines=None):
+        """mesh: the wall surface (PolyData) to tint, or None; thickness: the layers'
+        total (model units, < 0: against the normals) to draw over `over` (default:
+        mesh), or None; lines: the walls' feature edges, drawn moved with it."""
         self.hide(render=False)
+        over = over if over is not None else mesh
+        if thickness and over is not None and over.n_cells:
+            try:
+                surf, d = offset_field(over, thickness)
+                shell = surf.copy()
+                shell.points = np.asarray(surf.points) + d
+                a = self.p.add_mesh(shell, color=WALL_COLOR, opacity=0.3, pickable=False,
+                                    reset_camera=False, smooth_shading=True)
+                self._actors.append(a)
+                if lines is not None and lines.n_points:
+                    a = self.p.add_mesh(offset_lines(lines, surf, d), color=WALL_COLOR,
+                                        line_width=1.5, lighting=False, pickable=False,
+                                        reset_camera=False)
+                    self._actors.append(a)
+            except Exception as exc:                        # noqa: BLE001
+                print(f"inflation thickness: {exc}")
         if mesh is None or not mesh.n_cells:
             self.p.render()
             return

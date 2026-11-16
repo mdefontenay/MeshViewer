@@ -1,27 +1,25 @@
-"""The CFD tool — y+ estimate (flat-plate boundary layer).
-"Flow" and "y+ estimator" are groups that fold; each has a "Values" pop-up
-with every computed number; the auto length is the longest streamwise distance.
+"""The CFD tool — y+ estimate (flat-plate boundary layer), laid out like Inflation
+Layers (CAD files, panels/inflation.py): two groups, each with Formulas and a "Values"
+pop-up of every computed number; the auto length is the longest streamwise distance.
 
-    ⌄ Flow                                          Values
+    Fluid & Freestream                              Formulas   Values
       Fluid          [ Air — altitude          ▾ ]
-      Altitude       [ 0        ] m     ?          (U.S. Standard Atmosphere)
-      Temperature    [ 288.15   ] K
-      Density        [ 1.225    ] kg/m³
-      Viscosity      [ 1.789e-5 ] Pa·s
-      Sound speed    [ 340.29   ] m/s
-      Mach           [ 0.3      ]
-                        X      Y      Z
-      Direction      [ 1  ] [ 0  ] [ 0  ]              any length
-      Speed U = 102 m/s
-      Show flow vectors                      (switch)
-    ⌄ y+ estimator                              ?   Values
+      Altitude ?     [ 0        ] [ m      ▾ ]       (U.S. Standard Atmosphere)
+      ▸ Properties  (288.2 K · 1.225 kg/m³ · 1.79e-5 Pa·s)    folded: T, ρ, μ, a
+      Mach / Speed   [ 0.3 ] │ [ 102 ] [ m/s ▾ ]
+      Direction      [ 1 ] [ 0 ] [ 0 ]   Vectors (switch)
+    ───────────────────────────────────────────
+    y+ Estimator                                    Formulas   Values
       Boundary       [ wing                    ▾ ]
-      Length         [ auto: 1.23 ] m                   longest distance along the flow
-      Target y+ ?    [ 1 ]          (? = resolve the wall or wall functions)
+      Regime         [ External — around the walls ▾ ]
+      Length L       [ auto: 1.23 ] [ m ▾ ]          longest distance along the flow
+                                   Back to Auto Length
+      Target y+ ?    [ 1 ]   Compressible (switch)  (? = resolve the wall or wall functions)
       ┌ Max y+ on wing (from the mesh)
       │ 3.2   min 0.8
       │ First cell height for y+ = 1
       └ 3.88 µm
+      Color by y+                                   (switch)
 
 Lengths of the mesh are converted to metres with the file's unit (or the one
 chosen in the toolbar); without any, the mesh is taken to be in metres.
@@ -30,9 +28,7 @@ from __future__ import annotations
 
 import numpy as np
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget,
-)
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 from meshviewer.core import cfd
 from meshviewer.gui.jobs import run_job
@@ -45,7 +41,10 @@ from meshviewer.gui.widgets import (
 from meshviewer.gui.dialogs.wall_help import YPLUS_URL, label_with_help, wall_help_button
 from meshviewer.core.units import SPEED_UNITS, LEVEL_UNITS, DENSITY_UNITS, VISCOSITY_UNITS, LENGTH_UNITS, nice_length
 from meshviewer.gui.panels.fluid import FluidInputs
-from meshviewer.gui.forms import _label, _grid, _row
+from meshviewer.gui.forms import (
+    _grid, _label, _row, column, group_head, link, note, pair, rule, switch_row,
+)
+from meshviewer.gui.style import STATUS
 
 ATMOSPHERE_URL = "https://www.engineeringtoolbox.com/standard-atmosphere-d_604.html"
 FLUIDS = (("air", "Air — altitude"), ("fresh", "Fresh water — depth"),
@@ -61,7 +60,7 @@ GOOD, FAIR = 1.25, 2.5
 
 def yplus_grade(ratio):
     """max y+ / target -> colour: green (≤ 1.25), orange (≤ 2.5), red."""
-    return "#30b350" if ratio <= GOOD else "#ff9f0a" if ratio <= FAIR else "#ff453a"
+    return STATUS["ok" if ratio <= GOOD else "warn" if ratio <= FAIR else "bad"]
 
 
 # what the "Formulas" buttons show — (explanation, LaTeX) or a sub-title
@@ -89,7 +88,7 @@ FLOW_FORMULAS = [
     ("Kinematic viscosity and dynamic pressure",
      r"\nu = \frac{\mu}{\rho} \qquad q = \frac{1}{2}\rho U^2"),
     ("Total temperature", r"T_0 = T \left(1 + \frac{\gamma - 1}{2} M^2\right)"),
-    ("Reynolds number (L: the length in y+ estimator); turbulent above 5×10⁵",
+    ("Reynolds number (L: the length in y+ Estimator); turbulent above 5×10⁵",
      r"\mathrm{Re}_L = \frac{\rho\, U L}{\mu}"),
 ]
 YPLUS_FORMULAS = [
@@ -137,15 +136,12 @@ class CfdPanel(FluidInputs, QWidget):
         self._job = None
         self._busy = None
         self._props = None                     # air / water at the altitude / depth (T, p)
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(2, 0, 2, 0)
-        lay.setSpacing(6)
+        lay = column(self)
 
-        # ---- flow (a group that folds) ---------------------------------------------
-        flow = QWidget()
-        fl = QVBoxLayout(flow)
-        fl.setContentsMargins(0, 0, 0, 0)
-        fl.setSpacing(6)
+        # ---- Fluid & Freestream (as in Inflation Layers) ------------------------------
+        self.flow_formulas = FormulasButton("Flow — formulas", FLOW_FORMULAS)
+        self.flow_values = ValuesButton("Flow", tip="Every flow value: Re, T, p, ν, q…")
+        lay.addLayout(group_head("Fluid & Freestream", self.flow_formulas, self.flow_values))
         g = _grid()
         self.fluid = MenuSelect()
         for key, text in FLUIDS:
@@ -168,6 +164,12 @@ class CfdPanel(FluidInputs, QWidget):
         hl.addWidget(self.level_help)
         hl.addStretch(1)
         g.addWidget(self.level_head, 1, 0)
+        lay.addLayout(g)
+
+        # the fluid's properties, folded: their values in the title
+        props = QWidget()
+        pg = _grid()
+        props.setLayout(pg)
         # temperature — empty = the standard one (ISA at the altitude, 15 °C water)
         self.temp = TemperatureField()
         self.temp.setToolTip("Free-stream temperature. Air: the standard one at the altitude\n"
@@ -176,8 +178,7 @@ class CfdPanel(FluidInputs, QWidget):
         self._temp_auto = False                    # showing air's standard T
         self.temp.valueChanged.connect(self._fluid_changed)
         self.temp.unitChanged.connect(self._fluid_changed)
-        self.temp_label, self.temp_unit = _row(g, 2, "Temperature", self.temp)
-
+        self.temp_label, self.temp_unit = _row(pg, 0, "Temperature", self.temp)
         self.rho = UnitField(DENSITY_UNITS)
         self.mu = UnitField(VISCOSITY_UNITS)
         self.a = UnitField(SPEED_UNITS)
@@ -185,38 +186,33 @@ class CfdPanel(FluidInputs, QWidget):
                 ("Density", self.rho, "ρ of the free stream"),
                 ("Viscosity", self.mu, "Dynamic viscosity μ of the free stream"),
                 ("Sound speed", self.a, "Speed of sound a (speed U = Mach × a)")),
-                start=3):
+                start=1):
             box.setToolTip(tip)
             box.valueChanged.connect(self._property_typed)
             box.unitChanged.connect(self._unit_changed)
-            _row(g, r, text, box)
+            _row(pg, r, text, box)
+        self.props_section = CollapsibleSection("Properties", props, "cfd_props",
+                                                sub=True, start_open=False)
+        lay.addWidget(self.props_section)
 
+        g = _grid()
         self.mach = NumberField(0.3)
         self.mach.setToolTip("Free-stream Mach number (U = Mach × a)")
         self.mach.valueChanged.connect(self._update)
-        _row(g, 6, "Mach", self.mach)
         # the speed can be typed too; Mach follows (and the other way round)
         self.u = UnitField(SPEED_UNITS)
         self.u.setToolTip("Free-stream speed U (Mach = U / a)")
         self.u.valueChanged.connect(self._speed_typed)
         self.u.unitChanged.connect(self._unit_changed)
-        _row(g, 7, "Speed U", self.u)
-
-        # X / Y / Z above the three fields (like the section normal), and the
-        # fields use the unit columns too, so the numbers are not clipped.
-        axes = QWidget()
-        al = QHBoxLayout(axes)
-        al.setContentsMargins(0, 0, 0, 0)
-        al.setSpacing(4)
+        g.addWidget(QLabel("Mach / Speed"), 0, 0)
+        g.addWidget(pair(self.mach, None, self.u, None), 0, 1)
+        g.addWidget(self.u.menu, 0, 2, 1, 2)
         dirs = QWidget()
         dl = QHBoxLayout(dirs)
         dl.setContentsMargins(0, 0, 0, 0)
         dl.setSpacing(4)
         self.direction = []
         for k, v in zip("XYZ", (1.0, 0.0, 0.0)):
-            lab = _label(k, "AxisLabel")
-            lab.setAlignment(Qt.AlignCenter)
-            al.addWidget(lab, 1)
             b = NumberField(v)
             b.setMinimumWidth(0)
             b.setAlignment(Qt.AlignCenter)
@@ -224,38 +220,24 @@ class CfdPanel(FluidInputs, QWidget):
             b.valueChanged.connect(self._direction_changed)
             dl.addWidget(b, 1)
             self.direction.append(b)
-        g.addWidget(axes, 8, 1, 1, 3)
-        lab = QLabel("Direction")
-        lab.setToolTip("Flow direction X / Y / Z (any length)")
-        g.addWidget(lab, 9, 0)
-        g.addWidget(dirs, 9, 1, 1, 3)
-        fl.addLayout(g)
-
-        r = QHBoxLayout()
-        r.addWidget(QLabel("Show flow vectors"))
-        r.addStretch(1)
+        dl.addSpacing(8)
+        dl.addWidget(QLabel("Vectors"))
         self.vectors = Switch()
-        self.vectors.setToolTip("Small arrows before and after the boundary, along the flow")
+        self.vectors.setToolTip("Show Flow Vectors")
+        self.vectors.setAccessibleName("Show flow vectors")
         self.vectors.toggled.connect(self._vectors_toggled)
-        r.addWidget(self.vectors)
-        fl.addLayout(r)
-        self.flow_values = ValuesButton("Flow", tip="Every flow value: Re, T, p, ν, q…")
-        ftail = QWidget()
-        ftl = QHBoxLayout(ftail)
-        ftl.setContentsMargins(0, 0, 0, 0)
-        ftl.setSpacing(10)
-        self.flow_formulas = FormulasButton("Flow — formulas", FLOW_FORMULAS)
-        ftl.addWidget(self.flow_formulas)
-        ftl.addWidget(self.flow_values)
-        self.flow_section = CollapsibleSection("Flow", flow, "cfd_flow", trailing=ftail,
-                                               sub=True)
-        lay.addWidget(self.flow_section)
+        dl.addWidget(self.vectors)
+        lab = QLabel("Direction")
+        lab.setToolTip("Flow direction X / Y / Z (any length): gives the auto length")
+        g.addWidget(lab, 1, 0)
+        g.addWidget(dirs, 1, 1, 1, 3)
+        lay.addLayout(g)
+        lay.addWidget(rule())
 
-        # ---- y+ estimator (a group that folds) --------------------------------------
-        yp = QWidget()
-        yl = QVBoxLayout(yp)
-        yl.setContentsMargins(0, 0, 0, 0)
-        yl.setSpacing(6)
+        # ---- y+ Estimator ---------------------------------------------------------------
+        self.yplus_formulas = FormulasButton("y+ Estimator — formulas", YPLUS_FORMULAS)
+        self.yplus_values = ValuesButton("y+ Estimator", tip="Every y+ value: Cf, τw, u*…")
+        lay.addLayout(group_head("y+ Estimator", self.yplus_formulas, self.yplus_values))
         g = _grid()
         self.boundary = MenuSelect()
         self.boundary.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -269,47 +251,44 @@ class CfdPanel(FluidInputs, QWidget):
                              "Internal: developed pipe flow, Reynolds number on the hydraulic\n"
                              "diameter D")
         self.kind.currentIndexChanged.connect(self._kind_changed)
-        _row(g, 1, "Flow", self.kind, wide=True)
+        _row(g, 1, "Regime", self.kind, wide=True)
         self.length = UnitField(LENGTH_UNITS)
         self.length.setToolTip("Reference length for the Reynolds number. Empty = the\n"
                                "longest distance across the boundary along the flow\n"
                                "(e.g. the root chord of a swept wing)")
         self.length.valueChanged.connect(self._update)
         self.length.unitChanged.connect(self._unit_changed)
-        self.length_label, _ = _row(g, 2, "Length", self.length)
+        self.length_label, _ = _row(g, 2, "Length L", self.length)
+        self.auto_length = link("Back to Auto Length",
+                                "Forget the typed length: use the longest distance\n"
+                                "across the boundary along the flow", self._auto_length)
+        self.auto_length.setVisible(False)
+        g.addWidget(self.auto_length, 3, 1, 1, 3, Qt.AlignRight)
         self.target = NumberField(1.0)
         self.target.setToolTip("The y+ you want: gives the first cell height to use")
         self.target.valueChanged.connect(self._update)
-        lab, _ = _row(g, 3, "Target y+", self.target)
-        lab.hide()                                     # "?" = which y+ to aim for
         g.addWidget(label_with_help("Target y+", wall_help_button(
-            self.target.value, self._set_target)), 3, 0)
-        yl.addLayout(g)
-        r = QHBoxLayout()                              # back to the auto length
-        r.setContentsMargins(0, 0, 0, 0)
-        r.addStretch(1)
-        self.auto_length = QPushButton("Back to Auto Length")
-        self.auto_length.setObjectName("LinkButton")
-        self.auto_length.setFlat(True)
-        self.auto_length.setCursor(Qt.PointingHandCursor)
-        self.auto_length.setToolTip("Forget the typed length: use the longest distance\n"
-                                    "across the boundary along the flow")
-        self.auto_length.clicked.connect(self._auto_length)
-        self.auto_length.setVisible(False)
-        r.addWidget(self.auto_length)
-        yl.addLayout(r)
-        r = QHBoxLayout()
-        r.addWidget(QLabel("Compressibility correction"))
-        r.addStretch(1)
-        self.compressible = Switch(True)
-        self.compressible.setToolTip("Lower skin friction at high Mach (Raymer):\n"
-                                     "Cf × (1 + 0.144 M²)^−0.65 — about −1 % at M 0.3,\n"
-                                     "−30 % at M 2, −50 % at M 3")
+            self.target.value, self._set_target)), 4, 0)
+        self.compressible = Switch(True)               # as in Inflation Layers
+        self.compressible.setToolTip("Compressibility Correction")
+        self.compressible.setAccessibleName("Compressibility correction")
         self.compressible.toggled.connect(self._update)
-        r.addWidget(self.compressible)
-        yl.addLayout(r)
+        yr = QWidget()
+        yl = QHBoxLayout(yr)
+        yl.setContentsMargins(0, 0, 0, 0)
+        yl.setSpacing(6)
+        yl.addWidget(self.target, 1)
+        yl.addSpacing(6)
+        comp = QLabel("Compressible")
+        comp.setToolTip("Lower skin friction at high Mach (Raymer):\n"
+                        "Cf × (1 + 0.144 M²)^−0.65 — about −1 % at M 0.3,\n"
+                        "−30 % at M 2, −50 % at M 3")
+        yl.addWidget(comp)
+        yl.addWidget(self.compressible)
+        g.addWidget(yr, 4, 1, 1, 3)
+        lay.addLayout(g)
 
-        self.card = QFrame()
+        self.card = QFrame()                           # the result
         self.card.setObjectName("ResultCard")
         cl = QVBoxLayout(self.card)
         cl.setContentsMargins(12, 10, 12, 10)
@@ -325,8 +304,7 @@ class CfdPanel(FluidInputs, QWidget):
         big.addWidget(self.yplus_min, 0, Qt.AlignBottom)
         big.addStretch(1)
         cl.addLayout(big)
-        self.yplus_range = _label("", "InfoLine")
-        self.yplus_range.setWordWrap(True)
+        self.yplus_range = note()
         cl.addWidget(self.yplus_range)
         spacer = QWidget()
         spacer.setFixedHeight(6)
@@ -343,38 +321,23 @@ class CfdPanel(FluidInputs, QWidget):
         big.addWidget(self.height_mesh, 0, Qt.AlignBottom)
         big.addStretch(1)
         cl.addLayout(big)
-        self.height_file = _label("", "InfoLine")
+        self.height_file = note()
         cl.addWidget(self.height_file)
-        yl.addWidget(self.card)
-        r = QHBoxLayout()                              # colour the boundary by y+
-        r.addWidget(QLabel("Color by y+"))
-        r.addStretch(1)
-        self.colour = Switch()
-        self.colour.setToolTip("Paint the boundary by its y+ at each wall node (volume meshes)")
+        lay.addWidget(self.card)
+        self.colour = Switch()                         # colour the boundary by y+
         self.colour.toggled.connect(self._colour_toggled)
-        r.addWidget(self.colour)
-        yl.addLayout(r)
+        lay.addWidget(switch_row(
+            "Color by y+", self.colour,
+            "Paint the boundary by its y+ at each wall node (volume meshes)"))
         top = YPLUS_STOPS[-1][0]
         self.legend = GradientBar([(x / top, c) for x, c in YPLUS_STOPS],
                                   [(0, "0"), (1 / top, "target"), (2 / top, "2×"),
                                    (1, "3× or more")])
         self.legend.setToolTip("y+ / target. Gray: no first cell found")
         self.legend.setVisible(False)
-        yl.addWidget(self.legend)
-        self.note = _label("", "InfoLine")
-        self.note.setWordWrap(True)
-        yl.addWidget(self.note)
-        tail = QWidget()
-        tl = QHBoxLayout(tail)
-        tl.setContentsMargins(0, 0, 0, 0)
-        tl.setSpacing(10)
-        self.yplus_formulas = FormulasButton("y+ estimator — formulas", YPLUS_FORMULAS)
-        tl.addWidget(self.yplus_formulas)
-        self.yplus_values = ValuesButton("y+ estimator", tip="Every y+ value: Cf, τw, u*…")
-        tl.addWidget(self.yplus_values)
-        self.yplus_section = CollapsibleSection("y+ estimator", yp, "cfd_yplus", trailing=tail,
-                                                sub=True)
-        lay.addWidget(self.yplus_section)
+        lay.addWidget(self.legend)
+        self.note = note()
+        lay.addWidget(self.note)
         w = max(b.menu.minimumWidth() for b in self._unit_fields().values())
         for b in self._unit_fields().values():          # unit menus line up
             b.menu.setMinimumWidth(w)
@@ -468,14 +431,14 @@ class CfdPanel(FluidInputs, QWidget):
     def _kind_labels(self):
         """external flow (length L) or internal (hydraulic diameter D)."""
         internal = self.kind.currentData() == "internal"
-        self.length_label.setText("Diameter D" if internal else "Length")
+        self.length_label.setText("Diameter D" if internal else "Length L")
         self.length.setToolTip(
             "Hydraulic diameter D of the pipe or duct. Empty = 2ab / (a + b) from the\n"
             "boundary's widths across the flow (a round pipe: its diameter)" if internal else
             "Reference length for the Reynolds number. Empty = the\n"
             "longest distance across the boundary along the flow\n"
             "(e.g. the root chord of a swept wing)")
-        self.auto_length.setText("Back to auto diameter" if internal else "Back to auto length")
+        self.auto_length.setText("Back to Auto Diameter" if internal else "Back to Auto Length")
         self.compressible.setEnabled(not internal)       # flat-plate correction: external only
 
     def _set_target(self, v):
@@ -584,6 +547,7 @@ class CfdPanel(FluidInputs, QWidget):
             return
         if save:
             self._save()
+        self._props_title()
         rho, mu, a = self.rho.value(), self.mu.value(), self.a.value()
         mach = self.mach.value() or 0.0
         name = self.boundary.currentData()

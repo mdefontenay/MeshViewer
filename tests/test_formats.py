@@ -27,11 +27,19 @@ def test(app, files):
             for p in m.parts.values())
     exact = 120 + 2 * np.pi * 4 + np.pi * 5 + 10
     check(abs(L - exact) / exact < 1e-3, f"DXF: total length {L:.3f} (exact {exact:.3f})")
+    dxf_text_and_solids()
     # in the app: opens, the right sections, a distance on the drawing
     w = open_file(app, files["dxf"])
     sb = w.sidebar
-    check(sb.current_tab() == "measure" and sb.is_active("measure"),
-          f"drawing opens on Measure, measuring ({sb.current_tab()})")
+    check(sb.current_tab() == "measure" and sb.is_active("info")
+          and not sb.is_active("measure"),
+          f"drawing opens on Measure ▸ Info, not measuring ({sb.current_tab()})")
+    ins = sb.inspector
+    check(not ins.tab_actions["view"].isEnabled() and not ins.tab_actions["analyze"].isEnabled()
+          and ins.tab_actions["measure"].isEnabled(), "drawing: View and Analyze grayed")
+    sb.show_tab("view")
+    check(sb.current_tab() == "measure", "drawing: View can't be shown")
+    check(not sb.isVisible() and not w.a_sidebar.isEnabled(), "drawing: no left sidebar")
     check(bool(sb._boxes["section"].parts[0][1].text()), "Section: not for 2D")
     # 2D: seen from +Z, never turned
     sc = w.scene
@@ -41,13 +49,19 @@ def test(app, files):
           and not any(b.isVisible() for b in w.view_capsule.buttons[1:])
           and w.view_capsule.buttons[0].isVisible(), "2D: no Iso / X / Y / Z / Perspective")
     check(sc.state["parallel"], "2D: parallel projection")
-    gone = ("mesh_edges", "feature_edges", "faces", "bbox", "origin")
+    gone = ("mesh_edges", "feature_edges", "faces", "origin")
     check(not any(w.a_show[k].isVisible() for k in gone) and w.a_show["grid"].isVisible()
-          and w.a_show_menu.menu() is not None,
-          "drawing: no edges / faces / bounding box / origin buttons")
-    sc.set_bbox(True)
+          and w.a_show["bbox"].isVisible() and w.a_show_menu.menu() is not None,
+          "drawing: no edges / faces / origin buttons; Grid, Axes, Bounding Box")
+    check(sc.state["bbox"] and w.a_show["bbox"].isChecked() and not sc.state["grid"]
+          and not w.a_show["grid"].isChecked() and not w.a_show["axes"].isChecked(),
+          "drawing: bounding box on, grid and axes off by default")
+    w.a_show["grid"].trigger()                          # the drawing's own setting
+    check(w.ctl.appearance["drawing_axes"] == "grid" and w.ctl.appearance["axes"] != "grid"
+          and sc.state["grid"], "drawing: Grid on is kept for drawings only")
+    w.a_show["grid"].trigger()
     sc.set_origin(True)
-    check(not sc.state["bbox"] and not sc.state["origin"], "drawing: bbox, origin stay off")
+    check(not sc.state["origin"], "drawing: origin stays off")
     check(not sb.parts_section.isVisible(), "drawing: no layer list")
     import pyvista as pv
     sc.set_theme(False)                  # light first (the app follows the Mac, maybe dark)
@@ -60,6 +74,13 @@ def test(app, files):
     check({c[:3] for c in cols} == {(0, 0, 0)} and {c[:3] for c in cols_dark} == {(1, 1, 1)}
           and bg == (0, 0, 0),
           f"drawing: black lines (light), white lines on black (dark) {cols} {cols_dark} {bg}")
+    bb = sc._bbox_actor                  # the bounding box: the lines' color
+    white = bb.GetProperty().GetColor()
+    sc.set_theme(False)
+    black = bb.GetProperty().GetColor()
+    sc.set_theme(True)
+    check(white == (1.0, 1.0, 1.0) and black == (0.0, 0.0, 0.0) and not bb.GetPickable(),
+          f"drawing: bounding box white in dark mode, black in light {white} {black}")
     sc.set_theme(False)
     sc.p.camera.Azimuth(30)
     sc.p.camera.Elevation(20)
@@ -156,6 +177,103 @@ def test(app, files):
     check(not sp.advanced.isHidden() and idx >= 0 and lay.getItemPosition(idx)[0] == 1,
           "Section: Edit Plane shows the origin and normal right under Normal to")
     w.close()
+
+    # CGNS / UGRID: the summary counts the volume cells, from the file's header
+    from meshviewer.core.mesh import cgns, ugrid
+    n = cgns.cell_count(files["cgns"])
+    check(n and n > 0, f"CGNS: {n} cells from the zone size")
+    w = open_file(app, files["cgns"])
+    check(w.sidebar.summary.endswith(f"{n:,} cells"), f"CGNS summary: {w.sidebar.summary}")
+    w.close()
+    check(ugrid.cell_count(files["ugrid"]) is not None, "UGRID: cells from the header")
+    # STEP materials and colors (an assembly made in memory, as the reader sees it)
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.Quantity import Quantity_Color, Quantity_TOC_RGB
+    from OCP.TCollection import TCollection_ExtendedString, TCollection_HAsciiString
+    from OCP.TDocStd import TDocStd_Document
+    from OCP.XCAFDoc import XCAFDoc_ColorType, XCAFDoc_DocumentTool
+    from meshviewer.core.cad import occt
+    doc = TDocStd_Document(TCollection_ExtendedString("MDTV-XCAF"))
+    st = XCAFDoc_DocumentTool.ShapeTool_s(doc.Main())
+    lab = st.AddShape(BRepPrimAPI_MakeBox(1, 2, 3).Shape(), False)
+    mt = XCAFDoc_DocumentTool.MaterialTool_s(doc.Main())
+    h = TCollection_HAsciiString
+    mt.SetMaterial(lab, mt.AddMaterial(h("Aluminum 6061"), h("T6"), 2.7, h("g/cm3"),
+                                       h("POSITIVE_RATIO_MEASURE")))
+    XCAFDoc_DocumentTool.ColorTool_s(doc.Main()).SetColor(
+        lab, Quantity_Color(1.0, 0.0, 0.0, Quantity_TOC_RGB), XCAFDoc_ColorType.XCAFDoc_ColorGen)
+    mat = occt._label_material(lab)
+    check(mat and mat["name"] == "Aluminum 6061" and abs(mat["density"] - 2.7) < 1e-9
+          and mat["density_unit"] == "g/cm3", f"STEP material read ({mat})")
+    check(occt._shape_color([None, lab]) == "#ff0000", "STEP color read")
+    lab2 = st.AddShape(BRepPrimAPI_MakeBox(1, 1, 1).Shape(), False)
+    check(occt._label_material(lab2) is None, "no material: None")
+
+
+
+def _segments(poly):
+    """Length of each line segment of a part."""
+    seg = poly.lines.reshape(-1, 3)[:, 1:]
+    return np.linalg.norm(np.diff(poly.points[seg], axis=1)[:, 0], axis=1)
+
+
+def dxf_text_and_solids():
+    """TEXT, MTEXT and dimensions as the letters' outlines; SOLID / TRACE / 3DFACE
+    (arrowheads), also inside a block, as their closed outlines."""
+    import tempfile
+    from pathlib import Path
+    import ezdxf
+    from meshviewer.core.cad.dxf import read_dxf
+    doc = ezdxf.new(setup=True)
+    msp = doc.modelspace()
+    msp.add_lwpolyline([(0, 0), (100, 0), (100, 50), (0, 50)], close=True,
+                       dxfattribs={"layer": "PROFILE"})
+    msp.add_text("A-42", height=5, dxfattribs={"layer": "TEXT"}).set_placement((10, 10))
+    msp.add_mtext("Note one\\PNote two", dxfattribs={"char_height": 3, "insert": (10, 40),
+                                                     "layer": "NOTES"})
+    msp.add_solid([(0, 0), (6, 0), (0, 8)], dxfattribs={"layer": "ARROWS"})   # 6-8-10
+    msp.add_trace([(20, 0), (30, 0), (20, 2), (30, 2)], dxfattribs={"layer": "ARROWS"})
+    blk = doc.blocks.new("TICK")
+    blk.add_solid([(0, 0), (1, 0), (0, 1), (1, 1)])                  # layer 0: the INSERT's
+    msp.add_blockref("TICK", (60, 20), dxfattribs={"layer": "BLOCKS"})
+    dim = msp.add_linear_dim(base=(0, 60), p1=(0, 50), p2=(100, 50), dimstyle="EZDXF",
+                             dxfattribs={"layer": "DIMS"})
+    dim.render()
+    path = Path(tempfile.mkdtemp()) / "text_solids.dxf"
+    doc.saveas(str(path))
+    parts, _info = read_dxf(path, debug=False)
+    t = parts.get("TEXT")
+    check(t is not None and t.n_lines > 40 and 9.5 < t.bounds[0] and t.bounds[1] < 40
+          and 9 < t.bounds[2] and t.bounds[3] <= 15.1,
+          f"DXF TEXT: its letters as line segments ({t.n_lines if t else 0}, "
+          f"{t.bounds[:4] if t else None})")
+    n = parts.get("NOTES")
+    check(n is not None and n.n_lines > 40, f"DXF MTEXT: as line segments "
+          f"({n.n_lines if n else 0})")
+    a = parts.get("ARROWS")
+    seg = np.sort(_segments(a)) if a is not None else []
+    check(a is not None and a.n_lines == 3 + 4 and np.allclose(seg[-3:], [10, 10, 10])
+          and np.isclose(seg.sum(), 6 + 8 + 10 + 2 * (10 + 2)),
+          f"DXF SOLID (a 6-8-10 triangle) and TRACE (10 × 2) as closed outlines {seg}")
+    b = parts.get("BLOCKS")
+    check(b is not None and b.n_lines == 4 and np.isclose(_segments(b).sum(), 4)
+          and np.allclose(b.bounds[:4], (60, 61, 20, 21)),
+          "DXF: a SOLID inside a block, on the block's layer, where the block is")
+    # a font that isn't installed (Onshape's Noto Sans): one that has the letters instead
+    from meshviewer.core.cad.dxf import _covers, _mtext_parts, text_font
+    doc.styles.add("NOTO", font="NotoSans-Regular.ttf")
+    words = "UNLESS OTHERWISE SPECIFIED ±.01 30°"
+    t = msp.add_text(words, height=2, dxfattribs={"style": "NOTO"})
+    check(_covers(text_font(t, words).filename, words),
+          f"DXF: a missing font -> one with every letter ({text_font(t, words).filename})")
+    m = msp.add_mtext("\\A1;%%c2.150\\S+.000^ \\U+2212.010;")
+    texts = [x.dxf.text for x in _mtext_parts(m, doc.blocks.new("*T"))]
+    check("−.010" in texts and not any("U+" in x for x in texts),
+          f"DXF MTEXT: \\U+2212 in a tolerance is a minus sign {texts}")
+    d = parts.get("DIMS")
+    check(d is not None and d.n_lines > 10 and d.bounds[3] > 59 and "Defpoints" not in parts,
+          f"DXF DIMENSION: its lines, arrows and value, on its layer "
+          f"({d.n_lines if d else 0}; {sorted(parts)})")
 
 
 if __name__ == "__main__":

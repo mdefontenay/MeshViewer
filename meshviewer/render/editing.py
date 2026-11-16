@@ -74,27 +74,6 @@ class Editing:
         return True
 
     # ---- Edit section: rotate / mirror, move + undo + original -------
-    def apply_edit(self, r, t=(0.0, 0.0, 0.0), label=""):
-        """Rotate / mirror (R, 3×3) then move (t) every part and the volume
-        cells. Returns False for exact CAD (STEP, IGES, BREP), which can't be edited."""
-        if not self.model.editable:
-            return False
-        state = (self.model.transform, self.model.offset)
-        self._edit_history.append((state, label))
-        self._set_edit_state(*xf.compose((r, t), state))
-        return True
-
-    def undo_edit(self):
-        """Back one step (exact: everything is recomputed from the file's points)."""
-        if self._edit_history:
-            (r, t), _ = self._edit_history.pop()
-            self._set_edit_state(r, t)
-
-    def reset_edits(self):
-        if self.model.edited:
-            self._edit_history.clear()
-            self._set_edit_state(xf.identity(), np.zeros(3))
-
     @property
     def edit_labels(self):
         """every change so far, oldest first (the Edit section lists them)."""

@@ -2,7 +2,7 @@
 
     ┌────────────────────────────────────────────┐
     │            [icon]  Mesh Viewer              │
-    │                 2.5 beta 1                  │
+    │                    2.5                      │
     │                 [ Open… ]                   │
     │     or drop a mesh or CAD file here         │
     │                                             │

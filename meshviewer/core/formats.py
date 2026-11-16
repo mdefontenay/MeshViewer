@@ -64,7 +64,8 @@ def load(path: Path, debug: bool = True, quality: int | None = None) -> Model:
         q = mod.DEFAULT_QUALITY if quality is None else quality
         return Model(kind=kind, fmt=label, parts=src.tessellate(q),
                      retessellate=src.tessellate, quality_levels=list(src.levels), quality=q,
-                     source=src, units="mm" if label in ("STEP", "IGES") else "")
+                     source=src, units="mm" if label in ("STEP", "IGES") else "",
+                     part_info=src.part_info)             # (the same dict, kept up to date)
 
     out = getattr(mod, func)(path, debug=debug)
     parts, extra = out if isinstance(out, tuple) else (out, {})   # (parts, {"dim", "units"})
@@ -75,4 +76,9 @@ def load(path: Path, debug: bool = True, quality: int | None = None) -> Model:
         model.fmt = "Gmsh" if _kind(path) == "gmsh" else "Fluent"
     if hasattr(mod, "read_volume") and model.dim == 3:    # CGNS / UGRID / .msh volume cells
         model.volume = functools.partial(mod.read_volume, path, debug=debug)
+    if hasattr(mod, "cell_count") and model.dim == 3:     # from the header: quick
+        try:
+            model.n_cells = mod.cell_count(path) or None
+        except Exception:                                 # noqa: BLE001
+            model.n_cells = None
     return model

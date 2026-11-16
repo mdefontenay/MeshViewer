@@ -7,15 +7,18 @@ The menu bar, as Mac apps lay it out — every toolbar button is in it too:
                   Save Screenshot… ⇧⌘S, File Unit…
     Edit          Undo ⌘Z, Redo ⇧⌘Z, Select All ⌘A, Deselect All ⌥⌘A, Select ▸, Hide / Isolate
                   Selection, Show All, Find… ⌘F
-    View          Sidebar ⌃⌘S, Inspector ⌥⌘I, View / Measure / Analyze Tools ⌥⌘1–3,
+    View          Left Sidebar ⌃⌘S, Right Sidebar ⌥⌘I, View / Measure / Analyze Tools ⌥⌘1–3,
                   Section, Measure, Show, Units, Perspective, Fit, views ⌘1–4,
-                  Next / Previous Tab ⌃⇥, Customize Toolbar…
+                  Rotate Camera 90° Left ⌘L, Next / Previous Tab ⌃⇥, Hide / Show Toolbar ⌥⌘T,
+                  Customize Toolbar…
     Window        Minimize ⌘M, Zoom, Bring All to Front, the open windows
     Help          Mesh Viewer Help, Keyboard Shortcuts, Release Notes, Report a Problem…
 
-The toolbar is light: the sidebar on the left; the views; Show ▾, Select ▾ and the unit ▾
-(pull-down menus); then Export and Screenshot; the inspector on the right. View ▸
-Customize Toolbar… (or a right-click on it) picks which groups it shows.
+The toolbar is light: the left sidebar; Undo · Redo; the views (and Rotate Camera 90°
+Left); Show ▾, Select ▾ and the unit ▾ (pull-down menus); then Export · Screenshot; the
+right sidebar. View ▸ Customize Toolbar… (or a right-click on it) picks which groups it
+shows; View ▸ Hide Toolbar hides it all, for this window until it closes (a new window,
+and every launch, starts with it shown).
 """
 from __future__ import annotations
 
@@ -29,10 +32,10 @@ from meshviewer.gui.dialogs.toolbar import CustomizeToolbar, hidden_items
 from meshviewer.gui.feedback import Spinner
 from meshviewer.gui.icons import icon, paint_chevron
 from meshviewer.gui.report import report_problem
-from meshviewer.gui.sections import TABS
+from meshviewer.gui.sections import TABS, tabs_for
 from meshviewer.gui.welcome import add_sample_menu
 from meshviewer.gui.widgets import Capsule, Menu
-from meshviewer.render.elements import KINDS as SELECT_KINDS, MESH_KINDS
+from meshviewer.render.elements import KINDS as SELECT_KINDS, kinds_for, title_for
 
 class _ChevronMark(QObject):
     """On a toolbar pull-down (Show, the unit): the button as usual, then the
@@ -69,22 +72,33 @@ class Bars:
         self.a_shot = self._act("Save Screenshot…", self.save_screenshot, "Ctrl+Shift+S")
         self.a_appearance = self._act("Settings…", self.ctl.show_settings)   # toolbar button
         self.a_appearance.setMenuRole(QAction.NoRole)    # (the menu's Settings…: app menu)
-        self.a_sidebar = self._act("Sidebar", self.toggle_sidebar, "Meta+Ctrl+S", checkable=True)
+        self.a_sidebar = self._act("Left Sidebar", self.toggle_sidebar, "Meta+Ctrl+S",
+                                   checkable=True)
         self.a_sidebar.setChecked(True)
-        self.a_inspector = self._act("Inspector", self.toggle_inspector, "Ctrl+Alt+I",
+        self.a_inspector = self._act("Right Sidebar", self.toggle_inspector, "Ctrl+Alt+I",
                                      checkable=True)
         self.a_inspector.setChecked(True)
         self.a_tabs = [self._act(f"{title} Tools", lambda _=False, k=key: self.show_tools(k),
                                  f"Ctrl+Alt+{i}")
                        for i, (key, title) in enumerate(TABS, 1)]
         self.a_customize = self._act("Customize Toolbar…", self.customize_toolbar)
+        self.a_toolbar = self._act("Hide Toolbar", self._toggle_toolbar, "Ctrl+Alt+T")
         self.a_section = self._act("Section", self._toggle_section, "Ctrl+Alt+X", checkable=True)
-        self.a_measure = self._act("Measure", self._toggle_measure, "Ctrl+Shift+M", checkable=True)
+        self.a_measure = self._act("Measuring Tool", self._toggle_measure, "Ctrl+Shift+M",
+                                   checkable=True)
         # ---- Edit menu: undo, selection, visibility, find
         self.a_undo = self.changes.stack.createUndoAction(self, "Undo")
         self.a_undo.setShortcut(QKeySequence.Undo)
         self.a_redo = self.changes.stack.createRedoAction(self, "Redo")
         self.a_redo.setShortcuts([QKeySequence("Ctrl+Shift+Z"), QKeySequence.Redo])
+        # the toolbar's: the same steps, with a fixed name for the hover text
+        st = self.changes.stack
+        self.a_undo_tb = self._act("Undo", st.undo)
+        self.a_redo_tb = self._act("Redo", st.redo)
+        self.a_undo_tb.setEnabled(st.canUndo())
+        self.a_redo_tb.setEnabled(st.canRedo())
+        st.canUndoChanged.connect(self.a_undo_tb.setEnabled)
+        st.canRedoChanged.connect(self.a_redo_tb.setEnabled)
         self.a_select_all = self._act("Select All", self._select_all, QKeySequence.SelectAll)
         self.a_deselect = self._act("Deselect All", self._deselect)
         self.a_deselect.setShortcuts([QKeySequence("Ctrl+Alt+A"), QKeySequence("Esc")])
@@ -156,8 +170,12 @@ class Bars:
             self._act("Y", lambda: self.scene and self.scene.view("y"), "Ctrl+3"),
             self._act("Z", lambda: self.scene and self.scene.view("z"), "Ctrl+4"),
         ]
+        self.a_rotate_left = self._act("Rotate Camera 90° Left",
+                                       lambda: self.scene and self.scene.rotate_left(), "Ctrl+L")
         # Icons (drawn, follow light/dark). X / Y / Z stay as letters.
         for a, name in ((self.a_sidebar, "sidebar"), (self.a_inspector, "inspector"),
+                        (self.a_undo_tb, "undo"), (self.a_redo_tb, "redo"),
+                        (self.a_rotate_left, "rotate_left"),
                         (self.a_fit, "fit"),
                         (self.a_views[0], "iso"), (self.a_section, "section"),
                         (self.a_shot, "camera"), (self.a_measure, "ruler"),
@@ -168,12 +186,14 @@ class Bars:
         names = {self.a_views[0]: "Isometric", self.a_shot: "Screenshot",
                  self.a_appearance: "Settings", self.a_export: "Export",
                  self.a_fit: "Fit View"}
-        for a in (self.a_sidebar, self.a_inspector, self.a_fit, *self.a_views, self.a_section, self.a_shot,
+        keys = {self.a_undo_tb: self.a_undo, self.a_redo_tb: self.a_redo}   # their shortcuts
+        for a in (self.a_undo_tb, self.a_redo_tb, self.a_rotate_left,
+                  self.a_sidebar, self.a_inspector, self.a_fit, *self.a_views, self.a_section, self.a_shot,
                   self.a_measure, self.a_appearance, self.a_parallel, self.a_export,
                   self.a_file_unit, *self.a_show.values()):
             name = names.get(a, a.text().rstrip("…"))
-            keys = a.shortcut().toString(QKeySequence.NativeText)
-            a.setToolTip(f"{name}  ({keys})" if keys else name)
+            k = keys.get(a, a).shortcut().toString(QKeySequence.NativeText)
+            a.setToolTip(f"{name}  ({k})" if k else name)
         keys = QKeySequence("Ctrl+,").toString(QKeySequence.NativeText)
         self.a_appearance.setToolTip(f"Settings  ({keys})")        # its shortcut: app menu
 
@@ -206,7 +226,9 @@ class Bars:
         # Groups of related buttons, each in one capsule (macOS 27 toolbar style).
         items = {}
         items["sidebar"] = tb.addWidget(Capsule([self.a_sidebar]))
-        self.view_capsule = Capsule([self.a_fit, *self.a_views, self.a_parallel])
+        items["undo"] = tb.addWidget(Capsule([self.a_undo_tb, self.a_redo_tb]))
+        self.view_capsule = Capsule([self.a_fit, *self.a_views, self.a_rotate_left,
+                                     self.a_parallel])
         items["views"] = tb.addWidget(self.view_capsule)
         show = Menu(self)                              # what is shown (= View ▸ Show)
         for k, a in self.a_show.items():
@@ -230,8 +252,7 @@ class Bars:
         self.spinner = Spinner()                       # turns while background work runs
         self.spinner.slot = tb.addWidget(self.spinner)
         self.spinner.slot.setVisible(False)
-        items["export"] = tb.addWidget(Capsule([self.a_export]))
-        items["screenshot"] = tb.addWidget(Capsule([self.a_shot]))
+        items["export"] = tb.addWidget(Capsule([self.a_export, self.a_shot]))   # one pill
         items["settings"] = tb.addWidget(Capsule([self.a_appearance]))
         items["inspector"] = tb.addWidget(Capsule([self.a_inspector]))
         self._tb_items = items                         # a toolbar widget hides by its action
@@ -257,6 +278,13 @@ class Bars:
             if key == "select":
                 on = on and getattr(self, "_select_shown", True)
             slot.setVisible(on)
+
+    def _toggle_toolbar(self):
+        """View ▸ Hide / Show Toolbar: this window only, not remembered (a new window
+        and every launch start with it shown)."""
+        on = not self.toolbar.isVisible()
+        self.toolbar.setVisible(on)
+        self.a_toolbar.setText("Hide Toolbar" if on else "Show Toolbar")
 
     def customize_toolbar(self):
         self._customize = CustomizeToolbar(self)
@@ -327,10 +355,12 @@ class Bars:
         v.addAction(self.a_fit)
         for a in self.a_views:
             v.addAction(a)
+        v.addAction(self.a_rotate_left)
         v.addSeparator()
         v.addAction(self.a_next_tab)
         v.addAction(self.a_prev_tab)
         v.addSeparator()
+        v.addAction(self.a_toolbar)
         v.addAction(self.a_customize)
 
         w = bar.addMenu("Window")
@@ -368,7 +398,8 @@ class Bars:
         if self.scene is not None:
             self.scene.elements.set_kind(kind)
             kind = self.scene.elements.kind            # a CAD file has no mesh nodes
-        self.select_kind = kind
+        if self.scene is None or self.scene.model.file_type != "drawing":
+            self.select_kind = kind                    # (a drawing's Edge isn't kept)
         a = self.a_select.get(kind) or self.a_select["part"]
         a.setChecked(True)
         self.a_select_menu.setIcon(icon(f"pick_{kind}"))
@@ -420,31 +451,41 @@ class Bars:
                   self.a_parallel, self.a_select_all, self.a_deselect, self.a_hide_sel,
                   self.a_isolate_sel, self.a_show_all, self.a_find, self.a_next_tab,
                   self.a_prev_tab, self.a_inspector, *self.a_tabs, self.a_show_menu,
+                  self.a_rotate_left,
                   self.a_units_menu, self.a_select_menu, *self.a_select.values()]:
             a.setEnabled(loaded)
         if loaded and self.scene is not None:
             self._fit_toolbar(self.scene.model)
         self.stack.setCurrentWidget(self.plotter if loaded else self.empty)
-        self.sidebar.setVisible(loaded and self.a_sidebar.isChecked())   # empty: welcome only
+        # drawings: no left sidebar (one color, no layers to list); empty: welcome only
+        drawing = loaded and self.scene is not None and self.scene.model.file_type == "drawing"
+        self.sidebar.setVisible(loaded and self.a_sidebar.isChecked() and not drawing)
         self.sidebar.set_inspector_visible(loaded and self.a_inspector.isChecked())
-        self.a_sidebar.setEnabled(loaded)
+        self.a_sidebar.setEnabled(loaded and not drawing)
 
     def _fit_toolbar(self, model):
         """Only the buttons that mean something for this file: 2D files are always seen
         from above (no views, no perspective); drawings are lines only (no edges or
-        faces toggles, no bounding box or origin, no Select ▾); mesh nodes, edges and
-        triangles are picked on meshes only."""
+        faces toggles, no origin; the bounding box is their frame); mesh nodes, edges and
+        triangles are picked on meshes only; a 2D mesh picks mesh cells, no feature
+        faces (`kinds_for`)."""
         flat, drawing = model.dim == 2, model.file_type == "drawing"
         hide = set()
         if flat:
-            hide |= {*self.a_views, self.a_parallel}
+            hide |= {*self.a_views, self.a_parallel, self.a_rotate_left}
         if drawing:
             hide |= {self.a_show[k] for k in ("mesh_edges", "feature_edges", "faces",
-                                               "bbox", "origin")}
-        hide |= {self.a_select[k] for k in MESH_KINDS if model.kind != "mesh"}  # CAD
-        self._select_shown = not drawing             # lines only: a click picks the layer
-        self.m_select.menuAction().setVisible(not drawing)
-        for a in (*self.a_views, self.a_parallel, *self.a_show.values(),
+                                               "origin")}
+        kinds = kinds_for(model)
+        hide |= {a for k, a in self.a_select.items() if k not in kinds}
+        tabs = tabs_for(self.scene) if self.scene is not None else ()
+        for (key, _t), a in zip(TABS, self.a_tabs):   # a drawing: Measure Tools only
+            a.setEnabled(key in tabs)
+        for k, a in self.a_select.items():
+            a.setText(title_for(k, model))               # Mesh Cell on a 2D mesh
+        self._select_shown = True                    # drawings: Edge and Node
+        self.m_select.menuAction().setVisible(True)
+        for a in (*self.a_views, self.a_parallel, self.a_rotate_left, *self.a_show.values(),
                   *self.a_select.values()):
             a.setVisible(a not in hide)              # menus and shortcuts too
         cap = self.view_capsule

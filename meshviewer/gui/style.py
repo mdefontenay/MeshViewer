@@ -16,6 +16,7 @@ LIGHT = dict(
     hover="rgba(0,0,0,0.07)", pressed="rgba(0,0,0,0.13)",
     field="#ffffff", field_border="rgba(0,0,0,0.15)", field_solid="#ffffff", page="#f5f5f7",
     menu="rgba(246,246,246,0.98)", menu_border="rgba(0,0,0,0.12)",
+    tertiary="rgba(0,0,0,0.30)",
 )
 DARK = dict(
     text="#f5f5f7", secondary="#98989d", sidebar="#262628", divider="rgba(255,255,255,0.09)",
@@ -24,18 +25,30 @@ DARK = dict(
     field="rgba(255,255,255,0.06)", field_border="rgba(255,255,255,0.14)", field_solid="#1e1e20",
     page="#1c1c1e",
     menu="rgba(40,40,42,0.98)", menu_border="rgba(255,255,255,0.14)",
+    tertiary="rgba(255,255,255,0.30)",
 )
+
+# the state of a result or a check, in text and marks (the same in light and dark mode)
+STATUS = {"ok": "#30b350", "warn": "#ff9f0a", "bad": "#ff453a"}
 
 TEMPLATE = """
 /* ---- side columns ---- */
 /* the parts list (left) and the inspector (right), on the same shade */
 #SideScroll, #SideScroll > QWidget, #Sidebar, #Inspector, #InspectorPage {{ background: {sidebar}; border: none; }}
 #UnavailableNote {{ color: {secondary}; font-size: 11px; padding: 0 2px 2px 2px; }}
+#UnavailableNote[card="true"] {{ background: {capsule}; border: 1px solid {capsule_border};
+    border-radius: 9px; padding: 9px 10px 12px 10px; }}
 #SectionHeader {{ color: {secondary}; font-size: 12px; font-weight: 600; }}
+/* a tool that doesn't apply to the open file: its name lighter (its reason inside) */
+#SectionHeader[unavailable="true"] {{ color: {tertiary}; }}
 #SmallLabel {{ color: {text}; font-size: 11px; }}
 #AxisLabel {{ color: {secondary}; font-size: 11px; }}
 #ValueLabel {{ color: {text}; font-size: 12px; }}
 #InfoLine {{ color: {secondary}; font-size: 11px; padding: 2px 2px 0 2px; }}
+#InfoLine[state="ok"] {{ color: {ok}; }}
+#InfoLine[state="warn"] {{ color: {warn}; }}
+#InfoLine[state="bad"] {{ color: {bad}; }}
+#SheetTitle {{ color: {text}; font-size: 15px; font-weight: 600; }}
 #ResultCard {{ background: {capsule}; border: 1px solid {capsule_border}; border-radius: 9px; }}
 /* every sidebar section sits on a card like this one; inside it, cards and segmented
    controls are a shade lighter so they still stand out */
@@ -77,6 +90,13 @@ QLineEdit, QDoubleSpinBox {{
     selection-background-color: {accent};
 }}
 QLineEdit:focus, QDoubleSpinBox:focus {{ border: 1px solid {accent}; }}
+/* the parts list's options, beside the filter: a rounded square like the field */
+#FilterButton {{ background: {field}; border: 1px solid {field_border}; border-radius: 6px;
+                 min-width: 20px; max-width: 20px; min-height: 20px; max-height: 20px;
+                 padding: 0; }}
+#FilterButton:hover {{ background: {hover}; }}
+#FilterButton:pressed {{ background: {pressed}; }}
+#FilterButton::menu-indicator {{ image: none; width: 0; }}
 /* No arrow buttons: without this, styled spin boxes give the text no room. */
 QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
     subcontrol-origin: border; width: 0px; height: 0px; border: none;
@@ -102,6 +122,7 @@ QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
                         border-radius: 12px; font-size: 12px; font-weight: 500; }}
 #Segmented QToolButton {{ min-height: 20px; padding: 1px 9px;
                           border-radius: 5px; font-size: 12px; }}
+#TabScroll #Segmented QToolButton {{ min-width: 36px; padding: 1px 12px; }}
 #Capsule QToolButton:hover, #Segmented QToolButton:hover {{ background: {hover}; }}
 #Capsule QToolButton:pressed, #Segmented QToolButton:pressed {{ background: {pressed}; }}
 #Capsule QToolButton:checked, #Segmented QToolButton:checked {{ background: {accent}; color: white; }}
@@ -186,6 +207,8 @@ HIGH_CONTRAST = {
                capsule_border="rgba(255,255,255,0.38)", field_border="rgba(255,255,255,0.50)",
                menu_border="rgba(255,255,255,0.40)"),
 }
+for _d in HIGH_CONTRAST.values():
+    _d["tertiary"] = _d["secondary"]          # no lighter text with Increase Contrast
 
 
 def is_dark() -> bool:
@@ -249,6 +272,7 @@ def colors(dark=None) -> dict:
     if increase_contrast():
         c.update(HIGH_CONTRAST[d])
     c["accent"] = accent(dark)
+    c.update(STATUS)
     base = QGuiApplication.palette().window().color()
     side = QColor(c["sidebar"])
     for k in ("capsule", "capsule_border", "divider"):

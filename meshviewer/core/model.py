@@ -29,6 +29,11 @@ class Model:
     # Meshes only: reads the 3D cells on demand (-> pv.UnstructuredGrid
     # or None) for the section's "Show cut mesh". None = format without volume cells.
     volume: Optional[Callable[[], object]] = None
+    # What the file says about each part (STEP / IGES: core/cad/occt.CadFile.part_info):
+    # name -> {"path": assemblies above it, "color": "#rrggbb" or None, "material"}
+    part_info: dict = field(default_factory=dict)
+    # Volume cells in the file (CGNS, UGRID: from their headers), or None
+    n_cells: Optional[int] = None
     # Edit section: rotations / mirrors (3×3 integers) and move applied so
     # far — new point = transform @ original + offset. Parts are moved in memory;
     # Export saves the result.

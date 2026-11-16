@@ -6,7 +6,7 @@ from PySide6.QtGui import QPainter, QPainterPath, QPalette, QPen
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 
 from meshviewer.gui.store import settings
-from meshviewer.gui.widgets.basics import section_header
+from meshviewer.gui.widgets.basics import rule, section_header
 
 # ---------------------------------------------------------------------------
 # collapsible sidebar section (disclosure chevron + title + optional
@@ -67,7 +67,8 @@ class CollapsibleSection(QWidget):
     toggled = Signal(bool)      # True = expanded
 
     def __init__(self, title, content: QWidget, key: str, trailing: QWidget | None = None,
-                 parent=None, remember=True, start_open=True, sub=False):
+                 parent=None, remember=True, start_open=True, sub=False, locked=False):
+        """locked: always open — no chevron, the header doesn't fold it (the parts list)."""
         super().__init__(parent)
         self.content = content
         self._key = f"sidebar/collapsed/{key}"
@@ -95,7 +96,17 @@ class CollapsibleSection(QWidget):
             if not trailing.testAttribute(Qt.WA_SetCursor):
                 trailing.setCursor(Qt.ArrowCursor)
             h.addWidget(trailing)
-        self.header.clicked.connect(lambda: self.set_expanded(not self.expanded))
+        self._locked = locked
+        if sub:                                 # a subsection: a thin line above it
+            self.rule = rule()
+            lay.addWidget(self.rule)
+        if locked:
+            self.chevron.hide()
+            self.header.setCursor(Qt.ArrowCursor)
+            self.header.setToolTip("")
+            remember, start_open = False, True
+        else:
+            self.header.clicked.connect(lambda: self.set_expanded(not self.expanded))
         lay.addWidget(self.header)
         lay.addWidget(content)
 
@@ -111,8 +122,16 @@ class CollapsibleSection(QWidget):
     def set_title(self, text):
         self.title_label.setText(text)
 
+    def set_unavailable(self, on):
+        """The tool doesn't apply to the open file: its name lighter (the reason inside)."""
+        lab = self.title_label
+        if lab.property("unavailable") != bool(on):
+            lab.setProperty("unavailable", bool(on))
+            lab.style().unpolish(lab)
+            lab.style().polish(lab)
+
     def set_expanded(self, on):
-        self.expanded = bool(on)
+        self.expanded = bool(on) or self._locked
         self.content.setVisible(self.expanded)
         self.chevron.set_open(self.expanded)
         if self._remember:

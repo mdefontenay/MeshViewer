@@ -10,18 +10,19 @@ from PySide6.QtWidgets import (
 )
 
 from meshviewer.gui.store import settings
+from meshviewer.gui.forms import sheet_title
 
 # key, what the user sees — in toolbar order
 ITEMS = (
-    ("sidebar", "Sidebar"),
-    ("views", "Views: Fit, Isometric, X, Y, Z, Perspective"),
+    ("sidebar", "Left Sidebar"),
+    ("undo", "Undo, Redo"),
+    ("views", "Views: Fit, Isometric, X, Y, Z, Rotate Camera 90° Left, Perspective"),
     ("show", "Show (edges, faces, axes, grid…)"),
     ("select", "Select (part, node, edge, face)"),
     ("units", "Units"),
-    ("export", "Export"),
-    ("screenshot", "Screenshot"),
+    ("export", "Export, Screenshot"),
     ("settings", "Settings"),
-    ("inspector", "Inspector"),
+    ("inspector", "Right Sidebar"),
 )
 DEFAULT_HIDDEN = ("settings",)
 
@@ -51,8 +52,7 @@ class CustomizeToolbar(QDialog):
         lay.setSizeConstraint(QLayout.SetFixedSize)
         lay.setContentsMargins(20, 18, 20, 14)
         lay.setSpacing(8)
-        title = QLabel("Show in the toolbar")
-        title.setStyleSheet("font-size: 15px; font-weight: 600;")
+        title = sheet_title("Show in the toolbar")
         lay.addWidget(title)
         hidden = hidden_items()
         self.boxes = {}

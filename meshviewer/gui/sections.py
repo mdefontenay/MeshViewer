@@ -1,7 +1,7 @@
 """The tools of the inspector (the panel right of the 3D view), in three tabs:
 
     View      Meshing Control, Section, Edit      how the model is shown and changed
-    Measure   Info, Measure                       numbers about it
+    Measure   Info, Measuring Tool, Measure Selected   numbers about it
     Analyze   CFD, Cell Quality, Results, Plots   CFD checks, solver results and plots
 
 (On screen they are "tools"; in the code a tool's fold-out box is a "section".)
@@ -39,7 +39,8 @@ def _needs_exact_cad(scene):
 def _needs_editable(scene):
     if not scene.model.editable:
         return ("Not for STEP, IGES or BREP files yet: their exact geometry can't be moved "
-                "here. Meshes and STL, OBJ, PLY, glTF and VRML files can.")
+                "here. Meshes and STL, OBJ, PLY, glTF and VRML files can: export as STL "
+                "and open that file to edit it.")
 
 
 def _needs_mesh(scene):
@@ -68,8 +69,8 @@ def _needs_3d_plots(scene):
 
 def _needs_fields(scene):
     if not solution_fields(scene.model.parts):
-        return ("This file has no solution fields. Open a results file, such as the "
-                "Tecplot .dat FUN3D writes (project_tec_boundary.dat).")
+        return ("This file has no solution fields. Open a results file, such as a "
+                "solver's Tecplot .dat of its boundaries.")
 
 
 SECTIONS = (
@@ -79,7 +80,10 @@ SECTIONS = (
                 "How finely curved CAD faces are triangulated", _needs_exact_cad),
     SectionSpec("section", "Section", "section", "Cut the model with a plane", _needs_3d),
     SectionSpec("edit", "Edit", "edit", "Rotate, mirror or move the model", _needs_editable),
-    SectionSpec("measure", "Measure", "measure", "Distances, points, angles, areas, volumes",
+    SectionSpec("measure", "Measuring Tool", "measure",
+                "Distances, points, angles, areas, volumes", tab="measure"),
+    SectionSpec("selected", "Measure Selected", "info",
+                "What Select ▾ picked: a node, an edge, a face or a cell, in numbers",
                 tab="measure"),
     SectionSpec("cfd", "CFD", "cfd",
                 "y+ estimate (meshes) · Inflation Layers (CAD)", _needs_3d_cfd,
@@ -109,7 +113,16 @@ def default_tab(scene):
 
 
 def default_open(scene):
-    """The tools open the first time: Results for a results file, Measure for a drawing."""
+    """The tools open the first time: Results for a results file; for a drawing (no
+    parts list) Info and Measure Selected (a click picks an Edge or a Node, and Measure
+    Selected says what; the Measuring Tool is a click away)."""
     if solution_fields(scene.model.parts):
         return ["results"]
-    return ["measure"] if scene.model.file_type == "drawing" else []
+    return ["info", "selected"] if scene.model.file_type == "drawing" else []
+
+
+def tabs_for(scene):
+    """The tabs a file can use: a drawing only Measure (View and Analyze grayed)."""
+    if scene.model.file_type == "drawing":
+        return ("measure",)
+    return tuple(k for k, _ in TABS)

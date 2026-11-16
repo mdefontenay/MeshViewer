@@ -2,13 +2,20 @@
 
 "Blue Jay v5", "Blue Jay v5 (2)", … "Blue Jay v5 (14)"  ->  ▸ Blue Jay v5  (15)
 "Gear_00" … "Gear_69", "Layer:1" … "Layer:4"            ->  ▸ Gear (70), ▸ Layer (4)
-McMaster-Carr parts ("91251A540", "91251A540_Screw:3"…) ->  ▸ McMaster Parts, always
-first, with one sub-group per part number.
+McMaster-Carr parts ("91251A540", "91251A540_Screw:3"…) ->  ▸ McMaster Parts, first of
+all, with one sub-group per part number — when Isolate McMaster Parts is on (`mcmaster`;
+off by default: they stay in their places). Size / volume limits don't hide them there.
 
 A name is only grouped when at least two parts share its base. A group's
 checkbox shows/hides all of it (half-checked when mixed); selecting a group
 selects everything in it. Rows are painted by hand (rounded macOS-style
 selection, crisp fold-out arrows).
+
+STEP / IGES assemblies come first: the file's own tree (▾ Avbay Assembly ▸ Sub-assembly),
+with the groups above made inside each assembly. Rows are sorted by name, size (the
+bounding box's diagonal, largest first) or volume (largest first; parts enclosing none
+last), `sort_by` / `reverse`. The filter takes a name and size / volume limits
+(core/part_filter.py).
 """
 from __future__ import annotations
 
@@ -21,10 +28,13 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QLineEdit, QStyledItemDelegate, QTreeWidget, QTreeWidgetItem,
 )
 
+from meshviewer.core import part_filter
 from meshviewer.gui.style import accent
 from meshviewer.gui.widgets import color_dot
 
 NAME, MEMBERS = Qt.UserRole, Qt.UserRole + 1
+KIND, LABEL = Qt.UserRole + 2, Qt.UserRole + 3   # a group's kind, its name without the count
+RENAMABLE = ("group", "assembly")               # not McMaster Parts, not 2D's headings
 _SUFFIXES = (re.compile(r"\s*\(\d+\)$"),       # "Part (3)"   — duplicate names
              re.compile(r":\d+$"),             # "Part:3"     — Fusion / Onshape instances
              re.compile(r"\.\d+$"),            # "Part.2"     — solids of one part
@@ -81,6 +91,10 @@ class _RowDelegate(QStyledItemDelegate):
         ed.setFrame(False)
         return ed
 
+    def setEditorData(self, editor, index):
+        label = index.data(LABEL)                   # a group: its name, not "(27)"
+        editor.setText(label if label is not None else index.data(Qt.DisplayRole))
+
     def sizeHint(self, option, index):
         s = super().sizeHint(option, index)
         return QSize(s.width(), s.height() + self.extra)
@@ -93,6 +107,7 @@ class PartTree(QTreeWidget):
     isolate_requested = Signal(list)
     context_requested = Signal(list, list, object)   # names, clicked row's names, position
     rename_requested = Signal(str, str)              # old name, new name
+    group_rename_requested = Signal(str, str, str, list)   # kind, old, new, its parts
 
     ROW_RADIUS = 6.0
 
@@ -107,7 +122,7 @@ class PartTree(QTreeWidget):
         self.setColumnCount(1)
         self.setFrameShape(QTreeWidget.NoFrame)
         self.setIconSize(QSize(12, 12))
-        self.setIndentation(20)                     # wider arrow column
+        self.setIndentation(13)                     # compact: deep assemblies fit
         self._delegate = _RowDelegate(self)
         self.setItemDelegate(self._delegate)
         self.setUniformRowHeights(True)
@@ -122,9 +137,13 @@ class PartTree(QTreeWidget):
             lambda: self.selection_changed.emit(self.selected_names()))
         self.itemDoubleClicked.connect(lambda it, _c: self.zoom_requested.emit(self._names(it)))
         self._parts = {}                            # name -> item
+        self.sort_by, self.reverse = "name", False  # name / size / volume
+        self.mcmaster = False                       # Isolate McMaster Parts
+        self._scene = None
         self._hover = None
         self._arrow_click = False                  # press handled by the arrow code
         self._context_row = None                   # row right-clicked (menu open)
+        self.context_group = None                  # …when it is a group that can be renamed
         self._hide_native_selection()
 
     # ---- row spacing ------------------------------------------------
@@ -136,6 +155,7 @@ class PartTree(QTreeWidget):
 
     # ---- building ---------------------------------------------------------------
     def populate(self, scene):
+        self._scene = scene
         self.blockSignals(True)
         self.clear()
         self._parts = {}
@@ -143,18 +163,66 @@ class PartTree(QTreeWidget):
             self._fill_2d(scene)
             self.blockSignals(False)
             return
-        mcm = [n for n in scene.names if mcmaster_number(n)]
-        rest = [n for n in scene.names if not mcmaster_number(n)]
-
-        if mcm:                                     # always the first row
-            top = self._group_item(MCMASTER_GROUP, mcm,
-                                   f"{len(mcm)} McMaster-Carr parts (by part number)")
-            self.addTopLevelItem(top)
-            self._fill(scene, top, mcm, key=mcmaster_number)
-        self._fill(scene, None, rest, key=group_key)
+        names = list(scene.names)
+        if self.mcmaster:                           # Isolate McMaster Parts: on top
+            mcm = [n for n in names if mcmaster_number(n)]
+            if mcm:
+                top = self._group_item(MCMASTER_GROUP, mcm,
+                                       f"{len(mcm)} McMaster-Carr parts (by part number)",
+                                       kind="mcmaster")
+                self.addTopLevelItem(top)
+                self._fill(scene, top, mcm, key=mcmaster_number)
+            names = [n for n in names if not mcmaster_number(n)]
+        paths = {n: tuple(scene.part_meta(n).get("path", ())) for n in names}
+        if any(paths.values()):                     # STEP / IGES: the file's assemblies
+            self._fill_tree(scene, None, names, paths, 0)
+        else:
+            self._fill_auto(scene, None, names)
         for g in self.groups():                    # children first, then their parents
             self._update_group(g)
         self.blockSignals(False)
+
+    def _fill_auto(self, scene, parent, names):
+        """The parts grouped by their base name."""
+        self._fill(scene, parent, names, key=group_key)
+
+    def _fill_tree(self, scene, parent, names, paths, depth):
+        """The file's assemblies (a row each, holding all below it), then the parts
+        right in this one, grouped as usual."""
+        subs, here = {}, []
+        for n in names:
+            p = paths[n]
+            (subs.setdefault(p[depth], []) if len(p) > depth else here).append(n)
+        for label, members in self._sorted(scene, list(subs.items())):
+            shown = scene.group_names.get(label, label)       # renamed in the list
+            item = self._group_item(shown, members, "Assembly", kind="assembly")
+            item.setData(0, Qt.UserRole + 4, label)           # the file's name for it
+            parent.addChild(item) if parent is not None else self.addTopLevelItem(item)
+            self._fill_tree(scene, item, members, paths, depth + 1)
+            if depth == 0:
+                item.setExpanded(True)              # the top assembly opens
+        if here:
+            self._fill_auto(scene, parent, here)
+
+    # ---- order: name, size or volume -------------------------------------------------
+    def _value(self, scene, names):
+        """What a row is sorted by (None: no volume)."""
+        if self.sort_by == "size":
+            return max(scene.part_size(n) for n in names)
+        vols = [scene.part_volume(n) for n in names]
+        vols = [v for v in vols if v is not None]
+        return sum(vols) if vols else None
+
+    def _sorted(self, scene, rows):
+        """rows: [(label, names)] in the order chosen. Numbers: largest first (Reverse:
+        smallest), rows without a volume last either way."""
+        if self.sort_by == "name" or scene is None:
+            return sorted(rows, key=lambda r: natural(r[0]), reverse=self.reverse)
+        val = {r[0]: self._value(scene, r[1]) for r in rows}
+        sign = 1.0 if self.reverse else -1.0
+        return sorted(rows, key=lambda r: (val[r[0]] is None,
+                                           sign * val[r[0]] if val[r[0]] is not None else 0.0,
+                                           natural(r[0])))
 
     def _fill_2d(self, scene):
         """2D meshes: Faces (the cells: areas) and Boundaries (the lines), each a group."""
@@ -164,7 +232,7 @@ class PartTree(QTreeWidget):
             names = [n for n in scene.names if is_line_part(scene.model.parts[n]) == lines]
             if not names:
                 continue
-            top = self._group_item(title, names, tip)
+            top = self._group_item(title, names, tip, kind="heading")
             self.addTopLevelItem(top)
             self._fill(scene, top, names, key=group_key)
             top.setExpanded(True)
@@ -175,21 +243,27 @@ class PartTree(QTreeWidget):
         buckets = {}
         for n in names:
             buckets.setdefault(key(n), []).append(n)
-        for k, members in sorted(buckets.items(), key=lambda kv: natural(kv[0])):
-            members.sort(key=natural)
+        for k, members in self._sorted(scene, list(buckets.items())):
+            members[:] = [n for n, _ in self._sorted(scene, [(n, [n]) for n in members])]
             if len(members) == 1:
                 item = self._part_item(scene, members[0])
             else:
-                item = self._group_item(k, members, f"{len(members)} parts named “{k}…”")
+                item = self._group_item(k, members, f"{len(members)} parts named “{k}…”",
+                                        kind="group" if key is group_key else "mcmaster")
                 for n in members:
                     item.addChild(self._part_item(scene, n))
             parent.addChild(item) if parent is not None else self.addTopLevelItem(item)
 
     @staticmethod
-    def _group_item(label, members, tip):
+    def _group_item(label, members, tip, kind="group"):
         g = QTreeWidgetItem([f"{label}   ({len(members)})"])
         g.setData(0, MEMBERS, list(members))
-        g.setFlags(g.flags() | Qt.ItemIsUserCheckable)
+        g.setData(0, KIND, kind)
+        g.setData(0, LABEL, label)
+        flags = g.flags() | Qt.ItemIsUserCheckable
+        if kind in RENAMABLE:
+            flags |= Qt.ItemIsEditable                    # Rename Group…, Return
+        g.setFlags(flags)
         g.setToolTip(0, tip)
         return g
 
@@ -259,15 +333,43 @@ class PartTree(QTreeWidget):
 
     def keyPressEvent(self, e):
         names = self.selected_names()
-        if e.key() in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_F2) and len(names) == 1 \
+        if e.key() in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_F2) \
                 and self.state() != QAbstractItemView.EditingState:
-            if self.start_rename(names[0]):
+            items = self.selectedItems()
+            if len(items) == 1 and items[0].data(0, KIND) in RENAMABLE:
+                self.start_group_rename(items[0])          # a group row: its name
+                e.accept()
+                return
+            if len(names) == 1 and self.start_rename(names[0]):
                 e.accept()
                 return
         super().keyPressEvent(e)
 
+    def start_group_rename(self, item):
+        """Edit a group's name in place (its parts are renamed, or the assembly)."""
+        if item is None or item.data(0, KIND) not in RENAMABLE:
+            return False
+        self.scrollToItem(item)
+        self.setCurrentItem(item)
+        self.editItem(item, 0)
+        return True
+
     # ---- checkboxes ----------------------------------------------------------------
     def _item_changed(self, it, _col):
+        kind = it.data(0, KIND)
+        label = it.data(0, LABEL)
+        shown = f"{label}   ({len(it.data(0, MEMBERS) or [])})"
+        if kind in RENAMABLE and label is not None and it.text(0) != shown:   # typed a name
+            new = re.sub(r"\s*\(\d+\)\s*$", "", it.text(0)).strip()
+            self.blockSignals(True)
+            it.setText(0, shown)                     # the scene decides; the list refills
+            self.blockSignals(False)
+            old = it.data(0, Qt.UserRole + 4) if kind == "assembly" else label
+            members = list(it.data(0, MEMBERS) or [])
+            if new and new != label:
+                QTimer.singleShot(0, lambda: self.group_rename_requested.emit(
+                    kind, old, new, members))
+            return
         name = it.data(0, NAME)
         if name is not None and it.text(0) != name:  # typed a new name
             new = it.text(0).strip()
@@ -324,17 +426,31 @@ class PartTree(QTreeWidget):
         return any(self._parts[n].isHidden() for n in names if n in self._parts)
 
     # ---- filter -------------------------------------------------------------------
-    def apply_filter(self, text):
-        t = text.strip().lower()
+    def apply_filter(self, text, scale=1.0):
+        """A name (in a row's name, or a group's) and size / volume limits, in the
+        toolbar's unit (`scale`: model units -> it)."""
+        t, limits = part_filter.parse(text)
+        sc = self._scene
 
-        def walk(item, parent_hit):
+        def fits(name):
+            if not limits or sc is None or name not in sc.model.parts:
+                return True
+            vals = {"size": sc.part_size(name) * scale}
+            if any(p == "volume" for p, *_ in limits):
+                v = sc.part_volume(name)
+                vals["volume"] = None if v is None else v * scale ** 3
+            return part_filter.passes(vals, limits)
+
+        def walk(item, parent_hit, mcm=False):
             hit = parent_hit or not t or t in item.text(0).lower()
+            mcm = mcm or item.data(0, Qt.UserRole + 2) == "mcmaster"
             if not item.data(0, MEMBERS):
+                hit = hit and (mcm or fits(item.data(0, NAME)))   # McMaster: no limits
                 item.setHidden(not hit)
                 return hit
-            shown = sum(walk(item.child(j), hit) for j in range(item.childCount()))
+            shown = sum(walk(item.child(j), hit, mcm) for j in range(item.childCount()))
             item.setHidden(shown == 0)
-            if t and shown:
+            if (t or limits) and shown:
                 item.setExpanded(True)
             return shown > 0
         for i in range(self.topLevelItemCount()):
@@ -351,11 +467,13 @@ class PartTree(QTreeWidget):
         # elsewhere only on the row clicked. The selection itself never changes.
         names = sel if it.isSelected() and len(sel) > 1 else clicked
         self._context_row = self.indexFromItem(it)    # outline while the menu is open
+        self.context_group = it if it.data(0, KIND) in RENAMABLE else None
         self.viewport().update()
         try:
             self.context_requested.emit(names, clicked, self.viewport().mapToGlobal(pos))
         finally:                                      # (the menu runs inside this call)
             self._context_row = None
+            self.context_group = None
             self.viewport().update()
 
     # ---- painting: rounded selection, crisp arrows --------------------------------------

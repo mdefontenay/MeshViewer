@@ -15,7 +15,7 @@ NUMBERS = re.match(r"[\d.]+", VERSION)[0].rstrip(".")
 DOC_TYPES = [
     # extensions, name, rank, UTIs
     (["cgns"],         "CGNS Mesh File",        "Owner",     ["local.cgns"]),
-    (["ugrid"],        "FUN3D UGRID Mesh File", "Owner",     ["local.ugrid"]),
+    (["ugrid"],        "UGRID Mesh File", "Owner",     ["local.ugrid"]),
     (["step", "stp"],  "STEP CAD File",         "Default",   ["local.step"]),
     (["iges", "igs"],  "IGES CAD File",         "Default",   ["local.iges"]),
     (["brep", "brp"],  "BREP CAD File",         "Default",   ["local.brep"]),
@@ -54,7 +54,7 @@ PLIST = {
     ],
     "UTExportedTypeDeclarations": [
         _uti("local.cgns", "CGNS Mesh File", ["cgns"]),
-        _uti("local.ugrid", "FUN3D UGRID Mesh File",
+        _uti("local.ugrid", "UGRID Mesh File",
              ["ugrid", "lb8.ugrid", "b8.ugrid", "lb4.ugrid", "b4.ugrid"]),
     ],
     # Types we don't own: "imported" (used only if no other app defines them).
@@ -81,7 +81,7 @@ OPTIONS = {
     "packages": ["meshviewer", "pyvista", "pyvistaqt", "vtkmodules", "qtpy",
                  "numpy", "h5py", "OCP", "scooby", "pooch",
                  "matplotlib"]           # v2.3.5: draws the CFD formulas (mathtext)
-                + [m for m in ("meshio", "ezdxf")    # v2.4.3: Gmsh .msh, DXF
+                + [m for m in ("meshio", "ezdxf", "fontTools")   # Gmsh .msh, DXF (its text)
                    if importlib.util.find_spec(m)],
     # AppKit (PyObjC): the SF Symbols icons, asked from macOS when the app runs
     "includes": ["vtk"] + [m for m in ("objc", "AppKit", "Foundation")
