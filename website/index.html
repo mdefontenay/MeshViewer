@@ -10,6 +10,8 @@
   <meta property="og:title" content="Mesh Viewer">
   <meta property="og:description" content="A fast, native macOS viewer for CAD assemblies, CFD meshes, and simulation results.">
   <meta property="og:type" content="website">
+  <link rel="icon" type="image/png" href="assets/favicon.png">
+  <link rel="apple-touch-icon" href="assets/favicon.png">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -36,19 +38,16 @@
         </div>
         <p class="hero-note">Free and open source · Apple Silicon · macOS 13 or later</p>
       </div>
-      <div class="container container-wide">
-        <figure class="window">
-          <div class="window-bar" aria-hidden="true"><span></span><span></span><span></span></div>
-          <img src="assets/avbay_cross_section.png" width="2940" height="1846" fetchpriority="high"
-               alt="A STEP assembly in Mesh Viewer: the parts tree on the left, a section plane through it, and the inspector on the right">
-        </figure>
+      <div class="container">
+        <img class="hero-device" src="assets/macbookpro.svg" width="1216" height="735" fetchpriority="high"
+             alt="Mesh Viewer on a MacBook Pro, measuring a distance across a STEP assembly">
       </div>
     </section>
 
     <section id="features" class="section">
       <div class="container">
         <h2 class="section-title">Look inside anything.</h2>
-        <p class="section-lead">Double-click a STEP, CGNS, UGRID, .msh, STL, or DXF file. Cut it, measure it, color it by its results, and size its inflation layers.</p>
+        <p class="section-lead">Double-click a STEP, CGNS, UGRID, .msh, STL, or DXF file. Cut it, measure it, pre-prosses it with edits, post-process it with contours.</p>
       </div>
 
       <div class="carousel" data-carousel>
@@ -84,18 +83,32 @@
             <p class="card-text"><strong>Size inflation layers.</strong> Calculate y<sup>+</sup> and first-cell height from flow conditions, preview total boundary layer thickness in 3D over walls, and export settings for OpenFOAM, Fluent, STAR-CCM+, or Pointwise.</p>
           </li>
           <li class="card">
-            <div class="card-visual card-visual-spec">
-              <dl class="spec">
-                <div><dt>Select</dt><dd>Node · Edge · Face · Cell</dd></div>
-                <div><dt>Measure</dt><dd>Distance · Angle · Area · Volume</dd></div>
-                <div><dt>Measure Selected</dt><dd>Radius · Normal · Cell quality</dd></div>
-                <div><dt>Undo / Redo</dt><dd><kbd>⌘Z</kbd> <kbd>⇧⌘Z</kbd>, camera too</dd></div>
-                <div><dt>Zoom</dt><dd>Smooth trackpad zoom to the pointer</dd></div>
-                <div><dt>Appearance</dt><dd>Light · Dark · Your accent color</dd></div>
-                <div><dt>Accessibility</dt><dd>VoiceOver</dd></div>
-              </dl>
+            <div class="card-visual">
+              <img src="assets/dxf.png" width="2940" height="1846" loading="lazy"
+                   alt="DXF file Visualized">
             </div>
-            <p class="card-text"><strong>Measure, select, and work natively.</strong> Pick nodes, edges, faces, or cells to measure exact radii, normals, and cell quality. Built for macOS with full Undo/Redo, trackpad zoom to cursor, dark mode, and VoiceOver.</p>
+            <p class="card-text"><strong>Support for 2D files</strong> through DXF and MSH file.</p>
+          </li>
+          <li class="card">
+            <div class="card-visual card-visual-readout" aria-hidden="true">
+              <div class="readout">
+                <div class="segmented"><span class="on">Distance</span><span>Angle</span><span>Area</span></div>
+                <div class="readout-main">
+                  <span class="readout-label">Distance</span>
+                  <span class="readout-value">89.189 <small>mm</small></span>
+                </div>
+                <dl class="readout-rows">
+                  <div><dt><i class="dot x"></i>ΔX</dt><dd>−18.853 mm</dd></div>
+                  <div><dt><i class="dot y"></i>ΔY</dt><dd>−86.500 mm</dd></div>
+                  <div><dt><i class="dot z"></i>ΔZ</dt><dd>−10.820 mm</dd></div>
+                </dl>
+                <div class="readout-tags">
+                  <span>Node</span><span>Edge</span><span>Face</span><span>Cell</span>
+                  <span>Radius</span><span>Normal</span><span>Cell quality</span>
+                </div>
+              </div>
+            </div>
+            <p class="card-text"><strong>Measure with precision.</strong> Take distances, angles, and areas straight off the geometry, broken down into ΔX, ΔY, and ΔZ, with snapping to vertices. Select a node, edge, face, or cell to read a circle’s radius, a face’s normal, or a cell’s quality. On CAD, part areas and volumes come from the exact geometry, not the tessellation.</p>
           </li>
         </ul>
         <div class="container carousel-controls">
