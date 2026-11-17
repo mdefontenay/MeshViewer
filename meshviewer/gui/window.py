@@ -87,13 +87,19 @@ class ViewerWindow(Bars, Pages, Exports, QMainWindow):
         group = QActionGroup(self)
         group.setExclusive(True)
         self._page_group = group
-        self._pages_cap = None                     # the pill: 3D model · Inflation · plots
+        self._pages_cap = None                     # the pill: 3D model · Inflation ·
+        #                                            contours · plots
         self._plot_acts = {}                       # plot id -> its tab (QAction)
+        self._contour_acts = {}                    # contour id -> its tab
         self._cfd_on = False
         self._page = "model"
         self._active_plot = None                   # whose cut is drawn in 3D
-        self.a_page_model = QAction("3D Model", self)
-        self.a_page_model.setToolTip("3D Model")
+        self.a_page_model = QAction("3D View", self)   # the model alone (no contour)
+        self.a_page_model.setToolTip("3D View")
+        self._view_page = None                     # the 3D page shown: "model", "contour:<id>"
+        self._model_view = None                    # the 3D View's camera and Show ▾ (a dict)
+        self._vis_page = None                      # the tab whose shown / hidden parts show
+        self._model_hidden = None                  # the 3D View's hidden parts
         self.a_page_cfd = QAction("Inflation Layers", self)
         self.a_page_cfd.setToolTip("Inflation Layers")
         for a in (self.a_page_model, self.a_page_cfd):
@@ -123,10 +129,14 @@ class ViewerWindow(Bars, Pages, Exports, QMainWindow):
             lambda i, rng: i in pp.editors and pp.editors[i][1].set_ranges(*rng))
         pp.show_plot.connect(lambda i: self._show_page(f"plot:{i}"))
         pp.cuts_changed.connect(self._show_cuts)               # an eye clicked
-        rp = self.sidebar.results_panel
+        rp = self.sidebar.contours_panel                                   # Contours
+        rp.added.connect(self._contour_added)
+        rp.removed.connect(self._contour_removed)
+        rp.renamed.connect(lambda _i: self._rebuild_view_bar())
+        rp.show_contour.connect(lambda i: self._show_page(f"contour:{i}"))
         pp.value_unit = lambda f: (lambda v: rp.shown_values(f, v), rp.unit_label(f))
         self.sidebar.activity_changed.connect(self._activity_changed)   # a tab, a tool
-        self.sidebar.results_panel.units_changed.connect(     # a field's unit: the plots too
+        self.sidebar.contours_panel.units_changed.connect(     # a field's unit: the plots too
             lambda: self._active_plot is not None and self._refresh_plot(self._active_plot))
         self.sidebar.inflation_panel.changed.connect(self._inflation_changed)
         self.sidebar.inflation_panel.wants_model.connect(self._show_model_page)
@@ -189,10 +199,13 @@ class ViewerWindow(Bars, Pages, Exports, QMainWindow):
         if not model.parts:
             return self._failed(RuntimeError(f"No {model.group_title.lower()} found in this file."))
         self.scene = Scene(self.plotter, model, dark=is_dark(), accent=accent())
+        self._view_page = self._model_view = None        # each tab's view: from the file
+        self._vis_page = self._model_hidden = None
         self.scene.set_color_mode(self.sidebar.color_mode, render=False)   # File / Randomized
         saved = memory.load(self.path)                   # as you left it
         memory.restore(self.scene, saved)
         self.sidebar.bind(self.scene)
+        self._vis_page, self._model_hidden = "model", self._hidden_now()   # the 3D View's
         self.sidebar.plots_panel.file_stem = self.path.stem
         self._rebuild_view_bar()                         # a tab per plot
         self.a_parallel.blockSignals(True)                  # show the scene's projection
@@ -227,6 +240,9 @@ class ViewerWindow(Bars, Pages, Exports, QMainWindow):
         elif str(page.get("page", "")).startswith("plot:"):   # a plot's tab
             self._show_page(page["page"])
         memory.restore_camera(self.scene, saved)
+        self._view_page, self._model_view = "model", self._view_state()   # the 3D View's
+        if str(page.get("page", "")).startswith("contour:"):              # a contour's tab
+            self._show_page(page["page"])
         name_controls(self)                            # (the tools' controls are built now)
         self.ctl.add_recent(self.path)                   # File ▸ Open Recent
         self.changes.watch(self.scene)                   # clicks and camera moves: undoable
@@ -282,7 +298,9 @@ class ViewerWindow(Bars, Pages, Exports, QMainWindow):
             self.scene.set_axis_font(a["axis_font"], rebuild=False)
             self.scene.set_edge_options(a["edge_width"], a["hide_edges_moving"], render=False)
             self.scene.set_shading(a["shading"], render=False)
-            self.scene.set_axes_mode(a[self._axes_key()], rebuild=False, render=False)
+            if not self._own_view():                  # a contour's tab: its own
+                self.scene.set_axes_mode(a[self._axes_key()], rebuild=False, render=False)
+                self.scene.set_axis_indicator(a["axis_indicator"], render=False)
             self.scene.set_background(*self.ctl.background())        # rebuilds grid + axes
 
     # --- toolbar toggles for what is shown -----------------------------
@@ -294,12 +312,23 @@ class ViewerWindow(Bars, Pages, Exports, QMainWindow):
         return "drawing_axes" if self.scene is not None and self.scene.is_drawing else "axes"
 
     def _show_toggled(self, key, on):
+        if key in ("axes", "grid", "axis_indicator") and self._own_view() and self.scene:
+            if key == "axis_indicator":                 # a contour's tab: only its own
+                self.scene.set_axis_indicator(on)
+            else:
+                ax, gr = self.a_show["axes"].isChecked(), self.a_show["grid"].isChecked()
+                self.scene.set_axes_mode({(True, True): "both", (True, False): "axes",
+                                          (False, True): "grid", (False, False): "off"}[(ax, gr)])
+            return
         if key in ("axes", "grid"):
             # Axes and Grid together are the saved app-wide axes mode
             ax, gr = self.a_show["axes"].isChecked(), self.a_show["grid"].isChecked()
             mode = {(True, True): "both", (True, False): "axes",
                     (False, True): "grid", (False, False): "off"}[(ax, gr)]
             self.ctl.set_appearance(**{self._axes_key(): mode})
+            return
+        if key == "axis_indicator":                     # every window, remembered
+            self.ctl.set_appearance(axis_indicator=bool(on))
             return
         if not self.scene:
             return
@@ -311,9 +340,16 @@ class ViewerWindow(Bars, Pages, Exports, QMainWindow):
             self.scene.set_feature_edges(True)
 
     def _sync_show(self):
-        """Toolbar toggles = the scene's state + the saved axes mode (no signals)."""
+        """Toolbar toggles = the scene's state + the saved axes mode (no signals); in a
+        contour's tab, its own axes, grid and axis indicator."""
         mode = self.ctl.appearance[self._axes_key()]
-        want = {"axes": mode in ("axes", "both"), "grid": mode in ("grid", "both")}
+        want = {"axes": mode in ("axes", "both"), "grid": mode in ("grid", "both"),
+                "axis_indicator": bool(self.ctl.appearance["axis_indicator"])}
+        if self.scene and self._own_view():
+            sc = self.scene
+            want = {"axes": bool(sc.state["grid"] and sc.axis_lines),
+                    "grid": bool(sc.state["grid"] and sc.grid_lines),
+                    "axis_indicator": bool(sc.state.get("axis_indicator", True))}
         if self.scene:
             want.update({k: bool(self.scene.state.get(k)) for k in self.SCENE_TOGGLES})
         for k, on in want.items():
@@ -362,7 +398,7 @@ class ViewerWindow(Bars, Pages, Exports, QMainWindow):
         self.sidebar.edit_panel.refresh()
         self.sidebar.cfd_panel.model_changed()         # lengths in metres
         self.sidebar.inflation_panel.model_changed()
-        self.sidebar.results_panel.length_unit_changed()   # positions X / Y / Z
+        self.sidebar.contours_panel.length_unit_changed()   # positions X / Y / Z
         self.sidebar.plots_panel.model_changed()       # positions in the new unit
 
     def _toggle_section(self, on):
@@ -375,7 +411,7 @@ class ViewerWindow(Bars, Pages, Exports, QMainWindow):
 
     def _deselect(self):
         if self.scene:
-            if self.scene.measure.mode != "off":
+            if self.scene.measure.picking != "off":    # (the tool closed: marks stay)
                 self.scene.measure.clear()
             self.scene.select(None)
             self.scene.elements.clear()
@@ -417,7 +453,7 @@ class ViewerWindow(Bars, Pages, Exports, QMainWindow):
         self.sidebar.info_panel.model_changed()        # new bounds
         self.sidebar.cfd_panel.model_changed()         # flow vectors, length
         self.sidebar.inflation_panel.model_changed()   # walls, arrows, auto length
-        self.sidebar.results_panel.model_changed()     # results follow the edits
+        self.sidebar.contours_panel.model_changed()     # results follow the edits
         self.sidebar.plots_panel.model_changed()       # cuts of the moved model
 
     def _unit_chosen(self, a):
@@ -429,7 +465,7 @@ class ViewerWindow(Bars, Pages, Exports, QMainWindow):
             self.sidebar._show_info(self.scene.selected_parts)   # a picked length / area
             self.sidebar.cfd_panel.model_changed()      # mesh length in metres
             self.sidebar.inflation_panel.model_changed()   # auto length in metres
-            self.sidebar.results_panel.length_unit_changed()   # positions X / Y / Z
+            self.sidebar.contours_panel.length_unit_changed()   # positions X / Y / Z
             self.sidebar.plots_panel.model_changed()       # plots in the new unit
 
     # --- Export ----------------------------------------------------------
@@ -530,6 +566,13 @@ class ViewerWindow(Bars, Pages, Exports, QMainWindow):
     def remember_view(self):
         """camera, colours, hidden parts, section… for the next time."""
         if self.scene is not None and self.path is not None:
+            own = self._view_page if self._own_view() else None
+            if own:                                     # the file keeps the 3D View's
+                self._store_view(own, self._view_state())
+                self._apply_view(self._model_view, own=False)
+            if self._vis_page not in (None, "model"):   # the tab's own parts: kept with it
+                self._keep_parts(self._vis_page, self._hidden_now())
+            self.sidebar.contours_panel._save()         # each contour's tab view too
             try:                                        # the Inflation page too
                 self.scene.inflation_page = {
                     **self.inflation_view.get_state(),
@@ -537,6 +580,16 @@ class ViewerWindow(Bars, Pages, Exports, QMainWindow):
             except Exception:                           # noqa: BLE001
                 pass
             try:
-                memory.save(self.path, memory.capture(self.scene))
+                shown = dict(self.scene.visible)        # the file: the 3D View's parts
+                if self._vis_page not in (None, "model") and self._model_hidden is not None:
+                    self.scene.visible = {n: n not in self._model_hidden
+                                          for n in self.scene.names}
+                try:
+                    state = memory.capture(self.scene)
+                finally:
+                    self.scene.visible = shown
+                memory.save(self.path, state)
             except Exception as exc:                    # never block closing
                 print(f"could not remember the view: {exc}")
+            if own:
+                self._apply_view(self._tab_view(own), own=True)

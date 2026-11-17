@@ -33,6 +33,7 @@ class NumberField(QLineEdit):
         self.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self.setMinimumWidth(56)
         self._value = None
+        self.typed_text = ""                   # the text last typed (before it is tidied)
         self._range = None                     # (low, high) typed values snap into
         self.setValue(value)
         self.editingFinished.connect(self._finished)
@@ -52,6 +53,7 @@ class NumberField(QLineEdit):
         self.style().polish(self)
 
     def _finished(self):
+        self.typed_text = self.text().strip()          # as typed (shown again verbatim)
         text = self.text().strip().replace(",", ".").replace(" ", "")
         try:
             v = float(text) if text else None

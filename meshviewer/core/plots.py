@@ -68,10 +68,24 @@ def _section_defaults(model):
     return {"axis": AXES[int(np.argmax(span))],          # a wing: across the span
             "pos": None, "normal": None, "value": field, "along": None, "chord": False,
             "flip": None, "ref": None, "show": True,
-            # the plot's axes (Axes under each plot): typed ranges (None = auto, in the
-            # units shown), log scales, reversed x; "flip" above reverses y (cp: by default)
+            # the plot's axes as drawn (Axes under each plot): typed ranges (None = auto,
+            # in the units shown), log scales, reversed x; "flip" above reverses y (cp: by
+            # default, `y_flipped`); swap: the value across, the position up (Swap Axes)
             "x_min": None, "x_max": None, "y_min": None, "y_max": None,
-            "x_log": False, "y_log": False, "x_flip": False}
+            "x_log": False, "y_log": False, "x_flip": False, "swap": False,
+            # the data kept: value_min < value < value_max, along_min < x < along_max
+            # (shown units, None: open); typed: Min / Max as typed; lock: no zoom / pan
+            "value_min": None, "value_max": None, "along_min": None, "along_max": None,
+            "typed": {}, "lock": False}
+
+
+def y_flipped(m, value):
+    """Is the plot's y axis (as drawn) reversed? Flip Y as set, else cp: negative up
+    (when cp is on the y axis, not swapped)."""
+    flip = m.get("flip")
+    if flip is None:
+        flip = value.lower() == "cp" and not m.get("swap")
+    return bool(flip)
 
 
 def in_plane(axis):
@@ -222,9 +236,7 @@ def _section_compute(m, parts, names):
     for c in curves:
         x = c["xyz"][:, k]
         c["x"] = (x - lo) / chord if m.get("chord") and chord > 0 else x
-    flip = m.get("flip")
-    if flip is None:                                    # cp: negative up, as usual
-        flip = value.lower() == "cp"
+    flip = y_flipped(m, value)                          # cp: negative up, as usual
     lines = pv.merge(cut) if len(cut) > 1 else (cut[0] if cut else None)
     return {"curves": curves, "along": along, "value": value, "chord": chord,
             "chord_on": bool(m.get("chord")) and chord > 0, "flip": bool(flip),
@@ -251,7 +263,7 @@ def compute(m, parts, names):
 # ---- CSV ---------------------------------------------------------------------------------
 def to_csv(m, r, scale=1.0, unit="", value_unit=None):
     """The curves, one row per point: part, the plot's x and y, then X, Y, Z.
-    value_unit: (convert, label) for a field's values (Results ▸ Shown in), or None."""
+    value_unit: (convert, label) for a field's values (Contours ▸ Shown in), or None."""
     coord = r["value"].startswith(COORD)
     xname = "x/c" if r.get("chord_on") else f"{r['along']} ({unit})" if unit else r["along"]
     conv, vlabel = (lambda v: v * scale, unit) if coord else (value_unit or (lambda v: v, ""))

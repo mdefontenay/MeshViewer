@@ -13,6 +13,8 @@ OK / Save (not on Cancel).
 """
 from __future__ import annotations
 
+import re
+
 from pathlib import Path
 
 from PySide6.QtCore import QStandardPaths, Qt
@@ -36,10 +38,20 @@ def save_folder(path):
     return Path(path).parent
 
 
+def _suffix(name_filter):
+    """"JPEG image (*.jpg *.jpeg)" -> "jpg" (the extension a name without one gets)."""
+    m = re.search(r"\*\.(\w+)", name_filter or "")
+    return m.group(1) if m else ""
+
+
 def ask_save(window, title, default, filters, done):
+    """Where to save (a sheet). Several filters ("PNG (*.png);;JPEG (*.jpg)"): a name typed
+    without an extension gets the chosen one's."""
     d = QFileDialog(window, title, str(default), filters)
     d.setAcceptMode(QFileDialog.AcceptSave)
     d.setFileMode(QFileDialog.AnyFile)
+    d.setDefaultSuffix(_suffix(filters.split(";;")[0]))
+    d.filterSelected.connect(lambda f: d.setDefaultSuffix(_suffix(f)))
     d.fileSelected.connect(lambda fn: fn and done(fn))
     return _sheet(window, d)
 

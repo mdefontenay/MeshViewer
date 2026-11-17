@@ -1,6 +1,6 @@
 """Select ▾: what a click picks — the part, mesh nodes / edges / triangles (meshes only),
 feature nodes / edges / faces — and the feature faces, edges and nodes themselves (on a
-mesh: smooth edges found, straight or planar, cut where another meets them)."""
+mesh: smooth edges found, gaps bridged, cut at corners and where another meets them)."""
 import numpy as np
 import pyvista as pv
 from conftest import check, open_file, run
@@ -41,21 +41,18 @@ def _straight_or_planar():
     # a ring: two circles, each planar -> two edges, no node
     f = Features(pv.Disc(c_res=40))
     check(_counts(f) == (2, 0), f"ring: 2 circles, no node {_counts(f)}")
-    # a twisted strip: its helical sides are cut into planar pieces
+    # a twisted strip: its helical sides twist gently in 3D -> each one feature edge,
+    # cut only at the strip's square ends
     t = np.linspace(0, 4 * np.pi, 200)
     side = np.c_[np.cos(t), np.sin(t), 0.3 * t]
     n = len(t)
     strip = pv.PolyData(np.r_[side, side + [0, 0, 0.2]],
                         np.concatenate([[4, i, i + 1, n + i + 1, n + i] for i in range(n - 1)]))
     f = Features(strip)
-    pts = np.asarray(strip.points)
-    flat = True
-    for c in range(f.curve.max() + 1):
-        p = pts[np.unique(f.curve_segments(c))]
-        if len(p) > 3:                                 # the points of one edge: one plane
-            s = np.linalg.svd(p - p.mean(axis=0), compute_uv=False)
-            flat &= s[-1] <= 0.05 * s[0]
-    check(_counts(f)[0] > 10 and flat, f"helix: planar pieces ({_counts(f)[0]})")
+    longest = max(len(f.curve_segments(c)) for c in range(f.curve.max() + 1))
+    check(_counts(f) == (4, 4) and longest == n - 1,
+          f"helix: each side one feature edge, not cut by its twist {_counts(f)}, {longest}")
+    _corners()
     # two plates crossing: each one's side edges are cut where the other's meet them
     a = pv.Plane(i_size=2, j_size=2, i_resolution=4, j_resolution=4).triangulate()
     b = pv.Plane(direction=(0, 1, 0), i_size=2, j_size=2, i_resolution=4,
@@ -72,6 +69,99 @@ def _straight_or_planar():
     check(_counts(fa) == (4, 4) and _counts(fc) == (4, 4), "a shared side cuts nothing")
     _smooth()
     _creases()
+    _zigzags()
+    _bridges()
+
+
+def _corners():
+    from meshviewer.core.features import _runs
+    t = np.linspace(0, 6 * np.pi, 120)                 # a helix: no corner
+    check(_runs(np.c_[np.cos(t), np.sin(t), 0.2 * t], 30.0) == [], "helix: not cut")
+    kink = np.array([[i, 0.0, 0.0] for i in range(6)] +
+                    [[5 + i * np.cos(np.radians(27)), i * np.sin(np.radians(27)), 0] for i in (1, 2, 3)])
+    check(_runs(kink, 30.0) == [5], f"a lone 27° kink: a corner ({_runs(kink, 30.0)})")
+    a = np.radians(27) * np.arange(14)                 # a coarse circle, 27° at each point
+    check(_runs(np.c_[np.cos(a), np.sin(a), 0 * a], 30.0) == [],
+          "a coarse curve turning 27° at each point: not cut")
+    check(_runs(np.array([[0, 0, 0], [1, 0, 0], [1, 1, 0.0]]), 30.0) == [1], "90°: cut")
+
+
+def _line(pts, closed=False):
+    """Mesh edges joining the points in turn (and back to the first)."""
+    k = np.arange(len(pts) - (0 if closed else 1))
+    return k, (k + 1) % len(pts)
+
+
+def _zigzags():
+    from meshviewer.core.features import _anchored
+    def kept(pts, closed=False, anchor=(True, True)):
+        lo, hi = _line(pts, closed)
+        p = np.asarray(pts, dtype=float)
+        n = len(p)
+        found = np.ones(len(lo), bool)
+        sharp = np.zeros(len(lo), bool)
+        for end, on in zip((0, n - 1), anchor):         # a sharp edge going up at an end
+            if on:
+                p = np.r_[p, [p[end] + (0, 0, 1)]]
+                lo, hi = np.r_[lo, end], np.r_[hi, len(p) - 1]
+                found, sharp = np.r_[found, False], np.r_[sharp, True]
+        return int(_anchored(found, lo, hi, sharp, p, 30.0).sum())
+    x = np.arange(21.0)
+    zig = np.c_[x, 0.2 * (x % 2), 0 * x]                # ±22°, back and forth
+    check(kept(zig) == 0, "a zig-zag between two sharp edges: dropped")
+    arc = np.c_[30 * np.sin(x / 30), 30 * np.cos(x / 30), 0 * x]
+    check(kept(arc) == 20, f"a smooth arc between two sharp edges: kept ({kept(arc)})")
+    s = np.c_[x, np.where(x < 10, 0.02 * (x - 0) ** 2, 4 - 0.02 * (20 - x) ** 2), 0 * x]
+    check(kept(s) == 20, f"an S curve (one turn back): kept ({kept(s)})")
+    line = np.c_[x, 0 * x, 0 * x]
+    check(kept(line, anchor=(False, False)) == 0, "a floating line, both ends open: dropped")
+    check(kept(line, anchor=(True, False)) == 20, "a line from a sharp edge, its end open: kept")
+    a = np.linspace(0, 2 * np.pi, 40, endpoint=False)
+    loop = np.c_[np.cos(a), np.sin(a), 0 * a]
+    check(kept(loop, closed=True, anchor=(False, False)) == 40, "a floating closed loop: kept")
+
+
+def _bridges():
+    from meshviewer.core.features import _bridge
+    # a triangulated plate, 20 x 4 squares; feature edges along y = 2 with a gap
+    plate = pv.Plane(center=(10, 2, 0), i_size=20, j_size=4, i_resolution=20,
+                     j_resolution=4).triangulate()
+    p, lo, hi = _all_edges(plate)
+    on = lambda y: (np.abs(p[lo, 1] - y) < 1e-9) & (np.abs(p[hi, 1] - y) < 1e-9)  # noqa: E731
+    row, xm = on(2), (p[lo, 0] + p[hi, 0]) / 2
+    for gap, want in ((4, 4), (10, 0)):
+        net = row & ((xm < 4) | (xm > 4 + gap))
+        add = _bridge(net, lo, hi, p, 30.0)
+        check(add.sum() == want and (row[add] & (xm[add] > 4) & (xm[add] < 4 + gap)).all(),
+              f"a {gap}-edge gap on a line: {want} mesh edges bridged ({add.sum()})")
+        if want:                                         # then one feature edge
+            both = net | add
+            lines = pv.PolyData(p, lines=np.c_[np.full(both.sum(), 2), lo[both], hi[both]].ravel())
+            check(_counts(Features(lines)) == (1, 2), "bridged: one feature edge, two ends")
+    net = (row & (xm < 4)) | (on(3) & (xm > 8))          # facing, but not on one line
+    check(not _bridge(net, lo, hi, p, 30.0).any(), "two edges side by side: not bridged")
+    # a ring of a disc with 4 mesh edges missing: bridged along the ring
+    disc = pv.Disc(inner=0.5, outer=1.5, r_res=4, c_res=48).triangulate()
+    p, lo, hi = _all_edges(disc)
+    r = np.linalg.norm(p[:, :2], axis=1)
+    ring = (np.abs(r[lo] - 1) < 1e-6) & (np.abs(r[hi] - 1) < 1e-6)
+    mid = (p[lo] + p[hi]) / 2
+    ang = np.degrees(np.arctan2(mid[:, 1], mid[:, 0]))
+    gap = ring & (ang > 0) & (ang < 4 * 7.5)
+    add = _bridge(ring & ~gap, lo, hi, p, 30.0)
+    check(gap.sum() == 4 and (add == gap).all(),
+          f"a 4-edge gap in a circle: bridged along it ({add.sum()} of {gap.sum()})")
+
+
+def _all_edges(poly):
+    """Points (one per place) and every mesh edge (lo, hi) of a polygon mesh."""
+    p, inv = np.unique(np.round(np.asarray(poly.points, dtype=float), 9), axis=0,
+                       return_inverse=True)
+    inv = inv.reshape(-1)
+    faces = np.asarray(poly.faces).reshape(-1, 4)[:, 1:]          # triangles
+    e = inv[np.r_[faces[:, [0, 1]], faces[:, [1, 2]], faces[:, [2, 0]]]]
+    e = np.unique(np.sort(e, axis=1), axis=0)
+    return p, e[:, 0], e[:, 1]
 
 
 def _creases():
@@ -333,5 +423,94 @@ def test(app, files):
     w.close()
 
 
+def field_checks(app, files):
+    """Measure Selected ▸ Field Values: a node's values, an edge's length-weighted and
+    triangles' and parts' area-weighted means, in Contours' units; none without fields."""
+    from meshviewer.core.fields import field_values as values_of
+    from meshviewer.core.units import nice_num
+    from meshviewer.render.element_details import field_values
+    w = open_file(app, files["tecplot"])
+    sc, sb = w.scene, w.sidebar
+    el, sp = sc.elements, sb.selected_panel
+    floor = sc.model.parts["FLOOR"]
+    cp_floor = np.asarray(values_of(floor, "cp")[0], dtype=float)
+    p_floor = np.asarray(values_of(floor, "p")[0], dtype=float)
+    w.set_select_kind("mesh_node")
+    el._take(("FLOOR", 3), False)
+    app.processEvents()
+    fv = field_values(el)
+    got = dict(fv["fields"])
+    check(not fv["mean"] and abs(got["cp"] - cp_floor[3]) < 1e-12
+          and abs(got["p"] - p_floor[3]) < 1e-9 and "__speed__" in got,
+          "a node: every field's own value (speed too)")
+    rows = dict(sp.field_rows)
+    check(not sp.fields_box.isHidden() and "Pressure coefficient cp" in rows
+          and rows["Pressure coefficient cp"] == nice_num(cp_floor[3])
+          and not any(k.startswith("Avg.") for k in rows),
+          f"the panel: Field Values, no Avg. for a node ({list(rows)[:3]})")
+    w.set_select_kind("mesh_edge")
+    ids = list(floor.get_cell(0).point_ids)
+    a, b = sorted(ids[:2])
+    el._take(("FLOOR", (a, b)), False)
+    app.processEvents()
+    got = dict(field_values(el)["fields"])
+    check(abs(got["cp"] - (cp_floor[a] + cp_floor[b]) / 2) < 1e-12,
+          "an edge: the mean along it")
+    c, d = sorted(ids[1:3])
+    el._take(("FLOOR", (c, d)), True)                  # and a second one: length-weighted
+    pts = np.asarray(floor.points)
+    la, lb = np.linalg.norm(pts[b] - pts[a]), np.linalg.norm(pts[d] - pts[c])
+    want = (la * (cp_floor[a] + cp_floor[b]) / 2 + lb * (cp_floor[c] + cp_floor[d]) / 2) / (la + lb)
+    got = dict(field_values(el)["fields"])
+    check(abs(got["cp"] - want) < 1e-12, "two edges: length-weighted")
+    check(any(k == "Avg. Pressure coefficient cp" for k, _ in sp.field_rows)
+          and "Length-weighted" in sp.fields_note.text(), "the panel: Avg., length-weighted")
+    w.set_select_kind("mesh_cell")
+    sphere = sc.model.parts["SPHERE"]
+    cp_s = np.asarray(values_of(sphere, "cp")[0], dtype=float)
+    el._take(("SPHERE", 0), False)
+    el._take(("SPHERE", 1), True)
+    app.processEvents()
+    sizes = sphere.compute_cell_sizes(length=False, volume=False).cell_data["Area"]
+    means = [cp_s[list(sphere.get_cell(k).point_ids)].mean() for k in (0, 1)]
+    want = (sizes[0] * means[0] + sizes[1] * means[1]) / (sizes[0] + sizes[1])
+    got = dict(field_values(el)["fields"])
+    check(abs(got["cp"] - want) < 1e-9, f"two triangles: area-weighted ({got['cp']:.5g})")
+    w.set_select_kind("part")
+    sb._selection_changed(["SPHERE"])
+    app.processEvents()
+    fv = field_values(el)
+    got = dict(fv["fields"])
+    tri = sphere.compute_cell_sizes(length=False, volume=False).cell_data["Area"]
+    cell = np.asarray(sphere.point_data_to_cell_data().cell_data["cp"], dtype=float)
+    check(fv["how"] == "area" and abs(got["cp"] - (tri * cell).sum() / tri.sum()) < 1e-9
+          and sp.title.text().endswith("SPHERE") and not sp.fields_box.isHidden(),
+          "a part: area-weighted over it, its name on top")
+    # in Contours' units: p in Pa shown in kPa
+    cp_panel = sb.contours_panel
+    cp_panel.set_units("p", "Pa", "kPa")
+    app.processEvents()
+    rows = dict(sp.field_rows)
+    check(rows.get("Avg. Pressure p", "").endswith("kPa")
+          and abs(float(rows["Avg. Pressure p"].split()[0]) - got["p"] / 1000)
+          < 1e-3 * abs(got["p"] / 1000) + 1e-12, f"in Contours' units ({rows.get('Avg. Pressure p')})")
+    sb._selection_changed([])
+    app.processEvents()
+    check(sp.fields_box.isHidden(), "nothing selected: no Field Values")
+    w.close()
+    w = open_file(app, files["step"])                  # no solution fields
+    w.set_select_kind("feature_face")
+    w.scene.elements._take(("box", 0), False)
+    app.processEvents()
+    check(w.sidebar.selected_panel.fields_box.isHidden() and field_values(w.scene.elements)
+          is None, "no solution fields: no Field Values")
+    w.close()
+
+
+def _all(app, files):
+    test(app, files)
+    field_checks(app, files)
+
+
 if __name__ == "__main__":
-    run(test)
+    run(_all)

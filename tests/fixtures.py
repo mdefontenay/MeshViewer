@@ -1,4 +1,5 @@
-"""Small test files, written once into tests/_data/ (git-ignored):
+"""Small test files, written once into tests/_data/ (git-ignored) and kept between runs;
+made again when missing or when this file changes (`files()`):
 
     box.step         CAD: a box with a cylindrical hole (OCP)
     box.cgns         3D mesh: hex volume (HEXA_8) + wall / farfield quads, BC by element range
@@ -346,15 +347,31 @@ MAKERS = {"step": ("box.step", _step), "cgns": ("box.cgns", lambda p: _cgns(p)),
           "dxf": ("profile.dxf", _dxf)}
 
 
+STAMP = DATA / ".made-by"                    # the hash of this file when they were made
+
+
+def _source_hash():
+    import hashlib
+    return hashlib.sha1(Path(__file__).read_bytes()).hexdigest()
+
+
 def files(rebuild=False):
-    """{key: path}, making what is missing."""
+    """{key: path}: kept between runs, made again only when missing or when this file
+    changed since they were made (its hash in _data/.made-by)."""
     DATA.mkdir(exist_ok=True)
+    stamp = _source_hash()
+    try:
+        stale = STAMP.read_text().strip() != stamp
+    except OSError:
+        stale = True
     out = {}
     for key, (name, make) in MAKERS.items():
         p = DATA / name
-        if rebuild or not p.exists():
+        if rebuild or stale or not p.exists():
             make(p)
         out[key] = p
+    if rebuild or stale:
+        STAMP.write_text(stamp + "\n")
     return out
 
 

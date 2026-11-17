@@ -3,7 +3,9 @@
     FlowView     "Show flow vectors": 5 × 5 arrows up- and downstream of a boundary
     YplusView    CFD ▸ Colour by y+ (per wall node, relative to the target)
     WallView     Inflation Layers: the walls tinted
-    ResultsView  Results: a solution field on the visible boundaries (or its gradient)
+    ResultsView  Contours: a solution field on the visible boundaries (or its gradient),
+                 smooth or in bands, through the same colors as the color bar
+                 (render/colorbar.py)
     CutLineView  Plots: where the plane of a section plot cuts the boundaries
 
 Colour maths (ramps, scales) lives in core/fields.py.
@@ -12,7 +14,8 @@ from __future__ import annotations
 
 import numpy as np
 import pyvista as pv
-from meshviewer.core.fields import field_values, lighter_rgb, ramp_rgb, yplus_rgb
+from meshviewer.core.fields import (NAN_COLOR, field_values, lighter_rgb, ramp_t, ramp_table,
+                                    yplus_rgb)
 from meshviewer.core.polys import bare
 
 ARROW_COLOR = "#0a84ff"
@@ -280,9 +283,29 @@ class WallView:
         return list(self._actors)
 
 
-# --- Results — the boundaries painted by a solution field -----------------------
-# Colour scales (dataviz reference palette): one hue, light -> dark, for magnitudes; blue ->
-# grey -> red around zero for fields that change sign (cp, u, v, w…).
+# --- Contours — the boundaries painted by a solution field -----------------------
+# Each node (or face) carries where its value sits on the scale, 0…1 ("ResultT"); a lookup
+# table turns it into a color on the GPU, interpolated before mapping, so bands keep sharp
+# borders across the triangles. Selected parts: 0…1 moved to 2…3, where the table holds
+# the same colors lighter (the 1…2 gap holds the top color: t = 1 exactly).
+SELECTED = 2.0
+
+
+def results_lut(stops, edges=None, n=1024):
+    """The lookup table for "ResultT": 0…1 the colors (smooth, or in bands between
+    `edges`), 2…3 the same lighter (selected parts); NaN gray."""
+    from vtkmodules.util.numpy_support import numpy_to_vtk
+    from vtkmodules.vtkCommonCore import vtkLookupTable
+    base = ramp_table(stops, edges, n)
+    rows = np.vstack([base, np.repeat(base[-1:], n, axis=0), lighter_rgb(base)])
+    rgba = np.hstack([rows, np.full((len(rows), 1), 255, np.uint8)])
+    lut = vtkLookupTable()
+    lut.SetNumberOfTableValues(len(rgba))
+    lut.SetTable(numpy_to_vtk(np.ascontiguousarray(rgba), deep=True))
+    lut.SetTableRange(0.0, 3.0)
+    lut.SetNanColor(*[int(NAN_COLOR[i:i + 2], 16) / 255 for i in (1, 3, 5)], 1.0)
+    lut.Build()
+    return lut
 
 
 class ResultsView(YplusView):
@@ -291,13 +314,14 @@ class ResultsView(YplusView):
 
     def __init__(self, scene):
         super().__init__(scene)
-        self.spec = None                      # (field, lo, hi, stops, log) while shown
+        self.spec = None                      # (field, lo, hi, stops, log, edges) while shown
 
-    def show_field(self, field, lo, hi, stops, log=False):
+    def show_field(self, field, lo, hi, stops, log=False, edges=None):
+        """edges: None smooth, else the band borders 0…1 (the color bar's ticks)."""
         self.hide(render=False)
         sc = self.scene
-        self.spec = (field, lo, hi, stops, log)
-        polys, self._pieces = [], []          # (part name, "point" | "cell", RGB)
+        self.spec = (field, lo, hi, stops, log, None if edges is None else tuple(edges))
+        polys, self._pieces = [], []          # (part name, "point" | "cell", t 0…1)
         for n in sc.names:
             part = sc.model.parts.get(n)
             if part is None or not sc.visible.get(n):
@@ -306,10 +330,10 @@ class ResultsView(YplusView):
             if vals is None:
                 continue
             surf = bare(part)
-            rgb = ramp_rgb(vals, lo, hi, stops, log)
-            (surf.point_data if where == "point" else surf.cell_data)["ResultRGB"] = rgb
+            t = ramp_t(vals, lo, hi, log)
+            (surf.point_data if where == "point" else surf.cell_data)["ResultT"] = t
             polys.append(surf)
-            self._pieces.append((n, where, rgb))
+            self._pieces.append((n, where, t))
         if not polys:
             self.p.render()
             return
@@ -317,10 +341,14 @@ class ResultsView(YplusView):
         surf = polys[0] if len(polys) == 1 else pv.merge(polys, merge_points=False)
         self._surf = surf
         self.show_selection(render=False)
-        self._actor = self.p.add_mesh(surf, scalars="ResultRGB", rgb=True, edge_color="#202020",
+        self._actor = self.p.add_mesh(surf, scalars="ResultT", show_scalar_bar=False,
+                                      interpolate_before_map=True, edge_color="#202020",
                                       pickable=False, reset_camera=False, lighting=True,
                                       smooth_shading=True, ambient=0.25, diffuse=0.8)
         m = self._actor.GetMapper()
+        m.SetLookupTable(results_lut(stops, edges))
+        m.SetUseLookupTableScalarRange(False)
+        m.SetScalarRange(0.0, 3.0)
         m.Update()                             # (the copy exists once the mapper has run)
         self._surf = pv.wrap(m.GetInput())     # what is drawn (smooth shading copies it)
         m.SetResolveCoincidentTopologyToPolygonOffset()
@@ -337,9 +365,9 @@ class ResultsView(YplusView):
         where = {w for _, w, _ in self._pieces}
         if len(where) > 1:                     # mixed point / cell fields: leave as is
             return
-        rgb = np.concatenate([lighter_rgb(c) if n in sel else c for n, _, c in self._pieces])
+        t = np.concatenate([c + SELECTED if n in sel else c for n, _, c in self._pieces])
         data = self._surf.point_data if where == {"point"} else self._surf.cell_data
-        data["ResultRGB"] = rgb
+        data["ResultT"] = t
         self._surf.Modified()
         if render:
             self.p.render()

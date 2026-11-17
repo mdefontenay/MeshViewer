@@ -158,6 +158,7 @@ def test(app, files):
     check(sc.state["feature_edges"] and e[sc._index["fluid"]].visible and blk.GetNumberOfCells()
           and sc._edges.GetProperty().GetLineWidth() >= 2.5,
           "2D: Feature edges = the zone outline (shows the hidden wall)")
+    check(bool(sb._boxes["plots"].parts[0][1].text()), "Plots: not for 2D")
     w.close()
     w = open_file(app, files["fluent3d"])
     sp = w.sidebar.section_panel
@@ -178,13 +179,8 @@ def test(app, files):
           "Section: Edit Plane shows the origin and normal right under Normal to")
     w.close()
 
-    # CGNS / UGRID: the summary counts the volume cells, from the file's header
-    from meshviewer.core.mesh import cgns, ugrid
-    n = cgns.cell_count(files["cgns"])
-    check(n and n > 0, f"CGNS: {n} cells from the zone size")
-    w = open_file(app, files["cgns"])
-    check(w.sidebar.summary.endswith(f"{n:,} cells"), f"CGNS summary: {w.sidebar.summary}")
-    w.close()
+    # UGRID: the volume cells counted from the header (CGNS: in test_sidebar.py)
+    from meshviewer.core.mesh import ugrid
     check(ugrid.cell_count(files["ugrid"]) is not None, "UGRID: cells from the header")
     # STEP materials and colors (an assembly made in memory, as the reader sees it)
     from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
@@ -276,5 +272,76 @@ def dxf_text_and_solids():
           f"({d.n_lines if d else 0}; {sorted(parts)})")
 
 
+def shot_checks(app, files):
+    """Save Screenshot as PNG, JPEG and SVG; Color by y+ grayed where there is no y+."""
+    import tempfile
+    from pathlib import Path
+    w = open_file(app, files["tecplot"])
+    sc = w.scene
+    d = Path(tempfile.mkdtemp())
+    out = {ext: sc.screenshot(d / f"shot{ext}", scale=1) for ext in (".png", ".jpg", ".svg")}
+    png = out[".png"].read_bytes()
+    jpg = out[".jpg"].read_bytes()
+    svg = out[".svg"].read_text()
+    check(png[:8] == b"\x89PNG\r\n\x1a\n" and len(png) > 1000, "PNG")
+    check(jpg[:3] == b"\xff\xd8\xff" and len(jpg) > 1000, "JPEG")
+    import xml.etree.ElementTree as ET
+    w0, h0 = sc.p.window_size
+    root = ET.fromstring(svg.encode("utf-8"))
+    tags = {el.tag.split("}")[-1] for el in root.iter()}
+    check(root.tag.endswith("svg") and {"polygon", "line"} <= tags and "image" not in tags
+          and "base64" not in svg and root.get("width") == str(w0),
+          f"SVG: valid XML, vector polygons and lines, no picture inside ({sorted(tags)})")
+    w._show_page("contour:1")                          # a contour: its colors, its bar
+    for _ in range(5):
+        app.processEvents()
+    svg = sc.screenshot(d / "contour.svg", scale=1).read_text()
+    root = ET.fromstring(svg.encode("utf-8"))
+    fills = {el.get("fill") for el in root.iter() if el.tag.endswith("polygon")}
+    texts = [el.text for el in root.iter() if el.tag.endswith("text")]
+    check(len(fills) > 20 and "<image" not in svg and any(t == "y+" for t in texts)
+          and root.find(".//{http://www.w3.org/2000/svg}linearGradient") is not None,
+          f"a contour's tab: its colors as polygons ({len(fills)} colors), the color bar "
+          "as shapes and text")
+    w._show_page("model")
+    pp = w.sidebar.plots_panel                         # a plot's tab: the plot, vector
+    i = pp.add("section", "Mid")
+    for _ in range(5):
+        app.processEvents()
+    q = w.plot_page.save_picture(d / "plot.svg")
+    txt = q.read_text()
+    root = ET.fromstring(txt.encode("utf-8"))
+    tags = {el.tag.split("}")[-1] for el in root.iter()}
+    check(({"path", "polyline"} & tags) and "text" in tags and "image" not in tags,
+          f"a plot: paths and text, no picture ({sorted(tags)})")
+    for ext in (".png", ".jpg"):
+        pic = w.plot_page.save_picture(d / f"plot{ext}", scale=2)
+        check(pic.exists() and pic.stat().st_size > 1000, f"a plot as {ext[1:].upper()}")
+    pp.remove(i)
+    t = sc.screenshot(d / "see-through.jpg", scale=1, background="transparent")
+    check(t.read_bytes()[:3] == b"\xff\xd8\xff", "a transparent JPEG: on white")
+    odd = sc.screenshot(d / "shot", scale=1)
+    check(odd.suffix == ".png" and odd.exists(), "no extension: PNG")
+    from meshviewer.gui.window_export import SHOT_FILTERS
+    from meshviewer.gui.sheets import _suffix
+    check([_suffix(f) for f in SHOT_FILTERS.split(";;")] == ["png", "jpg", "svg"],
+          "the save sheet offers PNG, JPEG, SVG")
+    # Color by y+: a surface mesh has no first cells -> grayed
+    sb = w.sidebar
+    sb.show_section("cfd", expand=True)
+    cp = sb.cfd_panel
+    cp.activate(True)
+    for _ in range(10):
+        app.processEvents()
+    check(not cp.colour_row.isEnabled() and not cp.legend.isVisible(),
+          "Color by y+ grayed: a surface mesh (no first cells to measure)")
+    w.close()
+
+
+def _all(app, files):
+    test(app, files)
+    shot_checks(app, files)
+
+
 if __name__ == "__main__":
-    run(test)
+    run(_all)

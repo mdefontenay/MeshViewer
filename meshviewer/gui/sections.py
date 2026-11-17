@@ -2,7 +2,7 @@
 
     View      Meshing Control, Section, Edit      how the model is shown and changed
     Measure   Info, Measuring Tool, Measure Selected   numbers about it
-    Analyze   CFD, Cell Quality, Results, Plots   CFD checks, solver results and plots
+    Analyze   CFD, Cell Quality, Contours, Plots  CFD checks, solver results and plots
 
 (On screen they are "tools"; in the code a tool's fold-out box is a "section".)
 Every tool is in its tab for every file. When one doesn't apply to the open file, it
@@ -91,7 +91,8 @@ SECTIONS = (
     SectionSpec("cells", "Cell Quality", "cell_quality",
                 "Skewness, aspect ratio, Jacobian and volume of the cells", _needs_mesh,
                 tab="analyze"),
-    SectionSpec("results", "Results", "results", "Color the boundaries by a solution field",
+    SectionSpec("contours", "Contours", "results",
+                "Contours under the 3D view: the boundaries colored by a solution field",
                 _needs_fields, tab="analyze"),
     SectionSpec("plots", "Plots", "plots",
                 "Plots under the 3D view: sections (cp along x/c…)",
@@ -113,11 +114,11 @@ def default_tab(scene):
 
 
 def default_open(scene):
-    """The tools open the first time: Results for a results file; for a drawing (no
+    """The tools open the first time: Contours for a results file; for a drawing (no
     parts list) Info and Measure Selected (a click picks an Edge or a Node, and Measure
     Selected says what; the Measuring Tool is a click away)."""
     if solution_fields(scene.model.parts):
-        return ["results"]
+        return ["contours"]
     return ["info", "selected"] if scene.model.file_type == "drawing" else []
 
 

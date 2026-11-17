@@ -1,5 +1,6 @@
 """Scene ▸ what surrounds the model and how lines look: theme colours, background,
-grid and axes, origin marker, bounding box, line widths (Appearance, Display ▸ Axes)."""
+grid and axes, the XYZ axis indicator in the corner (Show ▸ Axis Indicator), origin
+marker, bounding box, line widths (Appearance, Display ▸ Axes)."""
 from __future__ import annotations
 
 import numpy as np
@@ -204,6 +205,18 @@ class Appearance:
                 prop.SetOpacity(0.0)
         return ax
 
+    def set_axis_indicator(self, on, render=True):
+        """Show ▸ Axis Indicator: the XYZ arrows in the corner (on by default)."""
+        on = bool(on)
+        if on == bool(self.state.get("axis_indicator", True)):
+            return
+        self.state["axis_indicator"] = on
+        self.p.hide_axes()
+        if on:
+            self._corner_axes(self.p, line_width=3, color=THEMES[self._dark]["grid"])
+        if render:
+            self.p.render()
+
     def _axes_viewport(self):
         """Where the XYZ arrows are: the bottom-right corner, the same for any label size
         (it grew with the labels, so the arrows moved when the size changed)."""
@@ -248,12 +261,16 @@ class Appearance:
             self._edges.GetProperty().SetColor(rgb(t["edge"]))
         self.refresh_grid(render=False)
         self.p.hide_axes()
-        self._corner_axes(self.p, line_width=3, color=t["grid"])
+        if self.state.get("axis_indicator", True):
+            self._corner_axes(self.p, line_width=3, color=t["grid"])
         if self._bbox_actor is not None:
             self._bbox_actor.GetProperty().SetColor(rgb(self.bbox_color))
         if self.state.get("origin"):
             self._build_origin()                   # dot colour follows the background
         self.section.restyle()                     # cut mesh + outline colours
+        bar = getattr(self, "colorbar", None)
+        if bar is not None:
+            bar.restyle()                          # its text: light or dark
         if self._original_actor is not None:       # grey "original" edges
             self._original_actor.GetProperty().SetColor(rgb(t["grid"]))
         if render:

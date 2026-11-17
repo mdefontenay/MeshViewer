@@ -62,14 +62,18 @@ conventions) and CHANGELOG.md (history) before changing code.
 ## Tests
 
 ```
-.venv/bin/python tests/run_all.py          # all 11 test files
+.venv/bin/python tests/run_all.py          # all 11 test files in one app, ~45 s
+.venv/bin/python tests/run_all.py plots    # only some (--isolated: a process each)
 .venv/bin/python mesh_viewer.py --selftest
 ```
-The tests use a scratch settings file (`MESHVIEWER_SETTINGS`), never the real one.
+The tests use a scratch settings file (`MESHVIEWER_SETTINGS`), never the real one;
+in `run_all.py` a new one per file (`conftest.fresh_start`).
 
 - They pass on this Mac (macOS, dark mode). `tests/fixtures.py` makes its STEP box
-  with OCP, no `cadquery` needed. The "Unrecognized file type: test_x.py" lines in
-  the output are noise: the app also reads the script's own path as a file to open.
+  with OCP, no `cadquery` needed; its files stay in `tests/_data/` and are made again
+  when `fixtures.py` changes. The tests' app ignores macOS's FileOpen of the script.
+- Not in parallel: a second app's windows and popup menus break the screen grabs and
+  the tab-menu checks.
 - `test_viewport.py` compares screen grabs: now and then a check fails because
   something covered the window. Run it again before suspecting the code.
 - To see the app, run a small script with `conftest.run` and save `w.grab()` (widget
@@ -90,11 +94,12 @@ The tests use a scratch settings file (`MESHVIEWER_SETTINGS`), never the real on
   `CAMERA_PAUSE`, `render/camera.py` `camera_gesture`).
 - Layout: parts list on the left, the inspector on the right with View (Meshing
   Control, Section, Edit) · Measure (Info, Measuring Tool, Measure Selected) · Analyze (CFD, Cell Quality,
-  Results, Plots) tabs (`gui/inspector.py`, `gui/sidebar.py`, `gui/sections.py`);
+  Contours, Plots) tabs (`gui/inspector.py`, `gui/sidebar.py`, `gui/sections.py`);
   light toolbar with View ▸ Customize Toolbar… (`gui/window_bars.py`).
-- Results (`gui/panels/results.py`): the field (Field, Unit in file, Shown in, a note
-  line), then the colors (Color the boundaries, Color by, Scale linear / log, Colors,
-  Min / Max). What a field is and its units: `core/field_kinds.py` (usual CFD and FEA
+- Contours (2.5.1, was Results; `gui/panels/contours.py` + `contour_editor.py`): one
+  fold-out and one tab under the view per contour, each with its field (Field, Unit in
+  file, Shown in), Color by, Color scale, Min / Max, Show color bar and ▸ Color Bar; the
+  color bar over the 3D view `render/colorbar.py`. What a field is and its units: `core/field_kinds.py` (usual CFD and FEA
   fields) and `core/units.py` (`QUANTITIES`: every unit name in one table only).
 - Section tool and section plots: ✎ Edit Plane right of X / Y / Z
   (`panels/section.py` `edit_plane_action`) shows Origin / Normal under Normal to.

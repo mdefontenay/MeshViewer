@@ -17,7 +17,7 @@ def test(app, files):
           f"CAD opens on View, tools closed ({sb.current_tab()})")
     check(IN_TAB == {"view": ["quality", "section", "edit"],
                      "measure": ["info", "measure", "selected"],
-                     "analyze": ["cfd", "cells", "results", "plots"]}, f"tabs {IN_TAB}")
+                     "analyze": ["cfd", "cells", "contours", "plots"]}, f"tabs {IN_TAB}")
     firsts = {tab: keys[0] for tab, keys in IN_TAB.items()}    # no line above the first tool
     check(all(sb._boxes[k].divider.isHidden() == (k in firsts.values())
               for keys in IN_TAB.values() for k in keys),
@@ -38,12 +38,12 @@ def test(app, files):
           and w.scene.measure.mode != "off" and w.a_measure.isChecked(),
           "Measure tab, Measure open: measuring, View ▸ Measure on")
     sb.show_tab("view")
-    check(not sb.is_active("measure") and w.scene.measure.mode == "off"
-          and not w.a_measure.isChecked(), "another tab: not measuring")
+    check(not sb.is_active("measure") and w.scene.measure.picking == "off"
+          and not w.a_measure.isChecked(), "another tab: not measuring (its marks stay)")
     w.a_tabs[1].trigger()                            # ⌥⌘2
     check(sb.current_tab() == "measure" and w.scene.measure.mode != "off", "⌥⌘2: measuring again")
     w.a_inspector.trigger()                          # ⌥⌘I: hidden
-    check(ins.isHidden() and w.scene.measure.mode == "off", "inspector hidden: not measuring")
+    check(ins.isHidden() and w.scene.measure.picking == "off", "inspector hidden: not measuring")
     w.a_measure.trigger()                            # ⇧⌘M shows it again
     check(not ins.isHidden() and w.a_inspector.isChecked() and sb.is_active("measure"),
           "View ▸ Measure: inspector back, measuring")
@@ -205,10 +205,66 @@ def test(app, files):
     check(not w.toolbar.isVisible() and w.a_toolbar.text() == "Show Toolbar", "Hide Toolbar")
     w.a_toolbar.trigger()
     check(w.toolbar.isVisible(), "Show Toolbar")
-    rs = w.sidebar.results_section                       # Results: its switch in the title
-    check(w.sidebar.results_panel.colour_on.parent() is not None and
-          rs.header.isAncestorOf(w.sidebar.results_panel.colour_on),
-          "Color the boundaries: the switch in the Results title")
+    # Show ▾ Axis Indicator: the XYZ arrows in the corner, on by default, every window
+    ai = w.a_show["axis_indicator"]
+    show_menu = w.a_show_menu.menu().actions()
+    view_show = next(a.menu() for a in w.menuBar().actions()[2].menu().actions()
+                     if a.menu() is not None and a.text() == "Show")
+    check(ai in show_menu and ai in view_show.actions() and ai.isCheckable()
+          and ai.isChecked() and ai.text() == "Axis Indicator" and not ai.icon().isNull(),
+          "Axis Indicator in Show ▾ and View ▸ Show, on by default")
+    widget = lambda win: win.scene.p.renderer.axes_widget          # noqa: E731
+    check(w.scene.state["axis_indicator"] and widget(w).GetEnabled(), "the XYZ arrows shown")
+    ai.trigger()
+    check(not w.scene.state["axis_indicator"] and not widget(w).GetEnabled()
+          and w.ctl.appearance["axis_indicator"] is False, "Axis Indicator off: hidden")
+    from meshviewer.gui.store import settings
+    check(settings().value("appearance/axis_indicator", True, type=bool) is False,
+          "remembered")
+    w.scene.set_theme(w.scene._ui_dark)                 # (the axes are rebuilt with the theme)
+    check(not widget(w).GetEnabled(), "stays off when the theme rebuilds the view")
+    w2 = open_file(app, files["tecplot"])
+    check(w2.sidebar.current_tab() == "analyze" and w2.sidebar.is_open("contours"),
+          "results file opens on Contours")
+    check(not w2.a_show["axis_indicator"].isChecked()
+          and not w2.scene.state["axis_indicator"], "another window: off too")
+    # the color bar dragged with the mouse (gui/viewport.py)
+    from PySide6.QtCore import QEvent, QPointF
+    from PySide6.QtGui import QMouseEvent
+    sc2, rp2 = w2.scene, w2.sidebar.contours_panel
+    w2._show_page("contour:1")                      # the bar: in a contour's tab
+    app.processEvents()
+    sc2.p.render_now()
+    bar = sc2.colorbar
+    vp = sc2.p
+    r = float(vp.devicePixelRatioF())
+    ax, ay = bar._anchor.GetComputedDoubleDisplayValue(sc2.p.renderer)[:2]
+    at = QPointF((ax + 4) / r, vp.height() - (ay - 40) / r - 1)      # on the bar, in points
+    start = tuple(bar.offset)
+    cam = sc2.camera_snapshot()
+
+    def mouse(kind, pos, buttons):
+        ev = QMouseEvent(kind, pos, vp.mapToGlobal(pos), Qt.LeftButton, buttons,
+                         Qt.NoModifier)
+        app.sendEvent(vp, ev)
+
+    mouse(QEvent.MouseButtonPress, at, Qt.LeftButton)
+    mouse(QEvent.MouseMove, at + QPointF(30, 20), Qt.LeftButton)
+    mouse(QEvent.MouseButtonRelease, at + QPointF(30, 20), Qt.NoButton)
+    app.processEvents()
+    check(abs(bar.offset[0] - start[0] - 30) < 0.6 and abs(bar.offset[1] - start[1] - 20) < 0.6
+          and sc2.same_camera(cam, sc2.camera_snapshot()),
+          f"the color bar dragged by the mouse {start} -> {bar.offset}, the camera still")
+    check(rp2.current["bar"]["pos"] == [round(bar.offset[0], 1), round(bar.offset[1], 1)]
+          and rp2.settings()["contours"][0]["bar"]["pos"] == rp2.current["bar"]["pos"],
+          "its new place saved with the file (its contour's)")
+    w2.close()
+    ai.trigger()
+    check(w.scene.state["axis_indicator"] and widget(w).GetEnabled(), "Axis Indicator on again")
+    rs = w.sidebar.contours_section                      # Contours: no switch in its title
+    from meshviewer.gui.widgets import Switch
+    check(rs.header.findChild(Switch) is None and rs.title_label.text() == "Contours",
+          "Contours: no Color the boundaries switch in its title")
     check(not w._tb_items["settings"].isVisible() and w._tb_items["show"].isVisible()
           and w._tb_items["units"].isVisible(), "Settings off by default; Show ▾, units ▾")
     check(w.a_units_menu.text() in [a.data() for a in w.a_units],
@@ -225,24 +281,22 @@ def test(app, files):
           "Restore Defaults")
     d.close()
     check(w.createPopupMenu().actions()[0] is w.a_customize, "right-click: Customize Toolbar…")
+    from meshviewer.core.fields import solution_fields
+    check(solution_fields(w.scene.model.parts) == [], "STEP: no solution fields")
     w.close()
-    # mesh: CFD = y+ estimate, in Analyze
+    # mesh: CFD = y+ estimate, in Analyze; the summary counts the volume cells, from the
+    # file's header
+    from meshviewer.core.mesh import cgns
+    n = cgns.cell_count(files["cgns"])
+    check(n and n > 0, f"CGNS: {n} cells from the zone size")
     w = open_file(app, files["cgns"])
     sb = w.sidebar
+    check(sb.summary.endswith(f"{n:,} cells"), f"CGNS summary: {sb.summary}")
     check(sb.current_tab() == "view", "mesh opens on View")
     check(sb.cfd_section.isVisibleTo(sb._boxes["cfd"].widget)
           and not sb.inflation_section.isVisibleTo(sb._boxes["cfd"].widget), "CFD on a mesh = y+ estimate")
     sb.show_section("cfd", expand=True)
     check(sb.current_tab() == "analyze" and sb.is_active("cfd"), "CFD: the Analyze tab")
-    w.close()
-    # results file: Analyze, Results open
-    w = open_file(app, files["tecplot"])
-    check(w.sidebar.current_tab() == "analyze" and w.sidebar.is_open("results"),
-          "results file opens on Results")
-    w.close()
-    from meshviewer.core.fields import solution_fields
-    w = open_file(app, files["step"])
-    check(solution_fields(w.scene.model.parts) == [], "STEP: no solution fields")
     w.close()
     # an empty window: no parts list, no inspector
     w = app.new_window()
@@ -253,5 +307,84 @@ def test(app, files):
     w.close()
 
 
+def measure_checks(app, files):
+    """What the Measuring Tool measured stays drawn when another tool or tab is shown;
+    meanwhile a click picks parts; back in the tool, measuring goes on."""
+    import numpy as np
+    w = open_file(app, files["step"])
+    sc, sb = w.scene, w.sidebar
+    sb.show_section("measure", expand=True)
+    for _ in range(5):
+        app.processEvents()
+    m = sc.measure
+    check(m.mode == "distance" and m.picking == "distance", "Measuring Tool: distance")
+    b = np.asarray(sc.model_bounds(), dtype=float).reshape(3, 2)
+    m.add_point(b[:, 0])
+    m.add_point(b[:, 1])
+    n = len(m._marker_actors)
+    check(len(m.points) == 2 and n > 0, f"two points, their marks ({n})")
+    sb.show_tab("view")                                 # another tab of tools
+    for _ in range(5):
+        app.processEvents()
+    check(len(m.points) == 2 and len(m._marker_actors) == n and m.picking == "off"
+          and m.paused, "another tab: the marks stay, clicks pick parts")
+    sb.show_tab("measure")
+    for _ in range(5):
+        app.processEvents()
+    check(len(m.points) == 2 and m.picking == "distance" and not m.paused,
+          "back to the Measuring Tool: the same points, measuring again")
+    sb.show_section("measure", False)                   # the tool folded
+    for _ in range(5):
+        app.processEvents()
+    check(len(m._marker_actors) == n and m.paused, "the tool folded: the marks stay")
+    w.close()
+
+
+def scroll_checks(app, files):
+    """The right sidebar scrolling: its scrollbar floats over the margin, the cards keep
+    their width (no gutter)."""
+    w = open_file(app, files["tecplot"], size=(1400, 520))
+    sb = w.sidebar
+    sb.show_tab("analyze")
+    sb.show_section("contours", expand=True)
+    ed = sb.contours_panel.editors[1]
+    ed[0].set_expanded(True)
+    ed[1].bar_section.set_expanded(True)
+    sb.show_section("plots", expand=True)
+    for _ in range(20):
+        app.processEvents()
+    scroll = sb.inspector.pages["analyze"][0]
+    card = sb._boxes["contours"].widget
+    right = lambda: card.mapTo(scroll, card.rect().topRight()).x()   # noqa: E731
+    check(scroll.verticalScrollBarPolicy() == Qt.ScrollBarAlwaysOff
+          and scroll.overlay.isVisible() and scroll.viewport().width() == scroll.width(),
+          "too tall: an overlay scrollbar, the page keeps its width")
+    bar = scroll.overlay.geometry()
+    check(bar.right() == scroll.viewport().geometry().right() and bar.left() > right(),
+          "the scrollbar in the right margin, clear of the cards")
+    edge = right()
+    ed[0].set_expanded(False)                          # short enough now
+    sb.show_section("plots", False)
+    for _ in range(20):
+        app.processEvents()
+    check(not scroll.overlay.isVisible() and right() == edge,
+          f"tall enough: no scrollbar, the cards' right edge where it was ({edge} -> "
+          f"{right()}, bar {scroll.overlay.isVisible()}, {scroll.height()} / "
+          f"{scroll.content_height()})")
+    ed[0].set_expanded(True)
+    for _ in range(20):
+        app.processEvents()
+    v = scroll.verticalScrollBar()
+    scroll.overlay.setValue(scroll.overlay.maximum())
+    check(v.value() == v.maximum() > 0, "the overlay scrolls the page")
+    w.close()
+
+
+def _all(app, files):
+    test(app, files)
+    measure_checks(app, files)
+    scroll_checks(app, files)
+
+
 if __name__ == "__main__":
-    run(test)
+    run(_all)

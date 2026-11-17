@@ -326,9 +326,11 @@ class CfdPanel(FluidInputs, QWidget):
         lay.addWidget(self.card)
         self.colour = Switch()                         # colour the boundary by y+
         self.colour.toggled.connect(self._colour_toggled)
-        lay.addWidget(switch_row(
+        self.colour_row = switch_row(                  # grayed while y+ can't be had
             "Color by y+", self.colour,
-            "Paint the boundary by its y+ at each wall node (volume meshes)"))
+            "Paint the boundary by its y+ at each wall node (volume meshes)")
+        self.colour_row.setEnabled(False)
+        lay.addWidget(self.colour_row)
         top = YPLUS_STOPS[-1][0]
         self.legend = GradientBar([(x / top, c) for x, c in YPLUS_STOPS],
                                   [(0, "0"), (1 / top, "target"), (2 / top, "2×"),
@@ -463,7 +465,7 @@ class CfdPanel(FluidInputs, QWidget):
         self._update()
 
     def _colour_toggled(self, on):
-        self.legend.setVisible(on)
+        self.legend.setVisible(on and self.colour_row.isEnabled())
         self._update()
 
     # ---- direction / vectors -------------------------------------------------------------
@@ -602,8 +604,13 @@ class CfdPanel(FluidInputs, QWidget):
         self._paint(ratio)
 
     def _paint(self, ratio):
-        """Colour by y+ in the 3D view."""
+        """Colour by y+ in the 3D view. Its switch grayed while there is no y+ to paint:
+        no wall picked, no flow (density, viscosity, speed), or no first cells to measure
+        (a surface mesh)."""
         sc = self.scene
+        can = ratio is not None
+        self.colour_row.setEnabled(can)
+        self.legend.setVisible(can and self.colour.isChecked())
         if sc is None:
             return
         if self.colour.isChecked() and ratio is not None:

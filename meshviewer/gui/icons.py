@@ -43,6 +43,8 @@ SF = {   # icon name -> SF Symbol
     "undo": "arrow.uturn.backward", "redo": "arrow.uturn.forward",
     "rotate_left": "rotate.left",          # the view turned 90° to the left
     "filter_menu": "line.3.horizontal.decrease",   # the parts list's options
+    "axis_indicator": "move.3d",           # Show ▸ Axis Indicator (the XYZ arrows)
+    "lock": "lock", "lock_open": "lock.open",      # a plot's zoom locked / free
 }
 _sf_cache = {}
 
@@ -306,6 +308,32 @@ def _draw_axes(p):
         _line(p, (x, 14.5), (x, 12.5))
 
 
+def _draw_axis_indicator(p):
+    """Three arrows from one point, as the XYZ indicator in the view's corner."""
+    o = (6, 12)
+    _line(p, o, (15.5, 12))
+    _line(p, (13.5, 10.3), (15.5, 12), (13.5, 13.7))
+    _line(p, o, (6, 2.5))
+    _line(p, (4.3, 4.5), (6, 2.5), (7.7, 4.5))
+    _line(p, o, (2.5, 15.5))
+    _line(p, (2.4, 12.9), (2.5, 15.5), (5.1, 15.4))
+
+
+def _draw_lock(p, open_=False):
+    """A padlock (open: the shackle lifted to one side)."""
+    p.drawRoundedRect(QRectF(4, 8.5, 10, 7.5), 1.6, 1.6)
+    path = QPainterPath(QPointF(6.5, 8.5))
+    if open_:
+        path.lineTo(QPointF(6.5, 5.5))
+        path.arcTo(QRectF(6.5, 2.5, 6, 6), 180, -180)
+        path.lineTo(QPointF(12.5, 4.5))
+    else:
+        path.lineTo(QPointF(6.5, 5.5))
+        path.arcTo(QRectF(6.5, 2.5, 5, 6), 180, -180)
+        path.lineTo(QPointF(11.5, 8.5))
+    p.drawPath(path)
+
+
 def _draw_grid(p):
     p.drawRoundedRect(QRectF(2.5, 2.5, 13, 13), 1.5, 1.5)
     for v in (6.8, 11.2):
@@ -450,6 +478,9 @@ DRAWINGS = {
     "feature_edges": _draw_feature_edges,
     "faces": _draw_faces,
     "axes": _draw_axes,
+    "axis_indicator": _draw_axis_indicator,
+    "lock": _draw_lock,
+    "lock_open": lambda p: _draw_lock(p, open_=True),
     "grid": _draw_grid,
     "bbox": _draw_bbox,
     "origin": _draw_origin,

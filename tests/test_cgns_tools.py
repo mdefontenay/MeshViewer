@@ -26,6 +26,8 @@ def test(app, files):
         h = cp._heights["wall"]
         hv = np.nanmax(np.asarray(h, dtype=float)) if h is not None else np.nan
         check(np.isfinite(hv) and 0.005 < hv < 0.05, f"{key}: first cell height on the wall {hv:.4g}")
+        app.processEvents()
+        check(cp.colour_row.isEnabled(), f"{key}: Color by y+ available (first cells measured)")
         # Cell quality: a real histogram (several bars), colours on the cut
         sb.show_section("cells")
         qp = sb.cell_panel

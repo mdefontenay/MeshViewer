@@ -3,12 +3,19 @@ inspector tab), a tool's place in its tab."""
 from __future__ import annotations
 
 from PySide6.QtCore import QEvent, QSize, Qt, QTimer
-from PySide6.QtWidgets import QFrame, QScrollArea, QSizePolicy
+from PySide6.QtWidgets import QFrame, QScrollArea, QScrollBar, QSizePolicy
+
+OVERLAY_W = 8                  # the overlay scrollbar's width (in the page's right margin)
 
 
 class FitScroll(QScrollArea):
     """A scroll area exactly as tall as its content, so no empty scrollbar track shows;
-    it only shrinks (and scrolls) when the window is too short for everything."""
+    it only shrinks (and scrolls) when the window is too short for everything.
+
+    Its vertical scrollbar floats over the right edge (`overlay`, in the margin the tools
+    leave there) instead of taking room: the cards keep their width and line up on the
+    right whether the tab scrolls or not. Qt's own bar stays off but does the scrolling
+    (the wheel, ensureWidgetVisible); the overlay follows it and drives it."""
 
     def __init__(self, inner):
         super().__init__()
@@ -24,6 +31,28 @@ class FitScroll(QScrollArea):
         self._timer.setSingleShot(True)
         self._timer.setInterval(0)
         self._timer.timeout.connect(self._fit)
+        self.overlay = QScrollBar(Qt.Vertical, self)
+        self.overlay.setObjectName("OverlayBar")
+        self.overlay.setCursor(Qt.ArrowCursor)
+        self.overlay.hide()
+        bar = self.verticalScrollBar()
+        bar.rangeChanged.connect(self._overlay_range)
+        bar.valueChanged.connect(self.overlay.setValue)
+        self.overlay.valueChanged.connect(bar.setValue)
+
+    def _overlay_range(self, lo, hi):
+        self.overlay.setRange(lo, hi)
+        self.overlay.setPageStep(self.verticalScrollBar().pageStep())
+        self.overlay.setValue(self.verticalScrollBar().value())
+        self._place_overlay()
+
+    def _place_overlay(self):
+        vp = self.viewport().geometry()
+        self.overlay.setGeometry(vp.right() - OVERLAY_W + 1, vp.top(), OVERLAY_W, vp.height())
+        need = self.overlay.maximum() > self.overlay.minimum()
+        self.overlay.setVisible(need)
+        if need:
+            self.overlay.raise_()
 
     def refit(self):
         """Match the content's height again (soon: after the layouts settle)."""
@@ -46,10 +75,9 @@ class FitScroll(QScrollArea):
         QTimer.singleShot(30, self._bar)
 
     def _bar(self):
-        """Scrollbar only when the content really doesn't fit (checked after the layout
-        settles — not while a section is opening)."""
-        need = self.height() < self.content_height() - 1
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded if need else Qt.ScrollBarAlwaysOff)
+        """The overlay bar only when the content really doesn't fit (checked after the
+        layout settles — not while a section is opening)."""
+        self._place_overlay()
 
     def eventFilter(self, obj, ev):
         if ev.type() in (QEvent.LayoutRequest, QEvent.Show):
@@ -60,6 +88,15 @@ class FitScroll(QScrollArea):
         super().resizeEvent(ev)
         self.refit()                               # wrapping labels change height
         self._bar()
+
+    def wheelEvent(self, ev):                       # (Qt's bar is off: scroll it anyway)
+        bar = self.verticalScrollBar()
+        before = bar.value()
+        super().wheelEvent(ev)
+        if bar.value() == before and bar.maximum() > 0:
+            d = ev.pixelDelta().y() or ev.angleDelta().y() / 2
+            bar.setValue(int(bar.value() - d))
+            ev.accept()
 
     def showEvent(self, ev):
         super().showEvent(ev)

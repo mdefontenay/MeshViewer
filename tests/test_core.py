@@ -7,15 +7,16 @@ from conftest import check, run
 def test(app, files):
     from meshviewer.core import cfd, formats
     from meshviewer.core.fields import solution_fields, ramp_rgb, SEQUENTIAL
+    models = {}
     for key in ("step", "cgns", "ugrid", "tecplot"):
-        m = formats.load(files[key], debug=False)
+        m = models[key] = formats.load(files[key], debug=False)
         check(m.parts and all(p.n_cells for p in m.parts.values()),
               f"{key}: {len(m.parts)} parts, {sum(p.n_cells for p in m.parts.values())} faces")
-    m = formats.load(files["cgns"], debug=False)
+    m = models["cgns"]
     check(set(m.parts) == {"wall", "farfield"}, f"cgns boundaries {sorted(m.parts)}")
     g = m.volume()
     check(g is not None and g.n_cells == 216, f"cgns volume {None if g is None else g.n_cells}")
-    m = formats.load(files["tecplot"], debug=False)
+    m = models["tecplot"]
     check(solution_fields(m.parts)[-1] == "__speed__", "tecplot fields + speed")
     rgb = ramp_rgb(np.array([0.0, 0.5, 1.0]), 0, 1, SEQUENTIAL)
     check(rgb.shape == (3, 3), "colour ramp")

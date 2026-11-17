@@ -58,7 +58,7 @@ class Inspector(QWidget):
             page = QWidget()
             page.setObjectName("InspectorPage")
             col = QVBoxLayout(page)
-            col.setContentsMargins(0, 0, 12, 0)  # the scrollbar sits at the edge
+            col.setContentsMargins(0, 0, 12, 0)  # its overlay scrollbar floats in this margin
             col.setSpacing(8)
             scroll = FitScroll(page)
             holder = QWidget()                   # the tools on top, room below
@@ -98,6 +98,13 @@ class Inspector(QWidget):
         self.stack.setCurrentWidget(self.pages[key][2])
         self.refit()
         self.tab_changed.emit(key)
+
+    def reveal(self, widget):
+        """Scroll the tab's tools so that `widget` (a fold-out in a tool) shows."""
+        for scroll, _col, holder in self.pages.values():
+            if holder.isAncestorOf(widget):
+                scroll.ensureWidgetVisible(widget, 0, 12)
+                return
 
     def refit(self):
         for scroll, _col, _h in self.pages.values():

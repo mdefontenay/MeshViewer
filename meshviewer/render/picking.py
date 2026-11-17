@@ -114,7 +114,8 @@ class Picking:
             self.face_pick(name, self.face_at(name, cell), additive)
             return
         m = self.measure
-        if m.mode in ("distance", "point"):
+        mode = m.picking                             # off while the tool is closed
+        if mode in ("distance", "point"):
             if self.model.dim == 2:                      # 2D: snapped, or inside the axes
                 snapped = self.elements.snap_2d(x, y) if m.snap else None
                 if snapped is not None:
@@ -124,14 +125,14 @@ class Picking:
                     pos = self.flat_point(x, y)
             m.add_point(pos, name, cell)
             return
-        if m.mode == "angle":
+        if mode == "angle":
             m.add_face(pos, name, cell)
             return
-        if m.mode == "area" and m.pick_faces and name is None and self.selected_faces:
+        if mode == "area" and m.pick_faces and name is None and self.selected_faces:
             self.clear_face_selection()              # click outside -> deselect
             m._changed()
             return
-        if m.mode == "area" and m.pick_faces and name and cell is not None \
+        if mode == "area" and m.pick_faces and name and cell is not None \
                 and "face_id" in self.model.parts[name].cell_data:
             self.toggle_face(name, int(self.model.parts[name].cell_data["face_id"][cell]),
                              additive)

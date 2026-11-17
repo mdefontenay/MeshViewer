@@ -20,12 +20,19 @@ from meshviewer.gui.feedback import show_error
 from meshviewer.gui.sheets import ask_save, save_folder
 
 
+# Save Screenshot: the picture's format by the file's extension (render/screenshot.py;
+# SVG: vector shapes, render/svg.py for the 3D view, the page itself for a plot's tab)
+SHOT_FILTERS = "PNG image (*.png);;JPEG image (*.jpg *.jpeg);;SVG image (*.svg)"
+
 class Exports:
     def save_screenshot(self):
         """choose resolution + background first (a sheet), then where to save."""
         if not self.scene:
             return
         w, h = self.plotter.window_size
+        if self._page.startswith("plot:"):              # a plot's tab: the plot
+            r = self.plot_page.devicePixelRatioF()
+            w, h = int(self.plot_page.width() * r), int(self.plot_page.height() * r)
         self._shot_dialog = ScreenshotDialog(self, w, h)
         self._shot_dialog.accepted.connect(                  # after the sheet has gone
             lambda: QTimer.singleShot(300, self._save_screenshot_to_file))
@@ -33,14 +40,17 @@ class Exports:
 
     def _save_screenshot_to_file(self):
         name = f"{self.path.stem}.png" if self.path else "Screenshot.png"
-        ask_save(self, "Save Screenshot", save_folder(self.path) / name, "PNG image (*.png)",
+        ask_save(self, "Save Screenshot", save_folder(self.path) / name, SHOT_FILTERS,
                  self._write_screenshot)
 
     def _write_screenshot(self, fn):
         d = self._shot_dialog
         QApplication.setOverrideCursor(Qt.WaitCursor)
-        try:
-            self.scene.screenshot(fn, scale=d.scale, background=d.background)
+        try:                                            # its format: by the extension
+            if self._page.startswith("plot:"):          # a plot's tab: the plot, drawn by Qt
+                self.plot_page.save_picture(fn, scale=d.scale)
+            else:                                       # the 3D view (SVG: render/svg.py)
+                self.scene.screenshot(fn, scale=d.scale, background=d.background)
         except Exception as exc:                        # shown, not a crash
             show_error(self, f"“{Path(fn).name}” couldn't be saved.", str(exc),
                        "Check that you can write to that folder and that the disk has room.",

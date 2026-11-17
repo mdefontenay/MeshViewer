@@ -32,6 +32,7 @@ from meshviewer.core.model import Model
 from meshviewer.core.polys import bare, one_thread, SMALL_PART
 from meshviewer.render.appearance import Appearance
 from meshviewer.render.camera import Camera
+from meshviewer.render.colorbar import ColorBar
 from meshviewer.render.editing import Editing
 from meshviewer.render.elements import Elements
 from meshviewer.render.measure import Measure
@@ -71,7 +72,8 @@ class Scene(Picking, Camera, Editing, Appearance, Screenshots):
         self.state = dict(grid=True, parallel=True, mesh_edges=not model.is_cad,
                           feature_edges=model.is_cad and model.file_type != "drawing",
                           bbox=False, origin=False,          # bbox: drawings, below
-                          original=False, shading=True, faces=True)
+                          original=False, shading=True, faces=True,
+                          axis_indicator=True)              # the XYZ arrows in the corner
         self._dark = dark
         self._ui_dark = dark
         self.bg_mode = ("default", None)          # set by Appearance
@@ -113,7 +115,8 @@ class Scene(Picking, Camera, Editing, Appearance, Screenshots):
         self.flow = FlowView(self)                # CFD ▸ Show flow vectors
         self.yplus_view = YplusView(self)         # CFD ▸ Colour by y+
         self.walls = WallView(self)               # Inflation Layers ▸ the walls
-        self.results = ResultsView(self)          # Results ▸ a solution field
+        self.results = ResultsView(self)          # Contours ▸ the active contour
+        self.colorbar = ColorBar(self)            # Contours ▸ its color bar, over the view
         self.plot_cut = CutLineView(self)         # Plots ▸ the cuts shown
         self.plots = []                           # Plots: each plot's settings (memory)
         self.visibility_listeners = []            # called after parts are shown / hidden
@@ -374,7 +377,7 @@ class Scene(Picking, Camera, Editing, Appearance, Screenshots):
         rv = getattr(self, "results", None)                 # only visible boundaries
         self.elements.refresh(render=False, notify=False)   # picks of hidden parts go
         cbs = list(getattr(self, "visibility_listeners", []))
-        for cb in cbs:                                      # Results (auto range), Plots
+        for cb in cbs:                                      # Contours (auto range), Plots
             cb()
         if not cbs and rv is not None:
             rv.refresh()
@@ -401,7 +404,7 @@ class Scene(Picking, Camera, Editing, Appearance, Screenshots):
             self.on_selection(was, list(self.selected_parts))    # Edit ▸ Undo        self._apply_blocks(old ^ set(self.selected_parts))
         self._refresh_highlights()
         self.results.show_selection(render=False)       # tint shows over result colours
-        if self.measure.mode == "area":
+        if self.measure.picking == "area":             # (paused: the area stays)
             self.measure._changed()
         if notify and self.on_pick:
             self.on_pick(list(self.selected_parts))

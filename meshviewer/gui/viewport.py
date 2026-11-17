@@ -25,6 +25,10 @@ pinch zoom smoothly, toward the point under the cursor (the camera's `zoom_at`, 
 
 Each step asks for a frame (`render`): still one frame per event or tick.
 
+Dragging an overlay (Contours ▸ the color bar): `overlay`, set by the scene, answers
+`hit(x, y)`; a left press on it moves it (`drag(dx, dy)`, `drag_done()`) instead of the
+camera, and the pointer is an open hand over it.
+
 make_view() gives this widget — or PyVistaQt's own, untouched, when the environment
 variable MESHVIEWER_PLAIN_VIEW is set (to compare, should a picture ever look stale).
 """
@@ -34,6 +38,7 @@ import math
 import os
 
 from PySide6.QtCore import QEvent, Qt, QThread, QTimer
+from PySide6.QtGui import QCursor
 from pyvistaqt import QtInteractor
 
 TRACKPAD_ZOOM = 0.004          # per pixel of trackpad scroll: 100 px -> × 1.5
@@ -51,6 +56,9 @@ class Viewport(QtInteractor):
         self._due.setInterval(0)                    # as soon as the event is handled
         self._due.timeout.connect(self.render_now)
         self.zoom_handler = None                    # (factor, x, y): the scene's zoom
+        self.overlay = None                         # what can be dragged (the color bar)
+        self._dragging = None                       # its last display point while dragged
+        self._hand = False                          # the open hand shown over it
         self._glide_left = 0.0                      # log of the wheel zoom still to come
         self._glide_at = (0.0, 0.0)
         self._glide = QTimer(self)
@@ -98,6 +106,45 @@ class Viewport(QtInteractor):
             self.zoom_handler(math.exp(ev.value()), *self._display_point(ev.position()))
             return True
         return super().event(ev)
+
+    # ---- dragging an overlay (the color bar) ----------------------------------------------
+    def _on_overlay(self, ev):
+        ov = getattr(self, "overlay", None)
+        return ov is not None and ov.hit(*self._display_point(ev.position()))
+
+    def mousePressEvent(self, ev):
+        if ev.button() == Qt.MouseButton.LeftButton and self._on_overlay(ev):
+            ev.accept()
+            self._dragging = self._display_point(ev.position())
+            self.setCursor(QCursor(Qt.CursorShape.ClosedHandCursor))
+            return
+        super().mousePressEvent(ev)
+
+    def mouseMoveEvent(self, ev):
+        if self._dragging is not None:
+            ev.accept()
+            x, y = self._display_point(ev.position())
+            self.overlay.drag(x - self._dragging[0], y - self._dragging[1])
+            self._dragging = (x, y)
+            return
+        if not ev.buttons():                        # the hand over the bar
+            over = self._on_overlay(ev)
+            if over != self._hand:
+                self._hand = over
+                if over:
+                    self.setCursor(QCursor(Qt.CursorShape.OpenHandCursor))
+                else:
+                    self.unsetCursor()
+        super().mouseMoveEvent(ev)
+
+    def mouseReleaseEvent(self, ev):
+        if self._dragging is not None and ev.button() == Qt.MouseButton.LeftButton:
+            ev.accept()
+            self._dragging = None
+            self.setCursor(QCursor(Qt.CursorShape.OpenHandCursor))
+            self.overlay.drag_done()
+            return
+        super().mouseReleaseEvent(ev)
 
     # ---- one frame per event -----------------------------------------------------------
     def render(self):

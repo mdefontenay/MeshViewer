@@ -3,23 +3,26 @@
     Plots
       [ New Plot… ]
       ▾ Root                                (opening it shows its plot)
-        ┌ Plane ─────────────────────────────────────┐
-        │ Normal to  [ X | Y | Z ] [ ✎ ]              │
-        │ Origin     [x] [y] [z]   (✎ Edit Plane)     │
-        │ Normal     [x] [y] [z]                      │
-        │ Position   [ auto: 0.35 ] m                 │
-        │            ───●──────────  (slider)         │
-        │ Plot ──────────────────────────────────────  │
-        │ Values     [ Pressure coefficient cp ▾ ]    │
-        │ Along      [ X | Z ]        [ Normalize ]   │
-        │ ▸ Axes          X        Y                  │
-        │   Min        [auto]   [auto]                │
-        │   Max        [auto]   [auto]                │
-        │   Log          ○        ○                   │
-        │   Flip         ○        ●  (cp: y flipped)  │
-        │                              Fit            │
-        │ Points ─────────────── [ Import… | Export… ]│
-        └─────────────────────────────────────────────┘
+        ┌──────────────────────────────────────────────┐
+        │ Plane                                         │
+        │ Normal to  [ X | Y | Z ] [ ✎ ]                │
+        │   (✎ Edit Plane: Origin [x] [y] [z], Normal)  │
+        │ Position   [ auto: 0.35 ]   m                 │
+        │ ────────────●───────────────── (full width)   │
+        │ ─────────────────────────────────────────────  │
+        │ Plot                                          │
+        │ Values     [ Pressure coefficient cp ▾ ]      │
+        │            > [ min ]   < [ max ]   kPa        │  values outside left out
+        │ Along      [ Y | Z ]          [ Normalize ]   │
+        │            > [ min ]   < [ max ]   m          │  positions outside left out
+        │ ─ ▸ Axes ─────────── x/c   cp   🔒 [Swap]     │  the plot's own axis names
+        │   Min        [auto]   [auto]                  │
+        │   Max        [auto]   [auto]                  │
+        │   Log          ○        ○                     │
+        │   Flip         ○        ●  (cp: y flipped)    │
+        │ ─────────────────────────────────────────────  │
+        │ Data       [ Import… | Export… ]              │
+        └──────────────────────────────────────────────┘
                                       [ Rename… | Delete ]
       ▸ Tip
 
@@ -28,8 +31,14 @@ named by the user. The kind of plot picks its editor: EDITORS (only "section"
 for now; a new kind adds an editor here and an entry in core/plots.py KINDS).
 The panel computes the plots (core.plots.compute) and says so with `changed`.
 The plots live on the scene (scene.plots: a list of dicts, remembered per file).
-Axes (and the plot itself: the wheel zooms, a drag pans, a double-click fits) only
-change how the plot is drawn: `view_changed`, no new cut.
+Axes (and the plot itself: the wheel zooms, a drag pans, a double-click or View ▸ Fit ⌘0
+fits) only change how the plot is drawn: `view_changed`, no new cut. Swap (in the Axes'
+title row) exchanges X and Y: what is plotted on each, with their ranges, log and flip.
+The data filters under Values and Along leave out the points whose value, or position
+along, is at or below its min or at or above its max (in the unit shown; empty: open on
+that side): not drawn, not in the auto ranges. A Min / Max the zoom or a drag set shows
+4 significant figures, one typed shows as typed. 🔒 Lock: the wheel, the trackpad and a
+drag no longer zoom or pan the plot.
 """
 from __future__ import annotations
 
@@ -48,7 +57,7 @@ from meshviewer.core.units import nice_num
 from meshviewer.gui.access import name_controls
 from meshviewer.gui.panels.section import edit_plane_action
 from meshviewer.gui.forms import (
-    _grid, _label, button, buttons, caption, group_head, link, note, rule, segmented,
+    _grid, _label, button, buttons, caption, link, note, rule, segmented,
     label_width, sheet_title, xyz_fields,
 )
 from meshviewer.gui.sheets import ask_open, ask_save, ask_text, save_folder
@@ -60,8 +69,8 @@ SLIDER_STEPS = 1000
 
 
 def value_label(v):
-    """Menu text of a value: the field's usual name (as in Results), 'Position X' for X."""
-    from meshviewer.gui.panels.results import field_label
+    """Menu text of a value: the field's usual name (as in Contours), 'Position X' for X."""
+    from meshviewer.gui.panels.contour_editor import field_label
     if v.startswith(plots.COORD):
         return f"Position {v[len(plots.COORD):].upper()} (the shape)"
     return field_label(v)
@@ -117,7 +126,7 @@ class SectionEditor(QWidget):
         self.slider.setRange(0, SLIDER_STEPS)
         self.slider.setToolTip("Slide the plane across the model")
         self.slider.valueChanged.connect(self._slid)
-        g.addWidget(self.slider, 3, 1, 1, 3)
+        g.addWidget(self.slider, 3, 0, 1, 4)           # the whole width
         self.origin = [NumberField() for _ in range(3)]
         self.normal = [NumberField() for _ in range(3)]
         self.advanced = xyz_fields((                   # origin / normal, as in Section
@@ -161,8 +170,29 @@ class SectionEditor(QWidget):
         self._chord_cap = Capsule([self.chord], name="Segmented")
         self.along_lay.addStretch(1)
         self.along_lay.addWidget(self._chord_cap)
-        g.addWidget(_label("Along"), 1, 0)
-        g.addWidget(self.along_box, 1, 1, 1, 3)
+        g.addWidget(_label("Along"), 2, 0)
+        g.addWidget(self.along_box, 2, 1, 1, 3)
+        # the data kept: values > min and < max, positions along > min and < max
+        self.filters, self.filter_units = {}, {}
+        for r, what in ((1, "value"), (3, "along")):
+            self.filters[what] = {}
+            for c, (end, sign) in enumerate((("min", ">"), ("max", "<")), start=1):
+                box = NumberField(None)
+                box.setPlaceholderText(end)
+                name = f"{'Values' if what == 'value' else 'Along'} {sign} {end}"
+                box.setToolTip(name)
+                box.setAccessibleName(name)
+                box.valueChanged.connect(
+                    lambda v, k=f"{what}_{end}": self._view(**{k: v}))
+                cell = QHBoxLayout()
+                cell.setSpacing(4)
+                cell.addWidget(_label(sign, "AxisLabel"))
+                cell.addWidget(box, 1)
+                g.addLayout(cell, r, c)
+                self.filters[what][end] = box
+            self.filter_units[what] = _label("", "AxisLabel")
+            g.addWidget(self.filter_units[what], r, 3)
+        g.setColumnStretch(2, 1)                         # the two boxes of a row alike
         cl.addLayout(g)
         cl.addWidget(self._build_axes())
         cl.addWidget(rule())
@@ -173,7 +203,11 @@ class SectionEditor(QWidget):
                      "two numbers of each row are x and the value")
         exp = button(self, "Export…", self.export_csv,
                      "The plotted points to a CSV: part, x, value, X, Y, Z")
-        cl.addLayout(group_head("Points", buttons(imp, exp)))
+        g = _grid()
+        g.addWidget(_label("Data"), 0, 0)
+        self.data_buttons = buttons(imp, exp)
+        g.addWidget(self.data_buttons, 0, 1, 1, 3, Qt.AlignLeft)
+        cl.addLayout(g)
         refl = QHBoxLayout()
         self.ref_label = note()
         refl.addWidget(self.ref_label, 1)
@@ -223,9 +257,9 @@ class SectionEditor(QWidget):
         self.sync_axis()
         self.value.blockSignals(True)
         self.value.clear()
-        from meshviewer.gui.panels.results import grouped
+        from meshviewer.gui.panels.contour_editor import grouped
         for title, group in grouped(plots.values_of(self.scene.model.parts)):
-            self.value.addSection(title)                # as Results ▸ Field
+            self.value.addSection(title)                # as Contours ▸ Field
             for v in group:
                 self.value.addItem(value_label(v), v)
         i = self.value.findData(m.get("value"))
@@ -276,7 +310,20 @@ class SectionEditor(QWidget):
         """After a compute: which way the x axis runs, flip, how many points."""
         for k, a in self.along.items():
             a.setChecked(k == r["along"])
-        Switch.set_silently(self.axis_flip["y"], r["flip"])
+        Switch.set_silently(self.axis_flip["y"], plots.y_flipped(self.m, r["value"]))
+        self.sync_names(r)
+        self.sync_units(r)
+
+    def sync_units(self, r):
+        """The units beside the data filters: the value's, and the position's (none for
+        x/c)."""
+        s, unit = self._scale()
+        if r["value"].startswith(plots.COORD):
+            vu = unit
+        else:
+            vu = self.panel.value_unit(r["value"])[1] if self.panel.value_unit else ""
+        self.filter_units["value"].setText(vu)
+        self.filter_units["along"].setText("" if r["chord_on"] else unit)
         self.status.setText("The plane misses the visible boundaries (or they don't "
                             "carry this value)." if r["empty"] else "")
         self.status.setVisible(bool(r["empty"]))
@@ -355,7 +402,8 @@ class SectionEditor(QWidget):
 
     # ---- Axes: ranges, log, flip (how the plot is drawn) -------------------------------
     def _build_axes(self):
-        """▸ Axes: Min / Max (empty = auto), Log and Flip for X and Y; Fit."""
+        """▸ Axes: the plot's names for X and Y, Swap; Min / Max (empty = auto), Log and
+        Flip for each."""
         w = QWidget()
         g = QGridLayout(w)
         g.setContentsMargins(0, 0, 0, 0)
@@ -364,10 +412,22 @@ class SectionEditor(QWidget):
         g.setColumnMinimumWidth(0, label_width())        # as the form grids above
         g.setColumnStretch(1, 1)
         g.setColumnStretch(2, 1)
-        for c, k in enumerate("XY", start=1):
-            h = _label(k, "AxisLabel")
+        self.axis_names = {}                             # the plot's names for X and Y
+        for c, k in enumerate("xy", start=1):
+            h = _label(k.upper(), "AxisLabel")
             h.setAlignment(Qt.AlignCenter)
             g.addWidget(h, 0, c)
+            self.axis_names[k] = h
+        self.swap = button(self, "Swap", self.swap_axes, "Swap Axes")
+        self.lock = IconToggle(("lock", "lock_open"), "Lock Zoom",
+                               checked=bool(self.m.get("lock")))
+        self.lock.setAccessibleName("Lock zoom")
+        self.lock.toggled.connect(self._lock)
+        corner = QHBoxLayout()
+        corner.setSpacing(4)
+        corner.addWidget(self.lock)
+        corner.addWidget(buttons(self.swap))
+        g.addLayout(corner, 0, 3, Qt.AlignRight)
         self.axis_range, self.axis_log, self.axis_flip = {}, {}, {}
         for r, (text, end) in enumerate((("Min", "min"), ("Max", "max")), start=1):
             g.addWidget(_label(text), r, 0)
@@ -375,7 +435,7 @@ class SectionEditor(QWidget):
                 f = NumberField(None)
                 f.setPlaceholderText("auto")
                 f.setToolTip(f"{k.upper()} {end} (empty = auto)")
-                f.valueChanged.connect(lambda v, key=f"{k}_{end}": self._view(**{key: v}))
+                f.valueChanged.connect(lambda v, key=f"{k}_{end}", f=f: self._typed(key, v, f))
                 g.addWidget(f, r, c)
                 self.axis_range[f"{k}_{end}"] = f
         for r, (text, store, attr) in enumerate((("Log", "log", self.axis_log),
@@ -387,11 +447,11 @@ class SectionEditor(QWidget):
                 sw.setToolTip(f"{text} {k.upper()}")
                 sw.setAccessibleName(f"{text} {k.upper()}")
                 key = "flip" if (store, k) == ("flip", "y") else f"{k}_{store}"
-                sw.toggled.connect(lambda on, key=key: self._view(**{key: bool(on)}))
+                sw.toggled.connect(self._flip_y if key == "flip" else
+                                   (lambda on, key=key: self._view(**{key: bool(on)})))
                 g.addWidget(sw, r, c, Qt.AlignCenter)
                 attr[k] = sw
-        fit = link("Fit", "Back to the whole plot (auto ranges)", self.fit_view)
-        g.addWidget(fit, 5, 2, Qt.AlignRight)
+
         self.axes_section = CollapsibleSection("Axes", w, "plot_axes", sub=True,
                                                start_open=False)
         return self.axes_section
@@ -401,24 +461,97 @@ class SectionEditor(QWidget):
         self.m.update(kw)
         self.view_changed.emit()
 
+    def _typed(self, key, v, field):
+        """A Min / Max typed: kept as typed (shown verbatim)."""
+        typed = dict(self.m.get("typed") or {})
+        if v is None:
+            typed.pop(key, None)
+        else:
+            typed[key] = field.typed_text or field.text().strip()
+        self.m["typed"] = typed
+        self._view(**{key: v})
+
+    def show_auto(self, ranges):
+        """The plot's ranges as drawn (x0, x1, y0, y1): an empty Min / Max shows its auto
+        value in gray, to 4 significant figures (the box is narrow: the number alone)."""
+        if ranges is None:
+            return
+        for key, v in zip(("x_min", "x_max", "y_min", "y_max"), ranges):
+            f = self.axis_range[key]
+            f.setPlaceholderText(f"{v:.4g}" if v is not None else "auto")
+            f.setToolTip(f"{key[0].upper()} {key[2:]} (empty = auto)")
+
+    def _lock(self, on):
+        """Lock: the wheel, a trackpad and a drag no longer zoom or pan the plot."""
+        self._view(lock=bool(on))
+
     def fit_view(self):
+        """View ▸ Fit (⌘0), a double-click: the whole plot (auto ranges)."""
         self.set_ranges(None, None, None, None)
 
+    def swap_axes(self):
+        """X ↔ Y: what each axis shows, with its range, log and flip."""
+        m = self.m
+        y_flip = plots.y_flipped(m, m["value"])
+        for a, b in (("x_min", "y_min"), ("x_max", "y_max"), ("x_log", "y_log")):
+            m[a], m[b] = m.get(b), m.get(a)
+        m["x_flip"], m["flip"] = y_flip, bool(m.get("x_flip"))
+        m["swap"] = not m.get("swap")
+        m["typed"] = {({"x": "y", "y": "x"}[k[0]] + k[1:]): t
+                      for k, t in (m.get("typed") or {}).items()}
+        self.sync_axes()
+        self.sync_names()
+        Switch.set_silently(self.axis_flip["y"], bool(m["flip"]))
+        self.view_changed.emit()
+
     def set_ranges(self, x0, x1, y0, y1):
-        """The plot zoomed / panned (or Fit): its ranges, the fields follow."""
-        self.m.update(x_min=x0, x_max=x1, y_min=y0, y_max=y1)
+        """The plot zoomed / panned (or Fit): its ranges, the fields follow (computed,
+        not typed)."""
+        self.m.update(x_min=x0, x_max=x1, y_min=y0, y_max=y1, typed={})
         self.sync_axes()
         self.view_changed.emit()
 
     def sync_axes(self):
+        """The Axes' fields from the plot: a typed Min / Max as it was typed, one the
+        zoom or a drag set to 4 significant figures."""
+        typed = self.m.get("typed") or {}
         for key, f in self.axis_range.items():
             f.blockSignals(True)
             v = self.m.get(key)
-            f.setValue(None if v is None else float(f"{v:.6g}"))
+            if v is None:
+                f.setValue(None)
+            elif key in typed:
+                f.setValue(v)
+                f.setText(typed[key])                    # verbatim
+            else:
+                f.setValue(float(f"{v:.4g}"))
             f.blockSignals(False)
         for k in "xy":
             Switch.set_silently(self.axis_log[k], bool(self.m.get(f"{k}_log")))
+        for what, boxes in getattr(self, "filters", {}).items():
+            for end, box in boxes.items():
+                box.blockSignals(True)
+                box.setValue(self.m.get(f"{what}_{end}"))
+                box.blockSignals(False)
         Switch.set_silently(self.axis_flip["x"], bool(self.m.get("x_flip")))
+
+    def sync_names(self, r=None):
+        """The Axes' column titles: what the plot's x and y show (x/c, Y, cp…)."""
+        r = r or self.panel.results.get(self.m["id"])
+        if r is None:
+            return
+        x = "x/c" if r["chord_on"] else r["along"].upper()
+        y = plots.value_title(r["value"])
+        if self.m.get("swap"):
+            x, y = y, x
+        for k, text in (("x", x), ("y", y)):
+            lab = self.axis_names[k]
+            lab.setText(lab.fontMetrics().elidedText(text, Qt.ElideRight, 90))
+            lab.setToolTip(text)
+
+    def _flip_y(self, on):
+        self.m["flip"] = bool(on)                      # set: no longer cp's own
+        self.view_changed.emit()
 
     def _remove_ref(self):
         self.m["ref"] = None
@@ -513,9 +646,10 @@ class PlotsPanel(QWidget):
         super().__init__(parent)
         self.scene = None
         self.file_stem = "plot"
-        self.value_unit = None     # field -> (convert, label): Results' units (window.py)
+        self.value_unit = None     # field -> (convert, label): Contours' units (window.py)
         self.results = {}          # id -> core.plots.compute() result
         self.editors = {}          # id -> (CollapsibleSection, editor)
+        self.tab = None            # the plot whose tab shows (its parts: the scene's)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(8)
@@ -537,6 +671,7 @@ class PlotsPanel(QWidget):
             sec.setParent(None)
             sec.deleteLater()
         self.editors, self.results = {}, {}
+        self.tab = None
         if self.scene is not None and self.model_changed in self.scene.visibility_listeners:
             self.scene.visibility_listeners.remove(self.model_changed)
         self.scene = scene
@@ -625,16 +760,29 @@ class PlotsPanel(QWidget):
         self.editors[m["id"]] = (sec, ed)
         name_controls(sec)                             # VoiceOver: its switches and eye
 
+    def expand_only(self, ident):
+        """Its fold-out open, the others folded -> its section (None: no such plot)."""
+        for i, (sec, _ed) in self.editors.items():
+            if (i == ident) != sec.expanded:
+                sec.set_expanded(i == ident)
+        return self.editors[ident][0] if ident in self.editors else None
+
     # ---- computing ----------------------------------------------------------------------------
-    def _visible(self):
+    def _visible(self, ident=None):
+        """The boundaries plot `ident` cuts: those shown in its tab (the scene's when its
+        tab shows, or it has no parts of its own yet)."""
         sc = self.scene
-        return [n for n in sc.names if sc.visible.get(n)]
+        m = self.plot(ident) if ident is not None else None
+        hidden = (m or {}).get("hidden")
+        if m is None or ident == self.tab or hidden is None:
+            return [n for n in sc.names if sc.visible.get(n)]
+        return [n for n in sc.names if n not in set(hidden)]
 
     def _compute(self, ident, emit=True):
         m = self.plot(ident)
         if m is None:
             return
-        r = plots.compute(m, self.scene.model.parts, self._visible())
+        r = plots.compute(m, self.scene.model.parts, self._visible(ident))
         self.results[ident] = r
         self.editors[ident][1].sync_result(r)
         if emit:

@@ -84,6 +84,39 @@ def test(app, files):
     pump()
     check(screen().shape[1] > 100 and differ(screen(), screen()) == 0, "after a resize: drawn at the new size")
     w.close()
+    tab_checks(app, files, screen_of=lambda view: screen_fn(app, view), differ=differ)
+
+
+def screen_fn(app, view):
+    img = app.primaryScreen().grabWindow(view.winId()).toImage()
+    a = np.frombuffer(img.constBits(), np.uint8).reshape(img.height(), img.bytesPerLine())
+    return a[:, :img.width() * 4].reshape(img.height(), img.width(), 4)[..., :3].astype(int)
+
+
+def tab_checks(app, files, screen_of, differ):
+    """3D View and a contour's tab: one frame each way, the colors only in the contour's."""
+    w = open_file(app, files["tecplot"])
+    _float_on_top(w)
+    sc, view = w.scene, w.plotter
+    pump = lambda: [app.processEvents() for _ in range(5)]            # noqa: E731
+    pump()
+    drawn = []
+    view.ren_win.AddObserver("StartEvent", lambda *_: drawn.append(1))
+    plain = screen_of(view)
+    drawn.clear()
+    w._show_page("contour:1")
+    pump()
+    colored = screen_of(view)
+    check(len(drawn) == 1 and sc.results.shown and sc.colorbar.shown,
+          f"Contour 1's tab: drawn once, with its colors and bar ({len(drawn)})")
+    check(differ(plain, colored) > 500, "…and the screen shows them")
+    drawn.clear()
+    w._show_page("model")
+    pump()
+    check(len(drawn) == 1 and not sc.results.shown and not sc.colorbar.shown
+          and differ(plain, screen_of(view)) < 50,
+          f"3D View again: drawn once, the model alone as before ({len(drawn)})")
+    w.close()
 
 
 

@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mesh Viewer for macOS</title>
+  <meta name="description" content="A fast, native macOS viewer for CAD assemblies, CFD meshes, and simulation results.">
+  <meta name="theme-color" content="#000000">
+  <meta name="color-scheme" content="dark">
+  <meta property="og:title" content="Mesh Viewer">
+  <meta property="og:description" content="A fast, native macOS viewer for CAD assemblies, CFD meshes, and simulation results.">
+  <meta property="og:type" content="website">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="nav">
+    <div class="nav-inner">
+      <a class="nav-title" href="#top">Mesh Viewer</a>
+      <nav class="nav-links" aria-label="Sections">
+        <a href="#features">Features</a>
+        <a href="#formats">Formats</a>
+        <a href="#install">Install</a>
+        <a class="pill pill-small" href="https://github.com/mdefontenay/MeshViewer">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="top">
+    <section class="hero">
+      <div class="container">
+        <h1>Mesh Viewer</h1>
+        <p class="hero-sub">A fast, native macOS viewer for CAD assemblies, CFD meshes, and simulation results.</p>
+        <div class="hero-actions">
+          <a class="pill" href="https://github.com/mdefontenay/MeshViewer/releases/latest">Download for Mac</a>
+          <a class="link-arrow" href="#install">Run with Python or build from source</a>
+        </div>
+        <p class="hero-note">Free and open source · Apple Silicon · macOS 13 or later</p>
+      </div>
+      <div class="container container-wide">
+        <figure class="window">
+          <div class="window-bar" aria-hidden="true"><span></span><span></span><span></span></div>
+          <img src="assets/avbay_cross_section.png" width="2940" height="1846" fetchpriority="high"
+               alt="A STEP assembly in Mesh Viewer: the parts tree on the left, a section plane through it, and the inspector on the right">
+        </figure>
+      </div>
+    </section>
+
+    <section id="features" class="section">
+      <div class="container">
+        <h2 class="section-title">Look inside anything.</h2>
+        <p class="section-lead">Double-click a STEP, CGNS, UGRID, .msh, STL, or DXF file. Cut it, measure it, color it by its results, and size its inflation layers.</p>
+      </div>
+
+      <div class="carousel" data-carousel>
+        <ul class="track" data-track>
+          <li class="card">
+            <div class="card-visual">
+              <img src="assets/avbay_cross_section.png" width="2940" height="1846" loading="lazy"
+                   alt="A STEP assembly with its parts tree, context menu, and a section plane">
+            </div>
+            <p class="card-text"><strong>Inspect CAD assemblies.</strong> Open STEP, IGES, and BREP files via OpenCASCADE. Filter parts by name, size, or volume, inspect materials, and adjust tessellation quality on the fly.</p>
+          </li>
+          <li class="card">
+            <div class="card-visual">
+              <img src="assets/cgns_cross_section.png" width="2940" height="1846" loading="lazy"
+                   alt="A CGNS volume mesh cut by the section plane">
+            </div>
+            <p class="card-text"><strong>Cut through volume meshes.</strong> Inspect CGNS (including polyhedra), UGRID, Gmsh, and Fluent <code>.msh</code> files. Slice volume cells with an interactive section plane and highlight skewed or inverted cells.</p>
+          </li>
+          <li class="card">
+            <div class="card-visual">
+              <img src="assets/transonic_contour.png" width="2940" height="1846" loading="lazy"
+                   alt="Transonic CFD results: a colored field on the wing, with plots">
+            </div>
+            <p class="card-text"><strong>Visualize CFD contours and plots.</strong> Load FUN3D and Tecplot <code>.dat</code> boundary results in dedicated tabs. Drag color bars anywhere over the view, switch between linear and log scales, and extract section plots.</p>
+          </li>
+          <li class="card">
+            <div class="card-visual card-visual-pair">
+              <img src="assets/wing_3d_layers.png" width="2940" height="1846" loading="lazy"
+                   alt="Inflation layers: the total thickness drawn in 3D over the wing, with the flow vectors">
+              <img src="assets/wing_layers.png" width="2940" height="1846" loading="lazy"
+                   alt="Inflation Layers page: the layer stack on the wall and the layer sizes plot">
+            </div>
+            <p class="card-text"><strong>Size inflation layers.</strong> Calculate y<sup>+</sup> and first-cell height from flow conditions, preview total boundary layer thickness in 3D over walls, and export settings for OpenFOAM, Fluent, STAR-CCM+, or Pointwise.</p>
+          </li>
+          <li class="card">
+            <div class="card-visual card-visual-spec">
+              <dl class="spec">
+                <div><dt>Select</dt><dd>Node · Edge · Face · Cell</dd></div>
+                <div><dt>Measure</dt><dd>Distance · Angle · Area · Volume</dd></div>
+                <div><dt>Measure Selected</dt><dd>Radius · Normal · Cell quality</dd></div>
+                <div><dt>Undo / Redo</dt><dd><kbd>⌘Z</kbd> <kbd>⇧⌘Z</kbd>, camera too</dd></div>
+                <div><dt>Zoom</dt><dd>Smooth trackpad zoom to the pointer</dd></div>
+                <div><dt>Appearance</dt><dd>Light · Dark · Your accent color</dd></div>
+                <div><dt>Accessibility</dt><dd>VoiceOver</dd></div>
+              </dl>
+            </div>
+            <p class="card-text"><strong>Measure, select, and work natively.</strong> Pick nodes, edges, faces, or cells to measure exact radii, normals, and cell quality. Built for macOS with full Undo/Redo, trackpad zoom to cursor, dark mode, and VoiceOver.</p>
+          </li>
+        </ul>
+        <div class="container carousel-controls">
+          <button class="chevron" type="button" data-prev aria-label="Previous">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+          </button>
+          <button class="chevron" type="button" data-next aria-label="Next">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <section id="formats" class="section">
+      <div class="container">
+        <h2 class="section-title">Formats.</h2>
+        <p class="section-lead">Exact CAD, volume meshes, results, and drawings, all in one window.</p>
+        <div class="bento">
+          <article class="tile">
+            <h3>Meshes</h3>
+            <ul>
+              <li><strong>CGNS</strong> <code>.cgns</code> — MIXED, polyhedral NGON / NFACE cells too</li>
+              <li><strong>UGRID</strong> <code>.lb8 .b8 .lb4 .b4.ugrid</code> — boundary names from <code>.mapbc</code></li>
+              <li><strong>Gmsh &amp; Fluent</strong> <code>.msh</code> — 2D or 3D, found from the file</li>
+            </ul>
+          </article>
+          <article class="tile">
+            <h3>Simulation Results</h3>
+            <ul>
+              <li><strong>Tecplot ASCII</strong> <code>.dat</code> — FUN3D boundary solutions</li>
+            </ul>
+            <p class="tile-note">Binary <code>.plt</code> / <code>.szplt</code> are not read. With several time steps, the last one is shown.</p>
+          </article>
+          <article class="tile">
+            <h3>Exact CAD</h3>
+            <ul>
+              <li><strong>STEP</strong> <code>.step .stp</code></li>
+              <li><strong>IGES</strong> <code>.iges .igs</code></li>
+              <li><strong>BREP</strong> <code>.brep .brp</code></li>
+            </ul>
+            <p class="tile-note">From SolidWorks, CATIA, NX, Creo, or Inventor, export STEP.</p>
+          </article>
+          <article class="tile">
+            <h3>Triangulated &amp; 2D</h3>
+            <ul>
+              <li><strong>STL, OBJ, PLY</strong> <code>.stl .obj .ply</code></li>
+              <li><strong>glTF, VRML</strong> <code>.gltf .glb .wrl .vrml</code></li>
+              <li><strong>DXF</strong> <code>.dxf</code> — layers, text, and dimensions</li>
+            </ul>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="install" class="section">
+      <div class="container">
+        <h2 class="section-title">Install.</h2>
+        <p class="section-lead">Download the app, or run it with the Python you already have.</p>
+        <div class="install">
+          <article class="tile install-card">
+            <h3>Apple Silicon App (.dmg)</h3>
+            <p>For Apple Silicon Macs running macOS 13 or later. Open the <code>.dmg</code> and drag <strong>Mesh Viewer</strong> onto <strong>Applications</strong>.</p>
+            <p class="callout"><strong>First launch.</strong> The app isn’t notarized, so macOS blocks it once. Try to open it, then go to <em>System Settings → Privacy &amp; Security</em> and click <em>Open Anyway</em>. You only do this once.</p>
+            <a class="pill" href="https://github.com/mdefontenay/MeshViewer/releases/latest">Download the Latest Release</a>
+            <p class="tile-note">On an Intel Mac, build it from source.</p>
+          </article>
+          <article class="tile install-card">
+            <h3>Run via Python / Build from Source</h3>
+            <p><strong>Already have Python?</strong> Skip the 1 GB app. <code>cadquery-ocp</code> is only needed for STEP / IGES / BREP, <code>h5py</code> only for CGNS.</p>
+            <div class="code" data-code>
+              <pre><code>pip install numpy pyvista pyvistaqt PySide6 h5py cadquery-ocp
+git clone https://github.com/mdefontenay/MeshViewer.git
+cd MeshViewer
+python mesh_viewer.py path/to/file.step</code></pre>
+              <button class="copy" type="button" data-copy>Copy</button>
+            </div>
+            <p><strong>Build the app.</strong> Needs Python 3.12 or 3.13 from Homebrew or python.org. The quick build installs into <code>/Applications</code>.</p>
+            <div class="code" data-code>
+              <pre><code>brew install python@3.13
+git clone https://github.com/mdefontenay/MeshViewer.git
+cd MeshViewer
+./build_app.sh</code></pre>
+              <button class="copy" type="button" data-copy>Copy</button>
+            </div>
+            <p class="tile-note"><code>./build_app.sh --standalone</code> builds a self-contained app you can copy to another Mac.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container">
+      <p>Made by <strong>Matthieu de Fontenay</strong>, built with Claude Opus 5.5. Built on
+        <a href="https://pyvista.org">PyVista</a> / <a href="https://vtk.org">VTK</a>,
+        <a href="https://doc.qt.io/qtforpython/">PySide6</a>,
+        <a href="https://dev.opencascade.org">OpenCASCADE</a>,
+        <a href="https://www.h5py.org">h5py</a>, and <a href="https://numpy.org">NumPy</a>.</p>
+      <div class="footer-row">
+        <span>MIT License © 2026</span>
+        <nav aria-label="Project links">
+          <a href="https://github.com/mdefontenay/MeshViewer">GitHub</a>
+          <a href="https://github.com/mdefontenay/MeshViewer/releases">Releases</a>
+          <a href="https://github.com/mdefontenay/MeshViewer/blob/main/CHANGELOG.md">Changelog</a>
+        </nav>
+      </div>
+    </div>
+  </footer>
+
+  <script src="script.js" defer></script>
+</body>
+</html>

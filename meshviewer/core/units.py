@@ -86,7 +86,7 @@ def fmt(v, units=""):
     return f"{s} {units}".strip()
 
 
-# ---- units of solution fields (Results, Plots) --------------------------------------------
+# ---- units of solution fields (Contours, Plots) --------------------------------------------
 PRESSURE_UNITS = {"Pa": 1.0, "kPa": 1e3, "MPa": 1e6, "GPa": 1e9, "bar": 1e5,
                   "atm": 101325.0, "psi": 6894.757, "ksi": 6894757.0}   # also stresses
 TEMPERATURE_UNITS = {"K": (1.0, 0.0), "°C": (1.0, 273.15), "°F": (5 / 9, 459.67 * 5 / 9)}

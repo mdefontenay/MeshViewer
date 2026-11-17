@@ -1,4 +1,4 @@
-"""The fields solvers usually write, so Results and Plots know what a field is.
+"""The fields solvers usually write, so Contours and Plots know what a field is.
 
     kind = field_kind("p")       -> Kind(title="Pressure p", group="Pressure",
                                          quantity="pressure", ...)

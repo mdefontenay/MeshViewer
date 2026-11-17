@@ -14,14 +14,18 @@ and Feature Node pick. No Qt, no drawing.
   mesh edge bending more than the feature angle, the surface's ends and the smooth
   edges. One goes on through a point where it meets no other (and, CAD, the faces
   either side stay the same).
-- On a **mesh** (no CAD faces) a feature edge also stays **straight or in one plane**:
-  its mesh edges are followed while each next one stays on the line of the first ones
-  (aligned) or in the plane of the first three (coplanar), and it does not turn by
-  more than the feature angle; the next mesh edge starts another feature edge. And
-  where another feature edge meets it partway — of this part or of another part of
-  the file (`cut_at_junctions`) — it is cut in two there; also where another part's
-  feature edge lying on it ends (a 2D mesh's outline, where one boundary gives way
-  to the next).
+- On a **mesh** (no CAD faces) a feature edge is **cut only at a corner**: where it
+  turns by more than the feature angle at one point, or by more than CORNER_DEG and
+  twice as much as next to it (a curve twisting gently in 3D stays one feature edge,
+  `_runs`); and where another feature edge meets it partway — of this
+  part or of another part of the file (`cut_at_junctions`) — it is cut in two there;
+  also where another part's feature edge lying on it ends (a 2D mesh's outline, where
+  one boundary gives way to the next).
+- On a mesh, a **gap** of a few mesh edges between two feature edges that stop facing
+  each other, on one line or in one plane, is **bridged** (`_bridge`): they are one.
+- A smooth edge that **zig-zags** (turning one way, then the other, mesh edge after
+  mesh edge: the mesher's diagonals, not an edge) is dropped, and so is one with
+  both ends in the open (`_anchored`).
 - A part made of **lines** only (a 2D mesh's boundaries) has its lines as feature
   edges, and no feature faces.
 - A **feature node** is a point where a feature edge ends.
@@ -34,8 +38,12 @@ from __future__ import annotations
 import numpy as np
 from vtkmodules.util.numpy_support import vtk_to_numpy
 
-FLAT_TOL_DEG = 2.0        # aligned / coplanar: a point at most this far off, as seen from
-                          # the start of the feature edge
+FLAT_TOL_DEG = 2.0        # a bridge (`_bridge`) aligned / coplanar: a point at most this far
+                          # off, as seen from the end of the feature edge
+CORNER_DEG = 25.0         # a mesh's feature edge kinked by more than this at a point: cut
+BRIDGE_EDGES = 8          # a gap of at most this many mesh edges between two feature edges
+WIGGLE_DEG = 0.5          # a smooth edge's turn counts (zig-zag) from this (straight: rounding)
+WIGGLE_SHARE = 0.5        # ... turning back at this share of its turns or more: a zig-zag
 SMOOTH_TOL_DEG = 0.002    # smooth edges: this close to a line / a plane (points the mesher
                           # put on the edge are, but for rounding; others hardly ever)
 ACROSS_COS = 0.7          # a smooth edge's plane crosses the surface (not lying on it)
@@ -155,6 +163,8 @@ def _smooth_edges(p, e_lo, e_hi, inner, sharp, cells, normal, angle, eps=1e-16,
         return found
     if bend is not None and cell_places is not None:
         found = _distinct(found, e_lo, e_hi, sharp, p, bend, cells, cell_places)
+    if found.any():                  # gaps the mesh leaves in a smooth edge: bridged
+        found |= _bridge(sharp | found, e_lo, e_hi, p, angle)
     return _anchored(found, e_lo, e_hi, sharp, p, angle)
 
 
@@ -188,6 +198,135 @@ def _hysteresis(strong, weak, e_lo, e_hi, p, angle, rounds=64):
         acc[cand[newly]] = True
         cand = cand[~newly]
     return acc
+
+
+def _bridge(net, e_lo, e_hi, p, angle, steps=BRIDGE_EDGES, tol_deg=FLAT_TOL_DEG,
+            run=LATTICE):
+    """Mesh edges filling the gaps between feature edges (`net`, mesh edges) that
+    stop facing each other. From a point where one stops (its last `run` mesh edges at
+    least, the line or plane they lie in): a path of at most `steps` mesh edges, none
+    of `net`, each going on from the last (turning less than `angle`, the same way
+    round as the feature edge turns), its points on that line (aligned) or in that
+    plane (coplanar) within `tol_deg` as seen from the end, to where another feature
+    edge stops — lying on the same line / plane, the path going on into it. The
+    shortest such paths, each end bridged once."""
+    n_p, n_e = len(p), len(e_lo)
+    add = np.zeros(n_e, dtype=bool)
+    f = np.flatnonzero(net)
+    if not len(f):
+        return add
+    deg = np.bincount(np.r_[e_lo[f], e_hi[f]], minlength=n_p)
+    ends = np.flatnonzero(deg == 1)
+    if len(ends) < 2:
+        return add
+    at = np.r_[e_lo, e_hi]                            # the mesh edges at each point
+    o = np.argsort(at, kind="stable")
+    nb_s, ed_s = np.r_[e_hi, e_lo][o], o % n_e
+    start = np.searchsorted(at[o], np.arange(n_p + 1))
+    nb_l, ed_l, st_l, net_l, deg_l = (nb_s.tolist(), ed_s.tolist(), start.tolist(),
+                                      net.tolist(), deg.tolist())
+    back = np.full((len(ends), run + 1), -1, dtype=np.int64)    # behind each end
+    for i, P in enumerate(ends.tolist()):
+        cur, prev, k = P, -1, 0
+        back[i, 0] = P
+        while k < run:
+            nxt = [(nb_l[j], ed_l[j]) for j in range(st_l[cur], st_l[cur + 1])
+                   if net_l[ed_l[j]] and ed_l[j] != prev]
+            if len(nxt) != 1:
+                break
+            (cur, prev), k = nxt[0], k + 1
+            back[i, k] = cur
+            if deg_l[cur] != 2:
+                break
+    ok = back[:, -1] >= 0                             # a feature edge, not a stub
+    ends, back = ends[ok], back[ok]
+    if len(ends) < 2:
+        return add
+    m = len(ends)
+    sin_tol, cos_turn = np.sin(np.radians(tol_deg)), np.cos(np.radians(angle))
+    q = p[back]                                       # (m, run + 1, 3): the end first
+    q0 = q[:, 0]
+    t = _unit(q0 - q[:, 1])                           # going out of the end
+    behind = q[:, 2:] - q0[:, None]
+    c = np.cross(t[:, None], behind)
+    off = np.linalg.norm(c, axis=2) > sin_tol * np.linalg.norm(behind, axis=2)
+    planar = off.any(axis=1)                          # else on a line
+    normal = _unit(c[np.arange(m), np.argmax(off, axis=1)])
+    d_in = _unit(q[:, :-1] - q[:, 1:])                # along it, towards the end
+    turns = np.einsum("ijk,ik->i", np.cross(d_in[:, 1:], d_in[:, :-1]), normal)
+    way = np.where(turns < 0, -1.0, 1.0)              # the way round it turns
+    end_of = np.full(n_p, -1, dtype=np.int64)
+    end_of[ends] = np.arange(m)
+
+    def dev(s, x):
+        """How far off the line / plane of end s points x are (sine, as seen from it)."""
+        v = x - q0[s]
+        far = np.maximum(np.linalg.norm(v, axis=-1), 1e-300)
+        h = np.where(planar[s], np.abs(np.einsum("...k,...k->...", v, normal[s])),
+                     np.linalg.norm(np.cross(t[s], v), axis=-1))
+        return h / far
+
+    src, cur, d_prev = np.arange(m), ends.copy(), t.copy()
+    levels = []                                       # each step: (mesh edges, from which)
+    seen = set((src * n_p + cur).tolist())
+    found, done = [], set()                           # (end, end, mesh edges); ends done
+    for _ in range(steps):
+        if not len(cur):
+            break
+        cnt = start[cur + 1] - start[cur]
+        st = np.repeat(np.arange(len(cur)), cnt)
+        pos = np.repeat(start[cur], cnt) + (np.arange(len(st)) - np.repeat(np.cumsum(cnt) - cnt, cnt))
+        x, e, s = nb_s[pos], ed_s[pos], src[st]
+        v = p[x] - p[cur[st]]
+        d = _unit(v)
+        good = (~net[e] & (np.linalg.norm(v, axis=1) > 0)
+                & (np.einsum("ij,ij->i", d, d_prev[st]) > cos_turn))
+        way_ok = np.einsum("ij,ij->i", np.cross(d_prev[st], d), normal[s]) * way[s] >= -sin_tol
+        good &= ~planar[s] | way_ok
+        good &= dev(s, p[x]) <= sin_tol
+        # another end reached: on the same line / plane, the path going on into it
+        r = end_of[x]
+        hit = good & (r >= 0) & (x != ends[s])
+        if hit.any():
+            h = np.flatnonzero(hit)
+            rh, sh, dh = r[h], s[h], d[h]
+            into = -t[rh]
+            fine = np.einsum("ij,ij->i", dh, into) > cos_turn
+            fine &= ~planar[sh] | (np.einsum("ij,ij->i", np.cross(dh, into), normal[sh])
+                                   * way[sh] >= -sin_tol)
+            fine &= (dev(sh[:, None], q[rh, 1:]) <= sin_tol).all(axis=1)
+            h = h[fine]
+            h = h[np.argsort(-np.einsum("ij,ij->i", d[h], -t[r[h]]), kind="stable")]
+            for j in h.tolist():                      # the smoothest way in first
+                if int(s[j]) in done:                 # its shortest one only
+                    continue
+                path, k = [int(e[j])], int(st[j])
+                for lv in range(len(levels) - 1, -1, -1):
+                    path.append(int(levels[lv][0][k]))
+                    k = int(levels[lv][1][k])
+                done.add(int(s[j]))
+                found.append((int(s[j]), int(r[j]), path))
+        go = good & (deg[x] == 0)                     # on, across no feature edge
+        if done:
+            go &= ~np.isin(s, list(done))
+        go_i = []                                     # the straightest first: it keeps
+        straight = np.einsum("ij,ij->i", d, d_prev[st])  # the point
+        g = np.flatnonzero(go)
+        g = g[np.argsort(-straight[g], kind="stable")]
+        for j, key in zip(g.tolist(), (s * n_p + x)[g].tolist()):
+            if key not in seen:
+                seen.add(key)
+                go_i.append(j)
+        go_i = np.array(go_i, dtype=np.int64)
+        levels.append((e[go_i], st[go_i]))
+        src, cur, d_prev = s[go_i], x[go_i], d[go_i]
+    used = set()
+    for a, b, path in sorted(found, key=lambda z: (len(z[2]), z[0])):
+        if a in used or b in used:
+            continue
+        used.update((a, b))
+        add[path] = True
+    return add
 
 
 def _tidy(crease, fixed, e_lo, e_hi, n_p, shortest=CREASE_BITS):
@@ -287,20 +426,81 @@ def _distinct(found, e_lo, e_hi, sharp, p, bend, cells, cell_places):
     return out
 
 
+def _chains(f, e_lo, e_hi, piece):
+    """The places of each piece (`piece`: label of each mesh edge `f`, a path or a
+    loop), in order along it: a list of (places, closed), by label."""
+    out = []
+    order = np.argsort(piece, kind="stable")
+    cut = np.flatnonzero(np.diff(piece[order])) + 1
+    for group in np.split(f[order], cut):
+        lo, hi = e_lo[group].tolist(), e_hi[group].tolist()
+        at = {}
+        for i, (a, b) in enumerate(zip(lo, hi)):
+            at.setdefault(a, []).append(i)
+            at.setdefault(b, []).append(i)
+        start = next((q for q, es in at.items() if len(es) == 1), lo[0])
+        places, used, cur = [start], set(), start
+        while True:
+            nxt = [i for i in at[cur] if i not in used]
+            if not nxt:
+                break
+            i = nxt[0]
+            used.add(i)
+            cur = hi[i] if lo[i] == cur else lo[i]
+            places.append(cur)
+        out.append((np.array(places), len(places) > 2 and places[0] == places[-1]))
+    return out
+
+
+def _zigzag(q, closed):
+    """Whether the polyline q (k + 1, 3) zig-zags: it turns one way, then back, at
+    WIGGLE_SHARE of its turns or more (two at least), or at three turns or more with
+    half its turning undone by the turns back (a row of mesh diagonals rippling across
+    a face). A smooth curve turns one way (an S: once back), a straight line not at
+    all (rounding: under WIGGLE_DEG)."""
+    d = np.diff(q, axis=0)
+    d = _unit(d[np.linalg.norm(d, axis=1) > 0])
+    if closed:
+        d = np.r_[d, d[:1]]
+    if len(d) < 4:
+        return False
+    b = np.cross(d[:-1], d[1:])                         # the way each turn goes
+    theta = np.arctan2(np.linalg.norm(b, axis=1), np.einsum("ij,ij->i", d[:-1], d[1:]))
+    sig = theta > np.radians(WIGGLE_DEG)
+    b, theta = b[sig], theta[sig]
+    if len(theta) < 3:
+        return False
+    back = np.einsum("ij,ij->i", b[:-1], b[1:]) < 0     # turning the other way
+    n_back = int(back.sum())
+    if n_back < 2:
+        return False
+    sign = np.r_[1.0, np.cumprod(np.where(back, -1.0, 1.0))]
+    total, net = float(theta.sum()), abs(float((sign * theta).sum()))
+    return n_back >= WIGGLE_SHARE * len(back) or (n_back >= 3 and net <= 0.5 * total)
+
+
 def _anchored(found, e_lo, e_hi, sharp, p, angle, shortest=LATTICE):
     """Tidy the smooth edges, piece by piece (a piece: between points where three or
     more meet, or a sharp edge). A real edge runs from feature edge to feature edge,
     or closes on itself; rows of points that line up by chance stop in the middle of a
-    face. Dropped: a piece shorter than FREE_EDGES mesh edges with an end in the open
-    (a row branching off an edge, or loose; a longer one is an edge whose end the
-    mesh doesn't show, and stays); a piece shorter than `shortest`
-    mesh edges between points where smooth edges meet (a lattice of rows crossing);
-    a smooth edge turning by more than `angle` where nothing else meets it (a smooth
-    edge has no corner). Again until nothing changes."""
+    face. Dropped first: a piece that zig-zags (`_zigzag`: mesh diagonals rippling
+    across a face). Then: a piece with both ends in the open (floating: it meets no
+    sharp edge, surface end or other smooth edge) unless it closes on itself; a piece
+    shorter than FREE_EDGES mesh edges with an end in the open (a row branching off
+    an edge; a longer one is an edge whose end the mesh doesn't show, and stays); a
+    piece shorter than `shortest` mesh edges between points where smooth edges meet
+    (a lattice of rows crossing); a smooth edge turning by more than `angle` where
+    nothing else meets it (a smooth edge has no corner). Again until nothing
+    changes."""
     n_p = len(p)
     on_sharp = np.zeros(n_p, dtype=bool)
     on_sharp[e_lo[sharp]] = on_sharp[e_hi[sharp]] = True
     f = np.flatnonzero(found)
+    if len(f):
+        piece = _pieces(f, e_lo, e_hi, on_sharp, n_p)
+        wavy = np.array([_zigzag(p[pl], closed) for pl, closed in
+                         _chains(f, e_lo, e_hi, piece)])
+        f = f[~wavy[piece]]
     while len(f):
         ends = np.r_[e_lo[f], e_hi[f]]
         deg = np.bincount(ends, minlength=n_p)
@@ -312,7 +512,8 @@ def _anchored(found, e_lo, e_hi, sharp, p, angle, shortest=LATTICE):
             np.add.at(ends_of, (piece, kind[side]), 1)
         free, joint, anchored = ends_of[:, 0], ends_of[:, 1], ends_of[:, 2]
         drop = (((size < shortest) & (anchored < 2) & (free == 0))
-                | ((free > 0) & (size < FREE_EDGES)))        # short, ending in the open
+                | ((free > 0) & (size < FREE_EDGES))         # short, ending in the open
+                | (free >= 2))                               # floating: both ends open
         drop = drop[piece]
         # a corner inside a piece: two smooth mesh edges, nothing else, turning sharply
         by = np.argsort(ends, kind="stable")
@@ -359,41 +560,22 @@ def place_tolerance(bounds):
     return float(np.ptp(b, axis=1).max() or 1.0) * 1e-7
 
 
-def _runs(p, angle, tol_deg=FLAT_TOL_DEG):
+def _runs(p, angle, corner=CORNER_DEG):
     """Where to cut a polyline of points p (k + 1, 3): the indices of the inner points
-    where a new straight-or-planar run starts. (Plain floats: a call per point.)"""
-    sin2 = np.sin(np.radians(tol_deg)) ** 2
-    cos_turn = float(np.cos(np.radians(angle)))
+    at a corner — turning by more than `angle`, or a kink: by more than `corner` and
+    twice as much as at the points either side (a coarse mesh's curve turns about as
+    much at each point). A curve turning gently, in a plane or twisting in 3D, stays
+    whole. Zero-length mesh edges are skipped."""
     d = np.diff(p, axis=0)
     length = np.linalg.norm(d, axis=1)
-    d = (d / np.where(length > 0, length, 1.0)[:, None]).tolist()
-    p = p.tolist()
-    cuts = []
-    start, normal = 0, None
-    for i in range(1, len(d)):
-        (ax, ay, az), (bx, by, bz) = d[i - 1], d[i]
-        if ax * bx + ay * by + az * bz < cos_turn:          # a corner
-            cuts.append(i)
-            start, normal = i, None
-            continue
-        (qx, qy, qz), (sx, sy, sz) = p[i + 1], p[start]
-        ox, oy, oz = qx - sx, qy - sy, qz - sz
-        far2 = ox * ox + oy * oy + oz * oz
-        if far2 == 0:
-            continue
-        if normal is None:                                   # a line so far
-            ux, uy, uz = d[start]
-            cx, cy, cz = uy * oz - uz * oy, uz * ox - ux * oz, ux * oy - uy * ox
-            c2 = cx * cx + cy * cy + cz * cz
-            if c2 > sin2 * far2:                             # off the line: its plane
-                c = c2 ** 0.5
-                normal = (cx / c, cy / c, cz / c)
-            continue
-        h = ox * normal[0] + oy * normal[1] + oz * normal[2]
-        if h * h > sin2 * far2:                              # out of the plane
-            cuts.append(i)
-            start, normal = i, None
-    return cuts
+    idx = np.flatnonzero(length > 0)
+    if len(idx) < 2:
+        return []
+    u = d[idx] / length[idx, None]
+    turn = np.degrees(np.arccos(np.clip(np.einsum("ij,ij->i", u[:-1], u[1:]), -1, 1)))
+    beside = np.maximum(np.r_[0.0, turn[:-1]], np.r_[turn[1:], 0.0])
+    cut = (turn > angle) | ((turn > corner) & (turn >= 2 * beside))
+    return idx[1:][cut].tolist()
 
 
 class Features:
@@ -478,6 +660,7 @@ class Features:
             crease = _hysteresis(bend > angle, bend > angle * WEAK_SHARE, e_lo, e_hi,
                                  p_place, angle)
             crease = _tidy(crease, ends_, e_lo, e_hi, len(rep))
+            crease |= _bridge(crease | ends_, e_lo, e_hi, p_place, angle)   # gaps in a crease
             sharp = ends_ | crease
             # faces: bounded by every edge bending over the feature angle (also the
             # bits too small to draw), so they don't leak through a gap
@@ -506,7 +689,7 @@ class Features:
 
     def _lines_only(self, poly):
         """A part made of lines (a 2D mesh's boundaries): its lines are its feature
-        edges, cut into straight or planar runs; no feature faces."""
+        edges, cut at corners; no feature faces."""
         lines = poly.GetLines()
         if lines is None or lines.GetNumberOfCells() == 0:
             return
@@ -560,8 +743,8 @@ class Features:
         self.nodes = self._rep[node]
 
     def _walk(self, ends, through, other):
-        """Feature edges of a mesh: along each chain of mesh edges, cut into straight or
-        planar runs (`_runs`)."""
+        """Feature edges of a mesh: along each chain of mesh edges, cut at its corners
+        (`_runs`)."""
         m = len(ends)
         curve = np.full(m, -1, dtype=np.int64)
         pts = self._pts[self._rep]                           # one point per place

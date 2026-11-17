@@ -1,3 +1,62 @@
+## What's new in 2.5.1
+
+**Contours** (was Results), as many as you like:
+
+- **New Contour** adds one, with **its own tab under the view**: each contour has its
+  own field, range, color scale and color bar. Choose a tab and the model shows that
+  contour; the **3D View** tab shows the model alone.
+- **Each tab its own view**: turn the model, switch mesh edges or the axis indicator,
+  or hide a boundary in one contour's or plot's tab, and the 3D View and the other tabs
+  stay as they were.
+- **Tabs and the sidebar move together**, for contours and plots: choosing a tab opens
+  its settings in the right sidebar and folds the others; opening its settings shows
+  its tab.
+
+**A color bar over the 3D view**:
+
+- The colors' scale stands **at the top-left of the view**, upright, with the field's
+  name and unit on top and its values along the ticks. **Drag it** wherever it hides
+  nothing; it is in Save Screenshot too (with the colors, which screenshots left out
+  before).
+- **Smooth or in bands**: turn off Smooth colors and the boundaries are colored in bands
+  with sharp borders, one per gap between the ticks.
+- **Ticks your way**: 2 to 15, evenly up the bar or spaced logarithmically (Tick
+  spacing; on a log color scale at the round values 1, 2, 5, 10…). Numbers that would
+  overlap are left out; the ends are always written.
+- Under ▸ Color Bar: Colors, **Height**, **Width**, Ticks, Tick spacing, **Text color**
+  (Auto, White or Black), Smooth colors, Show title and Reset Color Bar (which also
+  puts the bar back in its corner). Each file remembers them, and where you left the
+  bar.
+
+**Plots**: **Flip Y** turns the plot over at once; **Swap** puts the value across and
+the position up; **filters** under Values and Along keep only the points between a min
+and a max; **🔒 Lock** stops the wheel and the trackpad from zooming; Min and Max show 4
+significant figures (exactly what you typed when you type one); **View ▸ Fit (⌘0)** fits
+the plot shown. Each plot's settings are laid out as Plane, Plot, Axes
+and Data.
+
+**Save Screenshot** saves PNG, JPEG or SVG — a real vector SVG: the model's facets,
+edges, contour colors and color bar as shapes you can scale and edit; on a plot's tab,
+the plot itself (lines and text). **Measure Selected** lists the solution fields at a
+picked node, or their mean along edges and over faces, cells or parts. **Measurements stay on screen** when you
+switch to another tool. **Color by y+** is grayed when there is no y+ to show.
+
+**The right sidebar** no longer shifts its cards left when it scrolls: the scrollbar
+floats in the margin.
+
+**Show ▸ Axis Indicator** turns the XYZ arrows in the corner off or on, in every window.
+
+Cleaner feature edges on meshes (Select ▾ Feature Edge, Show ▸ Feature Edges):
+
+- **No more floating zig-zags**: lines of mesh diagonals rippling across a smooth face
+  are no longer taken as edges, nor smooth edges that start and stop in the middle of
+  a face.
+- **Gaps bridged**: two feature edges that stop a few mesh edges apart, facing each
+  other on one line or curve, are joined into one. On the ONERA M6 wing the tip curves
+  now reach the leading edge, and the upper, lower and tip faces are told apart.
+- **Smooth curves in one piece**: a curve that twists gently in 3D is one feature edge,
+  cut only at real corners and where another edge meets it.
+
 ## What's new in 2.5
 
 Mesh Viewer 2.5 is organized the macOS way, with everything from the five betas below.

@@ -12,12 +12,18 @@ One page for every plot: the window shows the one whose tab is chosen
 the points where the plane crosses mesh edges, the line is straight). The plot's Axes
 (min / max, log, flip: cp is drawn with y flipped, negative up) set how it is drawn; the
 wheel zooms, a drag pans, a double-click fits (written back to its Axes).
+
+Save Screenshot on a plot's tab saves this page (`save_picture`): PNG or JPEG drawn at
+the scale asked, SVG as vector shapes — the page painted into a QSvgGenerator, so the
+lines, the frame and the text are SVG paths and text, crisp at any size.
 """
 from __future__ import annotations
 
 import numpy as np
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QPalette, QPen
+from pathlib import Path
+
+from PySide6.QtCore import QPointF, QRect, QRectF, QSize, Qt, Signal
+from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QPalette, QPen
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QToolTip, QVBoxLayout, QWidget
 
 from meshviewer.core import plots
@@ -269,6 +275,9 @@ class CrossSectionPlot(_Plot):
                                   self._data(y0, "y"), self._data(y1, "y")))
 
     def wheelEvent(self, e):
+        if self.locked():                              # 🔒 Lock: no zoom
+            e.ignore()
+            return
         if self._r is None:
             return
         f = 0.85 ** (e.angleDelta().y() / 120.0)
@@ -280,8 +289,19 @@ class CrossSectionPlot(_Plot):
         self._emit_ranges()
         e.accept()
 
+    def drawn_ranges(self):
+        """(x0, x1, y0, y1) as drawn, in the units shown (None: nothing drawn)."""
+        if self._r is None:
+            return None
+        (x0, x1), (y0, y1) = self._r
+        return (float(self._data(x0, "x")), float(self._data(x1, "x")),
+                float(self._data(y0, "y")), float(self._data(y1, "y")))
+
+    def locked(self):
+        return bool(self.view.get("lock")) if hasattr(self, "view") else False
+
     def mousePressEvent(self, e):
-        if e.button() == Qt.LeftButton and self._r is not None:
+        if e.button() == Qt.LeftButton and self._r is not None and not self.locked():
             self._drag = (e.position(), self._r)
 
     def mouseReleaseEvent(self, e):
@@ -290,7 +310,8 @@ class CrossSectionPlot(_Plot):
         self._drag = None
 
     def mouseDoubleClickEvent(self, e):
-        self.ranges_changed.emit((None, None, None, None))       # fit
+        if not self.locked():
+            self.ranges_changed.emit((None, None, None, None))   # fit
 
     def mouseMoveEvent(self, e):
         if self._r is None:
@@ -352,6 +373,19 @@ class _Legend(QWidget):
         p.end()
 
 
+def _kept(lo, hi):
+    """values -> True where lo < v < hi (None: open on that side)."""
+    def kept(v):
+        v = np.asarray(v, dtype=float)
+        ok = np.isfinite(v)
+        if lo is not None:
+            ok = ok & (v > lo)
+        if hi is not None:
+            ok = ok & (v < hi)
+        return ok
+    return kept
+
+
 class PlotPage(QWidget):
     ranges_changed = Signal(int, object)         # plot id, (x0, x1, y0, y1): zoom / pan / fit
 
@@ -383,7 +417,7 @@ class PlotPage(QWidget):
     def show(self, m, r, colors, scale, unit, value_unit=None):
         """m: the plot, r: its compute() result, colors: part -> hex,
         (scale, unit): file lengths -> shown; value_unit: (convert, label) of a field's
-        values (Results ▸ Values in / Shown in), or None."""
+        values (Contours ▸ Unit in file / Shown in), or None."""
         self.ident = m["id"]
         self.title.setText(m["name"])
         coord = r["value"].startswith(plots.COORD)
@@ -408,9 +442,18 @@ class PlotPage(QWidget):
         curves = [(c["x"] * xs, np.asarray(conv(c["y"]), dtype=float),
                    QColor(colors.get(c["part"], "#8e8e93")), c["part"]) for c in r["curves"]]
         ref = [tuple(p[:2]) for p in (m.get("ref") or {}).get("points", [])]
+        vk = _kept(m.get("value_min"), m.get("value_max"))     # the data filters
+        ak = _kept(m.get("along_min"), m.get("along_max"))
+        curves = [(x, np.where(vk(y) & ak(x), y, np.nan), col, part)
+                  for x, y, col, part in curves]
+        ref = [(a, b) for a, b in ref if vk(b) and ak(a)]
+        if m.get("swap"):                             # Swap Axes: the value across
+            curves = [(y, x, col, part) for x, y, col, part in curves]
+            ref = [(y, x) for x, y in ref]
+            x_title, y_title = y_title, x_title
         view = {k: m.get(k) for k in ("x_min", "x_max", "y_min", "y_max", "x_log", "y_log",
-                                      "x_flip")}
-        view["y_flip"] = bool(r["flip"])              # cp: negative up
+                                      "x_flip", "lock")}
+        view["y_flip"] = plots.y_flipped(m, r["value"])   # as set now (cp: negative up)
         self.plot.set_data(curves, ref, x_title, y_title, view)
         names = []
         for c in r["curves"]:
@@ -419,3 +462,46 @@ class PlotPage(QWidget):
         if ref:
             names.append((m["ref"]["name"], None))
         self.legend.set_items(names)
+
+    # ---- Save Screenshot ---------------------------------------------------------------
+    def _paint_into(self, p):
+        """The page and its children painted with painter `p` (an SVG or an image)."""
+        from PySide6.QtCore import QPoint
+        from PySide6.QtGui import QRegion
+        self.render(p, QPoint(0, 0), QRegion(),
+                    QWidget.RenderFlag.DrawChildren | QWidget.RenderFlag.DrawWindowBackground)
+
+    def save_picture(self, path, scale=2):
+        """This page as a picture, by the extension: .svg vector shapes, .jpg / .jpeg a
+        JPEG, else a PNG (.png added) -> the path written."""
+        path = Path(path)
+        ext = path.suffix.lower()
+        w, h = self.width(), self.height()
+        if ext == ".svg":
+            from PySide6.QtSvg import QSvgGenerator
+            gen = QSvgGenerator()
+            gen.setFileName(str(path))
+            gen.setSize(QSize(w, h))
+            gen.setViewBox(QRect(0, 0, w, h))
+            gen.setTitle(self.title.text())
+            gen.setDescription("Mesh Viewer plot")
+            p = QPainter(gen)
+            p.fillRect(QRect(0, 0, w, h), self.palette().color(QPalette.Window))
+            self._paint_into(p)
+            p.end()
+            return path
+        k = max(1, int(scale))
+        img = QImage(w * k, h * k, QImage.Format_ARGB32)
+        img.setDevicePixelRatio(k)
+        img.fill(self.palette().color(QPalette.Window))
+        p = QPainter(img)
+        p.setRenderHint(QPainter.Antialiasing)
+        self._paint_into(p)
+        p.end()
+        if ext in (".jpg", ".jpeg"):
+            img.convertToFormat(QImage.Format_RGB32).save(str(path), "JPG", 92)
+        else:
+            if ext != ".png":
+                path = path.with_name(path.name + ".png")
+            img.save(str(path), "PNG")
+        return path

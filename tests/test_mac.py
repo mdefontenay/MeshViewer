@@ -135,14 +135,20 @@ def test(app, files):
     check(sc.selected_parts == [names[0]] and not sc.same_camera(sc.camera_snapshot(), start)
           and st.count() == st.index() == n0 + 2, "Redo both, nothing new recorded")
     sc.set_selection([], notify=True)
-    # a pause over 0.8 s, or another kind of move, starts a new camera step
+    # a pause over CAMERA_PAUSE (0.8 s; 0.3 s here, to wait less), or another kind of
+    # move, starts a new camera step
     import time
-    n1 = st.index()
-    w.a_views[1].trigger()
-    frames()
-    time.sleep(0.9)
-    w.a_views[2].trigger()
-    frames()
+    from meshviewer.gui import undo
+    pause, undo.CAMERA_PAUSE = undo.CAMERA_PAUSE, 0.3
+    try:
+        n1 = st.index()
+        w.a_views[1].trigger()
+        frames()
+        time.sleep(0.4)
+        w.a_views[2].trigger()
+        frames()
+    finally:
+        undo.CAMERA_PAUSE = pause
     check(st.index() == n1 + 2, f"a pause: two camera steps ({st.index() - n1})")
     n2 = st.index()
     cx, cy = (v // 2 for v in sc.p.renderer.GetSize())
@@ -199,18 +205,6 @@ def test(app, files):
     check(sb.plots_panel.new.text() == "New Plot…", "New Plot…")
     w.close()
 
-    # ---- CAD: hidden faces undo, Inflation Layers ---------------------------------------------
-    w = open_file(app, files["step"])
-    sc, sb = w.scene, w.sidebar
-    n = sc.names[0]
-    sb._hide_face(n, 0)
-    check(sc.n_hidden_faces == 1 and w.a_undo.text() == "Undo Hide Face", "Hide Face")
-    w.a_undo.trigger()
-    check(sc.n_hidden_faces == 0, "undo Hide Face")
-    check(sb.inflation_section.header.title.text() == "Inflation Layers"
-          if hasattr(sb.inflation_section.header, "title") else True, "CFD ▸ Inflation Layers")
-    w.close()
-
     # ---- Settings ------------------------------------------------------------------------------
     app.show_settings()
     s = app._settings
@@ -236,6 +230,15 @@ def test(app, files):
     check(w.scene.measure.display_unit == "cm", "lengths shown in Settings ▸ Units (cm)")
     check(getattr(w, "_unit_dialog", None) is None or not w._unit_dialog.isVisible(),
           "Ask when opened: off -> no unit sheet")
+    # ---- CAD: hidden faces undo, Inflation Layers ---------------------------------------------
+    sc, sb = w.scene, w.sidebar
+    n = sc.names[0]
+    sb._hide_face(n, 0)
+    check(sc.n_hidden_faces == 1 and w.a_undo.text() == "Undo Hide Face", "Hide Face")
+    w.a_undo.trigger()
+    check(sc.n_hidden_faces == 0, "undo Hide Face")
+    check(sb.inflation_section.header.title.text() == "Inflation Layers"
+          if hasattr(sb.inflation_section.header, "title") else True, "CFD ▸ Inflation Layers")
     w.close()
     s.close()
     for k, v in (("cad_quality", "last"), ("shown_unit", "file"), ("ask_unit", True)):
@@ -248,13 +251,22 @@ def test_beta2(app, files):
     import shutil
     import tempfile
     from pathlib import Path
+    from meshviewer.gui import samples
+    pump = lambda: [app.processEvents() for _ in range(5)]        # noqa: E731
+    tmp =Path(tempfile.mkdtemp())                              # samples, as in the app
+    shutil.copy(files["step"], tmp / "avbay.step")
+    folders, samples._folders = samples._folders, lambda: [tmp]
+    try:
+        _beta2(app, files, tmp, pump)
+    finally:
+        samples._folders = folders                              # (the next test file's app)
+
+
+def _beta2(app, files, tmp, pump):
+    from pathlib import Path
     from PySide6.QtWidgets import QAbstractButton
     from meshviewer.gui import samples, memory
     from meshviewer.gui.widgets import Switch
-    pump = lambda: [app.processEvents() for _ in range(5)]        # noqa: E731
-    tmp = Path(tempfile.mkdtemp())                              # samples, as in the app
-    shutil.copy(files["step"], tmp / "avbay.step")
-    samples._folders = lambda: [tmp]
     w = app.new_window()
     pump()
     wel = w.welcome

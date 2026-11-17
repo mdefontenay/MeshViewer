@@ -15,7 +15,8 @@ and the open tools are remembered per file (scene.inspector_state).
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QSize, Qt, Signal
+import shiboken6
+from PySide6.QtCore import QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QActionGroup, QPalette
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QLineEdit, QSizePolicy, QToolButton,
@@ -26,6 +27,7 @@ from meshviewer.gui.forms import link
 from meshviewer.gui.icons import icon
 from meshviewer.gui.inspector import Inspector
 from meshviewer.gui.panels.cfd import CfdPanel
+from meshviewer.gui.panels.contours import ContoursPanel
 from meshviewer.gui.panels.edit import EditPanel
 from meshviewer.gui.panels.inflation import InflationPanel
 from meshviewer.gui.panels.info import InfoPanel
@@ -34,7 +36,6 @@ from meshviewer.gui.panels.meshing import MeshingPanel
 from meshviewer.gui.panels.parts import PartTree
 from meshviewer.gui.panels.plots import PlotsPanel
 from meshviewer.gui.panels.quality import QualityPanel
-from meshviewer.gui.panels.results import ResultsPanel
 from meshviewer.gui.panels.section import SectionPanel
 from meshviewer.gui.panels.selected import SelectedPanel
 from meshviewer.gui.sections import BY_KEY, default_open, default_tab, tabs_for
@@ -143,9 +144,10 @@ class Sidebar(PartMenu, QWidget):
         self.cell_panel.computed.connect(self.info_panel.refresh)    # volume row
         self.cfd_panel.measured.connect(self.info_panel.refresh)     # volume row
 
-        self.results_panel = ResultsPanel()
-        self.results_section = self._add("results", self.results_panel,   # its switch: in
-                                         trailing=self.results_panel.colour_on)  # the header
+        self.contours_panel = ContoursPanel()          # contours -> tabs under the view
+        self.contours_section = self._add("contours", self.contours_panel, card=False)
+        self.selected_panel.units = self.contours_panel   # field values in its units
+        self.contours_panel.units_changed.connect(self.selected_panel.refresh)
 
         self.plots_panel = PlotsPanel()                # plots -> tabs under the view
         self.plots_section = self._add("plots", self.plots_panel, card=False)
@@ -195,6 +197,17 @@ class Sidebar(PartMenu, QWidget):
         else:
             for sec, *_ in self._boxes[key].parts:
                 sec.set_expanded(False)
+
+    def reveal(self, key, ident):
+        """A contour's or a plot's tab opened: its tool shown, its fold-out open (the
+        others folded) and scrolled into view."""
+        panel = {"contours": self.contours_panel, "plots": self.plots_panel}[key]
+        if ident not in panel.editors:
+            return
+        self.show_section(key, expand=True)
+        sec = panel.expand_only(ident)
+        if sec is not None:
+            QTimer.singleShot(0, lambda: shiboken6.isValid(sec) and self.inspector.reveal(sec))
 
     def set_inspector_visible(self, on):
         self.inspector.setVisible(bool(on))
@@ -328,7 +341,7 @@ class Sidebar(PartMenu, QWidget):
         self.cell_panel.bind(scene)
         self.info_panel.bind(scene)
         self.cfd_panel.bind(scene)
-        self.results_panel.bind(scene)
+        self.contours_panel.bind(scene)
         self.plots_panel.bind(scene)
         self.inflation_panel.bind(scene)
         self._apply_support(scene)
@@ -342,6 +355,7 @@ class Sidebar(PartMenu, QWidget):
         state = getattr(scene, "inspector_state", None) or {}
         tab = state.get("tab") or default_tab(scene)
         opened = state.get("open") if "open" in state else default_open(scene)
+        opened = ["contours" if k == "results" else k for k in opened]   # (2.5: Results)
         self._active = {}
         self._shown_tab = None
         for key, box in self._boxes.items():         # open what was open, close the rest
@@ -399,6 +413,8 @@ class Sidebar(PartMenu, QWidget):
             self.filter.clear()
             self.list.set_selected(names)
         self._show_info(names)
+        if self.scene is not None and self.scene.elements.kind == "part":
+            self.selected_panel.refresh()              # Part: the parts' field values
 
     def _elements_changed(self, scene):
         """Select ▾ picked or cleared: Info and Measure Selected follow; something picked
@@ -412,6 +428,8 @@ class Sidebar(PartMenu, QWidget):
         if self.scene:
             self.scene.set_selection(names)
             self._show_info(names)
+            if self.scene.elements.kind == "part":
+                self.selected_panel.refresh()          # Part: the parts' field values
 
     def _clear_selection(self):
         if self.scene:

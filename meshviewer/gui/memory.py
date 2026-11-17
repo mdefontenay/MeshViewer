@@ -2,7 +2,8 @@
 
 Saved when its window closes (and when the app quits), restored when it opens:
 camera, projection, display toggles, unit, part colours, renamed and hidden
-parts, and the section plane. CFD inputs; Plots; the Inflation Layers page —
+parts, and the section plane. CFD inputs; Contours (key "results": each contour's field,
+range, color bar and its place, the one shown, the fields' units); Plots; the Inflation Layers page —
 which page and tab, Flip Side, the flow arrow, the section zoom. Edits (moves, rotations) are not: they belong to
 an export. Stored in the app's settings, for the last 200 files.
 
@@ -87,7 +88,7 @@ def capture(scene):
         "cfd": scene.cfd_settings,
         "inflation": scene.inflation_settings,                    # Inflation Layers
         "inflation_page": getattr(scene, "inflation_page", None),  # tab, zoom…
-        "results": getattr(scene, "results_settings", None),      # field, range
+        "results": getattr(scene, "results_settings", None),      # Contours
         "plots": list(getattr(scene, "plots", None) or []),      # Plots
         "inspector": getattr(scene, "inspector_state", None),     # its tab, the tools open
         "hidden_faces": {orig.get(n, n): sorted(v) for n, v in scene.hidden_faces.items()

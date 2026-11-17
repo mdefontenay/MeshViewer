@@ -148,17 +148,18 @@ class Bars:
         # where the old "no unit" button was: what unit are the file's numbers in?
         self.a_file_unit = self._act("File Unit…", self._edit_file_unit)
         self.a_file_unit.setIcon(icon("edit_unit"))
-        self.a_fit = self._act("Fit", lambda: self.scene and self.scene.fit(), "Ctrl+0")
+        self.a_fit = self._act("Fit", self.fit_view, "Ctrl+0")   # the 3D view or the plot
         # parallel projection is a toolbar toggle next to the views
         self.a_parallel = self._act("Perspective",          # on: perspective, off: parallel
                                     lambda on: self.scene and self.scene.set_parallel(not on),
                                     "Ctrl+5", checkable=True)
-        # what is shown, as toolbar toggles. Edges: one pill; axes, grid, bounding box,
-        # origin: another.
+        # what is shown (Show ▾ and View ▸ Show). Edges and faces; then axes, grid,
+        # bounding box, origin and the XYZ axis indicator in the corner.
         self.a_show = {}
         for key, text in (("mesh_edges", "Mesh Edges"), ("feature_edges", "Feature Edges"),
                           ("faces", "Faces"), ("axes", "Axes"), ("grid", "Grid"),
-                          ("bbox", "Bounding Box"), ("origin", "Origin")):
+                          ("bbox", "Bounding Box"), ("origin", "Origin"),
+                          ("axis_indicator", "Axis Indicator")):
             a = self._act(text, lambda on, k=key: self._show_toggled(k, on), checkable=True)
             a.setIcon(icon(key))
             self.a_show[key] = a

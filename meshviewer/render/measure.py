@@ -62,6 +62,7 @@ class Measure:
         self.scene = scene
         self.p = scene.p
         self.mode = "off"            # "off" | "distance" | "angle" | "area"
+        self.paused = False          # the tool closed: its marks stay, clicks pick parts
         self.pick_faces = False      # area mode on CAD: pick single CAD faces
         self.snap = False            # distance: snap to a vertex (2D: to the lines)
         self.from_origin = False     # distance: one point, measured from (0, 0, 0)
@@ -73,7 +74,17 @@ class Measure:
         self._marker_actors = []
 
     # ---- mode ------------------------------------------------------------
+    @property
+    def picking(self):
+        """The mode clicks are measured in: "off" while paused (the Measuring Tool out of
+        view: what was measured stays drawn, a click picks as usual)."""
+        return "off" if self.paused else self.mode
+
+    def set_paused(self, on):
+        self.paused = bool(on)
+
     def set_mode(self, mode):
+        self.paused = False
         self.mode = mode
         self.points = []
         self.normals = []

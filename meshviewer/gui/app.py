@@ -81,6 +81,8 @@ class MeshViewerApp(QApplication):
             "axes": st.value("appearance/axes", _old_axes_setting(st)),
             # drawings (DXF) have their own, off by default: a sheet, not a model in space
             "drawing_axes": st.value("appearance/drawing_axes", "off"),
+            # Show ▸ Axis Indicator: the XYZ arrows in the view's corner
+            "axis_indicator": st.value("appearance/axis_indicator", True, type=bool),
         }
         # Settings ▸ General / Units
         self.prefs = {

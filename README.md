@@ -24,9 +24,10 @@ others could benefit from it.
 - **Meshes**: CGNS (polyhedra too), UGRID, Gmsh and Fluent .msh, 2D or 3D, with their
   named boundaries. The section plane cuts the volume cells; Cell Quality finds the
   skewed, stretched and inverted ones.
-- **CFD results and plots**: FUN3D / Tecplot results on the boundaries, with the usual
-  fields and their units, gradients, linear or log color scales, and section plots in
-  their own tabs.
+- **CFD results and plots**: FUN3D / Tecplot results on the boundaries as contours, each
+  in its own tab, with the usual fields and their units, gradients, linear or log color
+  scales, smooth or in bands, a color bar you can drag anywhere over the view, and
+  section plots in their own tabs.
 - **Inflation Layers**: y+ and first-cell height from the flow, the layer stack to
   scale on the wall, the total thickness drawn in 3D over the walls, and the settings
   exported for OpenFOAM, Fluent, STAR-CCM+ or Pointwise.

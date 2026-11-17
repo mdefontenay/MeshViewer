@@ -89,13 +89,19 @@ class MeasurePanel(QWidget):
         self.show_result(self.measure.result())
 
     def activate(self, on):
-        """Section opened (on) or closed (off)."""
+        """The tool in view (on) or not (off): out of view, what was measured stays drawn
+        in the 3D view (paused: a click picks parts again); back in view, measuring goes
+        on where it was."""
         if not self.measure:
             return
         if on:
-            self._mode(next(a.data() for a in self.mode_actions if a.isChecked()))
+            mode = next(a.data() for a in self.mode_actions if a.isChecked())
+            if self.measure.mode == mode:
+                self.measure.set_paused(False)
+            else:
+                self._mode(mode)
         else:
-            self.measure.set_mode("off")
+            self.measure.set_paused(True)
 
     # ---- handlers ----------------------------------------------------------------
     def _mode_widgets(self, mode):
