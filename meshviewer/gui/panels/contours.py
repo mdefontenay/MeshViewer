@@ -13,6 +13,10 @@ tab shows the model alone. Editing a contour shows its tab. A results file start
 one, Contour 1. A contour's auto range: the boundaries shown in its own tab (each tab
 shows and hides parts on its own, gui/window_pages.py).
 
+Custom… (in both unit menus): a unit typed for this file only (kept with the file's units in
+scene.results_settings, never in core/units or the app's settings); nothing converts it:
+the values are shown as written, labeled with it.
+
 Units: a field Mesh Viewer knows (core/field_kinds: pressure, Mach, stress…) offers its
 quantity's units, or none (Mach, y+, cp); a field it doesn't know, every unit by
 quantity; a position, lengths (the file's unit, shown in the toolbar's until another is
@@ -27,6 +31,11 @@ boundaries are shown or hidden. The color bar is drawn over the 3D view
 (render/colorbar.py; it can be dragged); in bands, the boundaries get the same bands.
 Remembered per file (scene.results_settings: on, active, units, contours); a new contour
 starts with the color bar's settings last chosen ("results/color_bar").
+
+Time steps (OpenFOAM): another step shown (scene.time_listeners) draws again. A contour
+whose ▸ Animation is on with Timeline keeps its auto Min / Max over every step: the steps'
+ranges are read once in the background ("Reading time steps…"), kept by the case, and
+the visible boundaries' are taken from them (`_timeline`).
 """
 from __future__ import annotations
 
@@ -36,10 +45,11 @@ from PySide6.QtWidgets import QPushButton, QVBoxLayout, QWidget
 
 from meshviewer.core.field_kinds import field_kind
 from meshviewer.core.fields import (COLORMAPS, DEFAULT_MAP, SPEED, field_values,
-                                    gradient_magnitude, solution_fields, ticks)
+                                    dead_fields, gradient_magnitude, planar, solution_fields,
+                                    speed_values, ticks)
 from meshviewer.core.plots import AXES, COORD
-from meshviewer.core.units import (NO_UNIT, QUANTITIES, convert_field, field_scale, nice_num,
-                                   unit_quantity)
+from meshviewer.core.units import (CUSTOM, NO_UNIT, QUANTITIES, convert_field, field_scale,
+                                   is_custom, nice_num, unit_quantity)
 from meshviewer.gui.forms import note
 from meshviewer.gui.panels.contour_editor import (  # noqa: F401  (field_label, grouped: Plots)
     BAR_DEFAULTS, ContourEditor, clean_contour, field_label, grouped, new_contour,
@@ -58,6 +68,8 @@ class ContoursPanel(QWidget):
     removed = Signal(int)
     renamed = Signal(int)
     show_contour = Signal(int)                    # open its tab
+    animation_changed = Signal()                  # a contour's ▸ Animation switched / set
+    fields_changed = Signal()                     # the fields offered (every step read)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -69,6 +81,10 @@ class ContoursPanel(QWidget):
         self.tab = None                           # the contour whose tab shows (drawn)
         self.range = None                         # its (lo, hi), in the unit shown
         self._units = {}                          # field -> [file unit, shown unit]
+        self._steps_job = None                    # reading the steps that tell fields apart
+        self._steps_failed = False
+        self._field_job = None                    # (field, stop flag, job): Timeline's read
+        self._names = []
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(8)
@@ -86,11 +102,21 @@ class ContoursPanel(QWidget):
         lay.addLayout(self.list)
 
     # ---- binding ---------------------------------------------------------------------------
-    @staticmethod
-    def fields_of(model):
-        """The file's fields, then the position of each node: X, Y, Z."""
-        fields = solution_fields(model.parts)
-        return fields + [COORD + a for a in AXES] if fields else fields
+    def fields_of(self, model):
+        """The file's fields, then the position of each node: X, Y, Z. Not on a 2D file:
+        the out-of-plane z components, Z. Never: a field that doesn't vary over the faces
+        a contour colors, at any time step (once they are read: `dead_fields`) — on a 2D
+        case, one only on the boundary lines (phi) or flat over the cells."""
+        fields = planar(self._names, model)
+        steps = None
+        if model.case is not None and len(model.times) > 1:
+            sampled = model.case.range_steps()
+            if model.case.ranges_read(sampled):
+                steps = [model.case.known_ranges(i) for i in sampled]
+        dead = dead_fields(model.parts, fields, steps)
+        fields = [f for f in fields if f not in dead]
+        axes = AXES if model.dim != 2 else [a for a in AXES if a != "z"]
+        return fields + [COORD + a for a in axes] if fields else fields
 
     def bind(self, scene):
         if self.scene is not None:
@@ -99,10 +125,13 @@ class ContoursPanel(QWidget):
             self.scene.colorbar.on_moved = None
             if self.model_changed in self.scene.visibility_listeners:
                 self.scene.visibility_listeners.remove(self.model_changed)
+            if self.time_changed in self.scene.time_listeners:
+                self.scene.time_listeners.remove(self.time_changed)
         for sec, _ed in list(self.editors.values()):
             self._drop(sec)
         self.editors = {}
         self.scene = None                          # no saving while setting up
+        self._names = solution_fields(scene.model.parts)   # every field (the step opened)
         self.fields = self.fields_of(scene.model)
         st = getattr(scene, "results_settings", None) or {}
         if "contours" not in st and st.get("field") is not None:   # one, before 2.5.1
@@ -113,12 +142,18 @@ class ContoursPanel(QWidget):
         self.contours = [c for c in (clean_contour(c, i + 1) for i, c in
                                      enumerate(st.get("contours") or [])) if c is not None]
         if not self.contours and self.fields:      # a results file: one to start with
-            self.contours = [new_contour(1, "Contour 1", self._default_field())]
+            self.contours = [new_contour(1, "Contour 1", self._default_field(scene.model.dim))]
         ids = [c["id"] for c in self.contours]
         self.active = st.get("active") if st.get("active") in ids else (ids[0] if ids else None)
         self.tab = None                            # the window opens the tab remembered
         self.scene = scene
         scene.visibility_listeners.append(self.model_changed)   # auto range: shown boundaries
+        scene.time_listeners.append(self.time_changed)         # another time step
+        scene.field_users.append(lambda: [c["field"] for c in self.contours
+                                          if c["field"] and not c["field"].startswith(COORD)])
+        self._steps_job, self._steps_failed = None, False
+        if self.time_count() > 1 and self.fields:                # which fields vary: read
+            self._all_ranges()                                   # every step (background)
         scene.colorbar.on_moved = self._bar_moved
         for c in self.contours:
             self._editor(c, expanded=False)
@@ -128,9 +163,12 @@ class ContoursPanel(QWidget):
         self._place_bar()
         self._changed(save=False)
 
-    def _default_field(self):
-        if "yplus" in self.fields:
-            return "yplus"
+    def _default_field(self, dim=3):
+        """Contour 1's field: y+ on boundaries (else cp, p, speed); a 2D flow: p, speed."""
+        keys = {(field_kind(f).key if field_kind(f) else f): f for f in self.fields}
+        for k in (("p", SPEED) if dim == 2 else ("yplus", "cp", "p", SPEED)):
+            if k in keys:
+                return keys[k]
         return self.fields[0] if self.fields else None
 
     def settings(self):
@@ -213,9 +251,16 @@ class ContoursPanel(QWidget):
         sec = CollapsibleSection(c["name"], ed, f"contour{c['id']}", remember=False,
                                  start_open=expanded, sub=True)
         sec.header.setToolTip("Click to show or hide its settings (opening one shows it)")
-        sec.toggled.connect(lambda on, i=c["id"]: on and self.show_contour.emit(i))
+        sec.toggled.connect(lambda on, i=c["id"]: on and self._unfolded(i))
         self.list.addWidget(sec)
         self.editors[c["id"]] = (sec, ed)
+
+    def _unfolded(self, ident):
+        """A contour's fold-out opened: its numbers (not kept up while folded), its tab."""
+        c = self.contour(ident)
+        if c is not None and self.scene is not None:
+            self.editors[ident][1].show_info(self.info(c))
+        self.show_contour.emit(ident)
 
     def expand_only(self, ident):
         """Its fold-out open, the others folded -> its section (None: no such contour)."""
@@ -275,9 +320,10 @@ class ContoursPanel(QWidget):
         Its quantity: from its name (p, ρ, u, T…), else from the unit picked for it in
         the file; a position: a length, in the file's unit, shown in the one picked (or
         the toolbar's until one is)."""
-        fu, su = self._units.get(field, [NO_UNIT, NO_UNIT])
+        model = self.scene.model if self.scene is not None else None
+        said = (model.field_units if model is not None else {}).get(field, NO_UNIT)
+        fu, su = self._units.get(field, [said, NO_UNIT])   # the file's own unit at first
         if field and field.startswith(COORD):
-            model = self.scene.model if self.scene is not None else None
             fu = model.units if model is not None and model.units in QUANTITIES["length"] \
                 else NO_UNIT
             if su not in QUANTITIES["length"]:
@@ -285,17 +331,25 @@ class ContoursPanel(QWidget):
                 su = du if du in QUANTITIES["length"] else fu
             return ("length", fu, su) if fu else (None, NO_UNIT, NO_UNIT)
         kind = field_kind(field)
+        if kind is not None and kind.quantity is None:
+            return None, NO_UNIT, NO_UNIT                  # Mach, y+…: no unit
+        if is_custom(fu):                                  # typed for this file (Custom…):
+            return CUSTOM, fu, (su if is_custom(su) else fu)   # nothing converts it
         q = kind.quantity if kind is not None else unit_quantity(fu)   # known: no choice
+        if q is not None and fu and fu not in QUANTITIES[q] and unit_quantity(fu):
+            q = unit_quantity(fu)          # as the file says: kinematic p in m²/s²
         if q is None:
             return None, NO_UNIT, NO_UNIT
         table = QUANTITIES[q]
-        su = su if su in table else (fu if fu in table else next(iter(table)))
+        su = su if su in table or is_custom(su) else (fu if fu in table else next(iter(table)))
         return q, (fu if fu in table else NO_UNIT), su
 
     def shown_values(self, field, vals):
-        """Field values in the unit shown (unchanged when the file's has none)."""
+        """Field values in the unit shown (unchanged when the file's has none, or a unit
+        typed for the file is involved: only its name is shown)."""
         q, fu, su = self.unit_of(field)
-        return vals if q is None or not fu else convert_field(vals, q, fu, su)
+        return vals if q is None or not fu or is_custom(fu) or is_custom(su) else \
+            convert_field(vals, q, fu, su)
 
     def unit_label(self, field):
         q, fu, su = self.unit_of(field)
@@ -329,6 +383,121 @@ class ContoursPanel(QWidget):
     def model_changed(self):
         self._changed(save=False)
 
+    # ---- time steps ----------------------------------------------------------------------
+    def time_count(self):
+        return self.scene.time_count if self.scene is not None else 0
+
+    def time_text(self):
+        """"t = 0.5 · Step 2 / 3" (the step shown), or "—"."""
+        m = self.scene.model if self.scene is not None else None
+        if m is None or self.time_count() < 2 or m.time_index is None:
+            return "—"
+        i = m.time_index
+        return f"t = {m.time_labels[i]} · Step {i + 1} / {len(m.times)}"
+
+    def time_changed(self):
+        """Another time step shown: the step in each ▸ Animation, the numbers, the active
+        contour drawn."""
+        text = self.time_text()
+        for _sec, ed in self.editors.values():
+            ed.anim.step_label.setText(text)
+        self._changed(save=False)
+
+    def animation_changed_for(self, ident):
+        """A contour's ▸ Animation switched or its range picked."""
+        self._save()
+        self.animation_changed.emit()
+        self._changed(save=False)
+
+    def _timeline(self, field, c):
+        """(min, max, min above zero) of a field over every time step, on contour c's
+        visible boundaries — or None: not Timeline, or the steps are still being read."""
+        a = c.get("anim") or {}
+        if not a.get("on") or a.get("range") != "timeline" or self.time_count() < 2:
+            return None
+        if self._all_ranges() is None:
+            return None
+        case, n = self.scene.model.case, self.time_count()
+        if not case.ranges_read(range(n), [field]):        # its every step: read (once)
+            self._read_field(field)
+        steps = [r for r in (case.known_ranges(i) for i in range(n)) if r is not None]
+        shown = self._shown(c)
+        lo = hi = pos = None
+        for per_part in steps:
+            for name, per in per_part.items():
+                if name not in shown or field not in per:
+                    continue
+                a0, a1, ap, _mark = per[field]
+                lo = a0 if lo is None else min(lo, a0)
+                hi = a1 if hi is None else max(hi, a1)
+                if ap is not None:
+                    pos = ap if pos is None else min(pos, ap)
+        return None if lo is None else (lo, hi, pos)
+
+    def _all_ranges(self):
+        """The ranges of the steps that tell the fields apart (every step of a short case,
+        a few spread over a long one: `FoamCase.range_steps`), every field; else they are
+        read in the background (once) and None for now."""
+        case = self.scene.model.case
+        steps = case.range_steps()
+        if case.ranges_read(steps):
+            return [case.known_ranges(i) for i in steps]
+        if self._steps_job is None and not self._steps_failed:
+            from meshviewer.gui.jobs import run_job
+            self._steps_job = run_job(lambda: case.read_ranges(steps),
+                                      self._steps_read, self._steps_not_read,
+                                      busy=(self.window(), "Reading time steps…"))
+        return None
+
+    def _read_field(self, field):
+        """Timeline: one field at every step, in the background (the one asked last; an
+        older read stops) — the range then covers them all."""
+        import threading
+        from meshviewer.gui.jobs import run_job
+        if self._field_job is not None:
+            if self._field_job[0] == field:
+                return
+            self._field_job[1].set()
+        stop = threading.Event()
+        case, n = self.scene.model.case, self.time_count()
+        job = run_job(lambda: case.read_ranges(range(n), [field], stop.is_set),
+                      lambda _ok, f=field: self._field_read(f),
+                      lambda exc, f=field: self._field_read(f),
+                      busy=(self.window(), "Reading time steps…"))
+        self._field_job = (field, stop, job)
+
+    def _field_read(self, field):
+        if self._field_job is not None and self._field_job[0] == field:
+            self._field_job = None
+            self._changed(save=False)
+
+    def field_varies(self, field):
+        """Does `field` change over the time steps? None: not known yet (being read)."""
+        if self.time_count() < 2 or field is None:
+            return False
+        if field.startswith(COORD):
+            return False
+        if self._all_ranges() is None:
+            return None
+        return self.scene.model.case.varies(field)
+
+    def _steps_read(self, _ok):
+        """The sampled steps read: the fields offered (dead ones out), ▸ Animation's."""
+        self._steps_job = None
+        fields = self.fields_of(self.scene.model)
+        if fields != self.fields:
+            self.fields = fields
+            for _sec, ed in self.editors.values():
+                ed.sync()
+            self.fields_changed.emit()
+        for _sec, ed in self.editors.values():
+            ed.anim.sync()
+        self._changed(save=False)
+
+    def _steps_not_read(self, exc):
+        self._steps_job, self._steps_failed = None, True
+        print(f"time steps could not be read: {exc}")
+
     def length_unit_changed(self):
         """The toolbar's unit or the file's changed: a position that follows the toolbar
         (no unit picked for it here), or any position when the file's unit changed, had
@@ -359,11 +528,9 @@ class ContoursPanel(QWidget):
                 continue
             part = sc.model.parts[n]
             if field == SPEED:
-                u, _ = field_values(part, "u")
-                v, _ = field_values(part, "v")
-                w, _ = field_values(part, "w")
-                if u is not None and v is not None and w is not None:
-                    out.append(np.sqrt(u * u + v * v + w * w))
+                s, _ = speed_values(part)
+                if s is not None:
+                    out.append(s)
                 continue
             vals, _ = field_values(part, field)
             if vals is not None:
@@ -399,11 +566,9 @@ class ContoursPanel(QWidget):
         """|u, v, w| stored on the parts the first time it is asked for."""
         for part in self.scene.model.parts.values():
             if SPEED not in part.point_data:
-                u, wu = field_values(part, "u")
-                v, _ = field_values(part, "v")
-                w, _ = field_values(part, "w")
-                if u is not None and v is not None and w is not None and wu == "point":
-                    part.point_data[SPEED] = np.sqrt(u * u + v * v + w * w)
+                s, where = speed_values(part)
+                if s is not None and where == "point":
+                    part.point_data[SPEED] = s
 
     def info(self, c):
         """What contour `c` shows: {array, unit, back, lo, hi, a_lo, a_hi, stops, log,
@@ -412,6 +577,8 @@ class ContoursPanel(QWidget):
         if base is None:
             return {"why": "No solution fields in this file.", "unit": ""}
         f = base
+        if not base.startswith(COORD):
+            self.scene.ensure_fields([base])           # (a step read for other fields)
         if f == SPEED:
             self._ensure_speed()
         q, fu, su = self.unit_of(base)
@@ -446,6 +613,9 @@ class ContoursPanel(QWidget):
                 return {"why": "No value above zero here: a log scale can't show it.",
                         "unit": unit}
         a_lo, a_hi = float(vals.min()), float(vals.max())
+        span = None if gradient or position else self._timeline(base, c)
+        if span is not None and (span[2] if log else span[0]) is not None:
+            a_lo, a_hi = float(conv(span[2] if log else span[0])), float(conv(span[1]))
         lo = c["lo"] if c["lo"] is not None else a_lo
         hi = c["hi"] if c["hi"] is not None else a_hi
         if log and lo <= 0:                           # (typed): the smallest above zero
@@ -478,11 +648,13 @@ class ContoursPanel(QWidget):
         if save:
             self._save()
         drawn = None
-        for c in self.contours:
-            inf = self.info(c)
-            self.editors[c["id"]][1].show_info(inf)
-            if c["id"] == self.active:
-                drawn = inf
+        for c in self.contours:                        # (a folded one: when it unfolds)
+            sec, ed = self.editors[c["id"]]
+            if c["id"] == self.active or sec.expanded:
+                inf = self.info(c)
+                ed.show_info(inf)
+                if c["id"] == self.active:
+                    drawn = inf
         self.range = None if drawn is None or "why" in drawn else (drawn["lo"], drawn["hi"])
         if self.range is None or self.tab is None or self.tab != self.active:
             sc.results.clear()

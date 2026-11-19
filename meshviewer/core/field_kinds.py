@@ -8,13 +8,19 @@
 CFD (FUN3D, Fluent, STAR-CCM+, OpenFOAM, SU2…) and FEA (Abaqus, Ansys, Nastran…)
 names, matched in lower case. A quantity is a key of core/units.QUANTITIES; its
 units are the ones offered. Names that mean two things (ux: a velocity in CFD, a
-displacement in FEA) are left out: they are asked like any unknown field.
+displacement in FEA) are left out: they are asked like any unknown field — except as
+OpenFOAM writes them (Ux, Uy, Uz; Q, the vortex criterion: EXACT, matched as written).
+Z_KEYS: the out-of-plane components, left out on 2D files (core/fields.planar). OpenFOAM's phase
+fractions (alpha.water, alpha.air…) are one kind (PHASE).
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 
 SPEED = "__speed__"                  # |u, v, w| (core/fields.SPEED)
+PHASE = "__phase__"                  # alpha.<phase> (OpenFOAM's volume fractions)
+QCRIT = "__qcrit__"                  # OpenFOAM's Q (q is a heat flux)
+TENSOR = ("xx", "xy", "xz", "yy", "yz", "zz")      # a symmetric tensor's components
 
 
 @dataclass(frozen=True)
@@ -33,15 +39,27 @@ def _k(key, title, group, quantity, *names):
 # In menu order: the groups, and the fields in each, as listed here.
 KINDS = (
     # ---- CFD ------------------------------------------------------------------------------
-    _k("mach", "Mach number", "Flow", None, "m", "mach_number", "ma"),
-    _k(SPEED, "Speed |u, v, w|", "Flow", "speed", "speed", "vmag", "umag", "velocity",
+    _k("mach", "Mach number", "Flow", None, "m", "mach_number", "ma", "machno"),
+    _k("co", "Courant number", "Flow", None, "courantno", "courant", "cfl"),
+    _k(SPEED, "Speed", "Flow", "speed", "speed", "vmag", "umag", "velocity",
        "velocity_magnitude", "vel", "velmag"),
     _k("u", "Velocity u", "Flow", "speed", "vx", "velocity_x", "x_velocity", "x-velocity"),
     _k("v", "Velocity v", "Flow", "speed", "vy", "velocity_y", "y_velocity", "y-velocity"),
     _k("w", "Velocity w", "Flow", "speed", "vz", "velocity_z", "z_velocity", "z-velocity"),
+    _k("mag(umean)", "Mean speed", "Flow", "speed", "umeanmag"),
+    _k("umeanx", "Mean velocity u", "Flow", "speed"),
+    _k("umeany", "Mean velocity v", "Flow", "speed"),
+    _k("umeanz", "Mean velocity w", "Flow", "speed"),
+    _k("phi", "Face flux φ", "Flow", "volume_flow", "flux"),
+    _k("phi_0", "Previous face flux φ₀", "Flow", "volume_flow", "phi0"),
+    _k(QCRIT, "Q criterion", "Flow", "rate_sq", "qcriterion", "q_criterion"),
+    _k("lambda2", "λ2 criterion", "Flow", "rate_sq", "lambda_2"),
     _k("cp", "Pressure coefficient cp", "Pressure", None, "c_p", "pressure_coefficient"),
     _k("p", "Pressure p", "Pressure", "pressure", "pressure", "press", "pstat",
        "static_pressure"),
+    _k("p_rgh", "Pressure p_rgh (p − ρgh)", "Pressure", "pressure", "prgh"),
+    _k("pmean", "Mean pressure", "Pressure", "pressure", "p_mean"),
+    _k("pprime2mean", "Mean pressure variance p'²", "Pressure", "pressure_sq"),
     _k("p0", "Total pressure", "Pressure", "pressure", "ptot", "pt", "total_pressure"),
     _k("cp0", "Total pressure coefficient", "Pressure", None, "cpt", "cptot"),
     _k("rho", "Density ρ", "Density and Temperature", "density", "density", "dens"),
@@ -50,6 +68,8 @@ KINDS = (
     _k("t0", "Total temperature", "Density and Temperature", "temperature", "ttot", "tt",
        "total_temperature"),
     _k("h", "Enthalpy", "Density and Temperature", "energy", "enthalpy"),
+    _k("alphat", "Turbulent thermal diffusivity αt", "Density and Temperature", "viscosity",
+       "alpha_t"),
     _k("yplus", "y+", "Wall", None, "y+", "y_plus", "wall_yplus"),
     _k("cf", "Skin friction cf", "Wall", None, "c_f", "skin_friction",
        "skin_friction_coefficient"),
@@ -57,23 +77,31 @@ KINDS = (
     _k("cfy", "Skin friction cf y", "Wall", None),
     _k("cfz", "Skin friction cf z", "Wall", None),
     _k("tau", "Wall shear stress", "Wall", "pressure", "tau_w", "tauw", "wall_shear",
-       "wall_shear_stress"),
-    _k("taux", "Wall shear stress x", "Wall", "pressure", "tau_x"),
-    _k("tauy", "Wall shear stress y", "Wall", "pressure", "tau_y"),
-    _k("tauz", "Wall shear stress z", "Wall", "pressure", "tau_z"),
+       "wall_shear_stress", "mag(wallshearstress)"),
+    _k("taux", "Wall shear stress x", "Wall", "pressure", "tau_x", "wallshearstressx"),
+    _k("tauy", "Wall shear stress y", "Wall", "pressure", "tau_y", "wallshearstressy"),
+    _k("tauz", "Wall shear stress z", "Wall", "pressure", "tau_z", "wallshearstressz"),
     _k("q", "Heat flux", "Heat", "heat_flux", "qw", "heat_flux", "wall_heat_flux"),
     _k("htc", "Heat transfer coefficient", "Heat", "htc", "heat_transfer_coefficient"),
     _k("k", "Turbulent kinetic energy k", "Turbulence", "tke", "tke", "turb_k"),
     _k("epsilon", "Dissipation ε", "Turbulence", "dissipation", "eps", "turb_eps"),
     _k("omega", "Specific dissipation ω", "Turbulence", "rate", "turb_omega", "sdr"),
     _k("vort", "Vorticity", "Turbulence", "rate", "vorticity", "vortmag",
-       "vorticity_magnitude"),
+       "vorticity_magnitude", "mag(vorticity)"),
+    _k("vorticityx", "Vorticity x", "Turbulence", "rate"),
+    _k("vorticityy", "Vorticity y", "Turbulence", "rate"),
+    _k("vorticityz", "Vorticity z", "Turbulence", "rate"),
     _k("mu", "Viscosity μ", "Turbulence", "viscosity", "viscosity", "visc", "mu_lam",
        "laminar_viscosity"),
     _k("mut", "Eddy viscosity μt", "Turbulence", "viscosity", "mu_t", "eddy_viscosity",
        "mu_turb", "turbulent_viscosity"),
-    _k("nut", "Kinematic eddy viscosity νt", "Turbulence", "kinematic", "nu_t", "nutilde",
+    _k("nut", "Kinematic eddy viscosity νt", "Turbulence", "kinematic", "nu_t"),
+    _k("nutilda", "Modified turbulent viscosity ν̃", "Turbulence", "kinematic", "nutilde",
        "nu_tilde"),
+    *(_k(f"r{c}", f"Reynolds stress R{c}", "Turbulence", "tke") for c in TENSOR),
+    *(_k(f"uprime2mean{c}", f"Mean Reynolds stress {c}", "Turbulence", "tke")
+      for c in TENSOR),
+    _k(PHASE, "Phase fraction α", "Multiphase", None),
     # ---- FEA ------------------------------------------------------------------------------
     _k("disp", "Displacement |d|", "Displacement", "length", "displacement", "dmag",
        "usum", "displacement_magnitude"),
@@ -103,9 +131,17 @@ KINDS = (
 )
 
 _BY_NAME = {n: k for k in KINDS for n in k.names}
+EXACT = {"Ux": "u", "Uy": "v", "Uz": "w", "Q": QCRIT}   # as OpenFOAM writes them
 GROUP_ORDER = tuple(dict.fromkeys(k.group for k in KINDS))
+Z_KEYS = {"w", "umeanz", "vorticityz", "tauz", "cfz", "dz",
+          *(f"{t}{c}" for t in ("r", "uprime2mean") for c in TENSOR if "z" in c)}
 
 
 def field_kind(name):
     """The Kind of a field from its name (as the file writes it), or None."""
-    return _BY_NAME.get((name or "").lower().strip())
+    name = (name or "").strip()
+    if name in EXACT:
+        return _BY_NAME[EXACT[name]]
+    if name.lower().startswith("alpha.") and len(name) > 6:     # alpha.water
+        return _BY_NAME[PHASE]
+    return _BY_NAME.get(name.lower())

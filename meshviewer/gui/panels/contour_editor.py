@@ -9,12 +9,11 @@
       │ ──────────────────────────────────────────── │
       │ Color by       [ Value | Gradient ]          │
       │ Color scale    [ Linear | Log ]              │   how values map onto colors
-      │ Min [ auto: 0.02 ] kPa                       │
+      │ Colors         [ ▬▬▬▬ (the color map) ▾ ]    │
+      │ Min [ auto: 0.02 ] kPa                       │   (Timeline: over every step)
       │ Max [ auto: 1.6 ]  kPa                       │
-      │ Show color bar                     (switch)  │   the bar over the 3D view
-      │ ─ ▸ Color Bar ─────────────────────────────  │   folded at first
-      │     Colors       [ ▬▬▬▬ (the color map) ▾ ]  │
-      │     Height       [━━━━●━━━━━━━]       100%   │   60 – 160 %
+      │ ─ ▸ Color Bar ──────────────────── (switch)  │   the bar over the 3D view; on:
+      │     Height       [━━━━●━━━━━━━]       100%   │   unfolds (off: "Off — …")
       │     Width        [━━━━●━━━━━━━]       100%   │
       │     Ticks        [━━●━━━━━━━━━]          5   │   2 – 15, ends included
       │     Tick spacing [ Linear | Log ]            │   evenly up the bar / in log10
@@ -22,7 +21,8 @@
       │     Smooth colors                  (switch)  │   off: bands between the ticks
       │     Show title                     (switch)  │
       │                        [ Reset Color Bar ]   │
-      └─────────────────────────────────────────────┘
+      │ ─ ▸ Animation ──────────────────── (switch)  │   time steps: gui/panels/
+      └─────────────────────────────────────────────┘     contour_animation.py
                                    [ Rename… | Delete ]
 
 The editor writes its contour's dict (`c`) and tells the panel (`contour_changed`), which
@@ -40,10 +40,11 @@ from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QVBoxLay
 from meshviewer.core.field_kinds import GROUP_ORDER, KINDS, field_kind
 from meshviewer.core.fields import COLORMAPS, DEFAULT_MAP, TICKS
 from meshviewer.core.plots import COORD
-from meshviewer.core.units import NO_UNIT, QUANTITIES, QUANTITY_TITLES
 from meshviewer.gui.access import name_controls
 from meshviewer.gui.forms import (_grid, _label, _row, button, buttons, note, rule, segmented,
                                   switch_row)
+from meshviewer.gui.panels.contour_animation import AnimationSection, anim_settings
+from meshviewer.gui.panels.field_units import CUSTOM_ITEM, FieldUnits  # noqa: F401 (tests)
 from meshviewer.gui.store import settings as _settings
 from meshviewer.gui.widgets import (CollapsibleSection, GradientSelect, MenuSelect,
                                     NoWheelSlider, NumberField, Switch)
@@ -124,7 +125,7 @@ def new_contour(ident, name, field, bar=None):
     return {"id": int(ident), "name": name, "field": field, "lo": None, "hi": None,
             "show": "value", "log": False, "cmap": DEFAULT_MAP,
             "bar": bar_settings(bar if bar is not None else last_bar_settings()),
-            "view": None}
+            "anim": anim_settings(None), "view": None}
 
 
 def clean_contour(c, ident):
@@ -140,6 +141,7 @@ def clean_contour(c, ident):
     out["log"] = bool(c.get("log"))
     out["cmap"] = c.get("cmap") if c.get("cmap") in COLORMAPS else DEFAULT_MAP
     out["view"] = clean_view(c.get("view"))
+    out["anim"] = anim_settings(c.get("anim"))
     return out
 
 
@@ -196,21 +198,15 @@ class ContourEditor(QWidget):
         # -- which field, and its unit
         g = _grid()
         self.field = MenuSelect()
+        self.field.cascade = True                      # a submenu per group (Flow ▸ …)
         self.field.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.field.setToolTip("Field")
         self.field.currentIndexChanged.connect(self._field_changed)
         _row(g, 0, "Field", self.field, wide=True)
-        self.file_unit = MenuSelect()                  # what the file's numbers are in
-        self.file_unit.setToolTip("Unit in File")
-        self.shown_unit = MenuSelect()                 # what to show them in
-        self.shown_unit.setToolTip("Shown In")
-        for m in (self.file_unit, self.shown_unit):
-            m.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-            m.currentIndexChanged.connect(self._unit_changed)
-        self._unit_rows = [_row(g, 1, "Unit in file", self.file_unit, wide=True)[0],
-                           _row(g, 2, "Shown in", self.shown_unit, wide=True)[0]]
+        self.units = FieldUnits(self, lambda: self.panel, lambda: self.c["field"], g, 1)
+        self.file_unit, self.shown_unit = self.units.file_unit, self.units.shown_unit
         cl.addLayout(g)
-        self.unit_note = note()                        # what applies to this field's unit
+        self.unit_note = self.units.note               # what applies to this field's unit
         cl.addWidget(self.unit_note)
         cl.addWidget(rule())
 
@@ -224,22 +220,28 @@ class ContourEditor(QWidget):
             self, (("linear", "Linear", "Linear"), ("log", "Log", "Log")),
             self._scale_changed)
         _row(g, 1, "Color scale", cap, wide=True, align=Qt.AlignLeft)
+        self.cmap = GradientSelect()
+        self.cmap.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        for key, stops in COLORMAPS.items():
+            self.cmap.addItem(stops, key)
+        self.cmap.setToolTip("Colors")
+        self.cmap.currentIndexChanged.connect(lambda *_: self._set(cmap=self.cmap.currentData()))
+        _row(g, 2, "Colors", self.cmap, wide=True)
         self.lo = NumberField()
         self.lo.setToolTip("Min")
         self.hi = NumberField()
         self.hi.setToolTip("Max")
         self.lo.valueChanged.connect(lambda v: self._set(lo=v))
         self.hi.valueChanged.connect(lambda v: self._set(hi=v))
-        _, self.lo_unit = _row(g, 2, "Min", self.lo, unit=" ")
-        _, self.hi_unit = _row(g, 3, "Max", self.hi, unit=" ")
+        _, self.lo_unit = _row(g, 3, "Min", self.lo, unit=" ")
+        _, self.hi_unit = _row(g, 4, "Max", self.hi, unit=" ")
         cl.addLayout(g)
         self.stats = note()                            # only when there is nothing to show
         self.stats.setVisible(False)
         cl.addWidget(self.stats)
-        self.bar_on = Switch()
-        self.bar_on.toggled.connect(lambda on: self._set_bar(on=bool(on)))
-        cl.addWidget(switch_row("Show color bar", self.bar_on))
         cl.addWidget(self._build_bar_section())
+        self.anim = AnimationSection(self)                 # time steps (OpenFOAM)
+        cl.addWidget(self.anim.section)
 
         # -- rename / delete, under the card (as a plot's)
         bottom = QHBoxLayout()
@@ -253,20 +255,22 @@ class ContourEditor(QWidget):
         name_controls(self)
 
     def _build_bar_section(self):
-        """▸ Color Bar, in the forms layout: label · field · unit · ? (sliders take the
-        field and unit columns, their value the last)."""
+        """▸ Color Bar, its switch in the header (Show color bar), in the forms layout:
+        label · field · unit · ? (sliders take the field and unit columns, their value
+        the last). Off: one note instead of the controls."""
+        outer = QWidget()
+        oc = QVBoxLayout(outer)
+        oc.setContentsMargins(0, 0, 0, 0)
+        oc.setSpacing(6)
+        self.bar_note = note("Off — switch on to show the color bar.")
+        oc.addWidget(self.bar_note)
         w = QWidget()
+        self.bar_details = w
+        oc.addWidget(w)
         col = QVBoxLayout(w)
         col.setContentsMargins(0, 0, 0, 0)
         col.setSpacing(6)
         g = _grid()
-        self.cmap = GradientSelect()
-        self.cmap.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        for key, stops in COLORMAPS.items():
-            self.cmap.addItem(stops, key)
-        self.cmap.setToolTip("Colors")
-        self.cmap.currentIndexChanged.connect(lambda *_: self._set(cmap=self.cmap.currentData()))
-        _row(g, 0, "Colors", self.cmap, wide=True)
         self.height_slider, self.height_label = _slider_row(g, 1, "Height", *SIZE_RANGE, 5)
         self.width_slider, self.width_label = _slider_row(g, 2, "Width", *SIZE_RANGE, 5)
         self.ticks_slider, self.ticks_label = _slider_row(g, 3, "Ticks", *TICKS, 1)
@@ -293,9 +297,19 @@ class ContourEditor(QWidget):
         self.reset_cap = buttons(self.reset_bar)
         g.addWidget(self.reset_cap, 0, 1, 1, 3, Qt.AlignRight)
         col.addLayout(g)
-        self.bar_section = CollapsibleSection("Color Bar", w, f"contour_bar{self.c['id']}",
-                                              sub=True, remember=False, start_open=False)
+        self.bar_on = Switch()                         # Show color bar
+        self.bar_on.setToolTip("Show Color Bar")
+        self.bar_on.setAccessibleName("Show Color Bar")
+        self.bar_on.toggled.connect(self._bar_switched)
+        self.bar_section = CollapsibleSection("Color Bar", outer, f"contour_bar{self.c['id']}",
+                                              trailing=self.bar_on, sub=True, remember=False,
+                                              start_open=False)
         return self.bar_section
+
+    def _bar_switched(self, on):
+        if on:
+            self.bar_section.set_expanded(True)
+        self._set_bar(on=bool(on))
 
     # ---- from the contour's dict to the widgets -----------------------------------------
     def sync(self):
@@ -321,10 +335,13 @@ class ContourEditor(QWidget):
         self.cmap.blockSignals(False)
         self.sync_bar()
         self.sync_units()
+        self.anim.sync()
 
     def sync_bar(self):
         b = self.c["bar"]
         Switch.set_silently(self.bar_on, b["on"])
+        self.bar_note.setVisible(not b["on"])
+        self.bar_details.setVisible(b["on"])
         Switch.set_silently(self.smooth, b["smooth"])
         Switch.set_silently(self.show_title, b["title"])
         self.tick_acts["log" if b["tick_log"] else "linear"].setChecked(True)
@@ -339,56 +356,7 @@ class ContourEditor(QWidget):
         self.ticks_label.setText(str(b["ticks"]))
 
     def sync_units(self):
-        """The unit rows for its field: Unit in file only where there is a choice, Shown in
-        once the file's unit is known, and a line saying what applies."""
-        f = self.c["field"]
-        if f is None:
-            for w in (*self._unit_rows, self.file_unit, self.shown_unit, self.unit_note):
-                w.setVisible(False)
-            return
-        q, fu, su = self.panel.unit_of(f)
-        kind = field_kind(f)
-        position = f.startswith(COORD)
-        for m in (self.file_unit, self.shown_unit):
-            m.blockSignals(True)
-            m.clear()
-        if position:
-            text = (f"Positions are in the file's unit, {fu} (File ▸ File Unit…)." if fu else
-                    "The file doesn't say its unit: set it with File ▸ File Unit….")
-        elif kind is not None and kind.quantity is None:
-            text = f"{kind.title} has no unit."
-        else:
-            if kind is not None:                      # its quantity's units
-                self.file_unit.addItem("—  As written", NO_UNIT)
-                for k in QUANTITIES[kind.quantity]:
-                    self.file_unit.addItem(k, k)
-            else:                                     # unknown: any unit, by quantity
-                self.file_unit.addItem("—  No unit", NO_UNIT)
-                for quantity, table in QUANTITIES.items():
-                    self.file_unit.addSection(QUANTITY_TITLES[quantity])
-                    for k in table:
-                        self.file_unit.addItem(k, k)
-            self.file_unit.setCurrentIndex(max(0, self.file_unit.findData(fu)))
-            if fu:
-                text = ""
-            elif kind is not None:
-                text = ("As written in the file (solvers often write it non-dimensional). "
-                        "Pick the unit it is in to show it in another.")
-            else:
-                text = ("Mesh Viewer doesn't know this field: pick its unit if it has one, "
-                        "to show it in another.")
-        choose = not position and (kind is None or kind.quantity is not None)
-        self._unit_rows[0].setVisible(choose)
-        self.file_unit.setVisible(choose)
-        for k in (QUANTITIES[q] if q and fu else ()):
-            self.shown_unit.addItem(k, k)
-        self.shown_unit.setCurrentIndex(max(0, self.shown_unit.findData(su)))
-        self._unit_rows[1].setVisible(bool(q and fu))
-        self.shown_unit.setVisible(bool(q and fu))
-        self.unit_note.setText(text)
-        self.unit_note.setVisible(bool(text))
-        for m in (self.file_unit, self.shown_unit):
-            m.blockSignals(False)
+        self.units.sync()
 
     def show_info(self, info):
         """What the panel worked out for it: the auto range, the unit, or why nothing
@@ -401,7 +369,11 @@ class ContourEditor(QWidget):
         if "a_lo" in info:
             self.lo.setPlaceholderText(f"auto: {info['a_lo_text']}")
             self.hi.setPlaceholderText(f"auto: {info['a_hi_text']}")
+        else:                                          # nothing shows: no old numbers
+            self.lo.setPlaceholderText("auto")
+            self.hi.setPlaceholderText("auto")
         self.tick_acts["log"].setEnabled(bool(info.get("lo_positive", True)))
+        self.anim.sync_range()
 
     # ---- handlers ------------------------------------------------------------------------
     def commit(self):
@@ -438,10 +410,8 @@ class ContourEditor(QWidget):
             self.sync()
         self.panel.contour_changed(self.c["id"])
 
-    def _unit_changed(self, *_):
-        f = self.c["field"]
-        if f is not None:
-            self.panel.set_units(f, self.file_unit.currentData(), self.shown_unit.currentData())
+    def set_custom_unit(self, which, text):
+        self.units.set_custom(which, text)
 
     def reset_color_bar(self):
         """Reset Color Bar: its height, width, ticks, tick spacing, text color, smooth

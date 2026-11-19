@@ -62,15 +62,15 @@ def _needs_3d_cfd(scene):
                 "(a 3D mesh or a CAD model).")
 
 
-def _needs_3d_plots(scene):
-    if scene.model.dim == 2:
-        return "Not for 2D files yet: a section plot cuts 3D boundaries."
-
-
 def _needs_fields(scene):
     if not solution_fields(scene.model.parts):
         return ("This file has no solution fields. Open a results file, such as a "
                 "solver's Tecplot .dat of its boundaries.")
+
+
+def _needs_fields_probe(scene):
+    if not solution_fields(scene.model.parts):
+        return "Open a simulation result file to probe fields."
 
 
 SECTIONS = (
@@ -95,8 +95,11 @@ SECTIONS = (
                 "Contours under the 3D view: the boundaries colored by a solution field",
                 _needs_fields, tab="analyze"),
     SectionSpec("plots", "Plots", "plots",
-                "Plots under the 3D view: sections (cp along x/c…)",
-                _needs_3d_plots, tab="analyze"),
+                "Plots under the 3D view: sections (cp along x/c…; a line across a 2D "
+                "file)", tab="analyze"),
+    SectionSpec("probes", "Probe", "probe",
+                "Fields at a point, along a line or over an area — over time when the "
+                "case has time steps", _needs_fields_probe, tab="analyze"),
 )
 BY_KEY = {s.key: s for s in SECTIONS}
 

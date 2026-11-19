@@ -5,13 +5,15 @@
     │                    2.5                      │
     │                 [ Open… ]                   │
     │     or drop a mesh or CAD file here         │
+    │   Solver [ OpenFOAM ▾ ]  [ Open Case… ]     │
     │                                             │
     │  Recent                Try a Sample         │
     │  wing.cgns  ~/CFD      ONERA M6 Wing        │
     │  …                     Avionics Bay         │
     └────────────────────────────────────────────┘
 
-While a file opens, only "Opening wing.cgns…" stays. The same recent files are in
+Solver picks what Open Case… opens (a case folder); only OpenFOAM for now, the others
+are listed grayed (SOLVERS). While a file opens, only "Opening wing.cgns…" stays. The same recent files are in
 File ▸ Open Recent, the same samples in File ▸ Open Sample (gui/samples.py).
 """
 from __future__ import annotations
@@ -25,8 +27,14 @@ from PySide6.QtWidgets import (
 
 from meshviewer import version_label
 from meshviewer.gui.samples import available
+from meshviewer.gui.store import settings
+from meshviewer.gui.widgets import MenuSelect
 
 RECENT_SHOWN = 6
+# Open Case…'s solvers: (group, name, key, can be opened yet)
+SOLVERS = (("CFD", "OpenFOAM", "openfoam", True), ("CFD", "FUN3D", "fun3d", False),
+           ("CFD", "Overflow", "overflow", False), ("CFD", "LAVA", "lava", False),
+           ("CFD", "SU2", "su2", False), ("FEA", "Nastran", "nastran", False))
 
 
 def _row(title, detail, tip):
@@ -62,6 +70,7 @@ def _short(folder):
 class Welcome(QWidget):
     open_file = Signal(str)          # a path: a recent file or a sample
     open_dialog = Signal()           # Open…
+    open_case = Signal(str)          # Open Case…: the solver's key ("openfoam")
 
     def __init__(self, recent, parent=None):
         """recent: a function giving the recent files (newest first)."""
@@ -99,6 +108,9 @@ class Welcome(QWidget):
         self.hint.setObjectName("EmptyState")
         self.hint.setAlignment(Qt.AlignCenter)
         outer.addWidget(self.hint)
+        outer.addSpacing(10)
+        self.case_row = self._case_row()
+        outer.addWidget(self.case_row, 0, Qt.AlignCenter)
         outer.addSpacing(22)
 
         self.lists = QWidget()
@@ -130,15 +142,46 @@ class Welcome(QWidget):
     def idle(self):
         """Nothing open: the way in."""
         self.status.setVisible(False)
-        for w in (self.open, self.hint, self.lists):
+        for w in (self.open, self.hint, self.case_row, self.lists):
             w.setVisible(True)
         self._fill_recent()
 
     def opening(self, name):
         self.status.setText(f"Opening {name}…")
         self.status.setVisible(True)
-        for w in (self.open, self.hint, self.lists):
+        for w in (self.open, self.hint, self.case_row, self.lists):
             w.setVisible(False)
+
+    # ---- Open Case… -------------------------------------------------------------------------
+    def _case_row(self):
+        row = QWidget()
+        lay = QHBoxLayout(row)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(8)
+        label = QLabel("Solver")
+        label.setObjectName("InfoLine")
+        self.solver = MenuSelect()
+        self.solver.setAccessibleName("Solver")
+        group = None
+        for g, name, key, ready in SOLVERS:
+            if g != group:
+                self.solver.addSection(g)
+                group = g
+            self.solver.addItem(name, key, enabled=ready)
+        i = self.solver.findData(settings().value("welcome/solver", "openfoam"))
+        self.solver.setCurrentIndex(max(i, 0))
+        self.solver.currentIndexChanged.connect(
+            lambda _i: settings().setValue("welcome/solver", self.solver.currentData()))
+        from meshviewer.gui.forms import button, buttons
+        act = button(self, "Open Case…", tip="Open Case  (⇧⌘O)",
+                     slot=lambda: self.open_case.emit(self.solver.currentData()))
+        act.setIconText(act.text())                   # (Qt drops the "…" on buttons)
+        cap = buttons(act)
+        self.open_case_button = cap.buttons[0]
+        self.open_case_button.setCursor(Qt.PointingHandCursor)
+        for w in (label, self.solver, cap):
+            lay.addWidget(w)
+        return row
 
     # ---- the two lists --------------------------------------------------------------------
     def _clear(self, col):

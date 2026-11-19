@@ -17,7 +17,8 @@ from meshviewer.gui.widgets.basics import Menu
 # ---------------------------------------------------------------------------
 class MenuSelect(QPushButton):
     """Looks like a field with a chevron; click -> right-click-style menu with
-    the choices (a check mark on the current one). QComboBox-like API."""
+    the choices (a check mark on the current one). QComboBox-like API. cascade: each
+    titled section is a submenu (Flow ▸ …), the current one's checked too."""
     currentIndexChanged = Signal(int)
 
     def __init__(self, parent=None):
@@ -27,19 +28,23 @@ class MenuSelect(QPushButton):
         self._items = []                      # [(text, data)]
         self._icons = []                      # optional icon per item
         self._sections = {}                   # item index -> header above it ("" = a line)
+        self._off = set()                     # items shown grayed (can't be picked)
         self._index = -1
         self._widest, self._has_icon = 0, False   # widest text so far (px), any icon?
+        self.cascade = False
         self.clicked.connect(self._open)
         # macOS: lay out by the drawn box, not the native button's smaller rect
         # (without it, two menus in a row overlap)
         self.setAttribute(Qt.WA_LayoutUsesWidgetRect)
 
     # ---- QComboBox-like API ----
-    def addItem(self, text, data=None, icon=None):
+    def addItem(self, text, data=None, icon=None, enabled=True):
         self._items.append((text, data))
         self._icons.append(icon)
-        if self._index < 0:
-            self.setCurrentIndex(0)
+        if not enabled:
+            self._off.add(len(self._items) - 1)
+        elif self._index < 0:
+            self.setCurrentIndex(len(self._items) - 1)
         self._widest = max(self._widest, self.fontMetrics().horizontalAdvance(text))
         self._has_icon = self._has_icon or icon is not None
         self._fit_width()
@@ -51,9 +56,12 @@ class MenuSelect(QPushButton):
     def count(self):
         return len(self._items)
 
+    def isItemEnabled(self, i):
+        return 0 <= i < len(self._items) and i not in self._off
+
     def clear(self):
         self._items, self._icons, self._index = [], [], -1
-        self._sections = {}
+        self._sections, self._off = {}, set()
         self._widest, self._has_icon = 0, False
         self.setText("")
         self.setIcon(QIcon())
@@ -81,7 +89,7 @@ class MenuSelect(QPushButton):
         return next((i for i, (_, d) in enumerate(self._items) if d == data), -1)
 
     def setCurrentIndex(self, i):
-        if not 0 <= i < len(self._items):
+        if not 0 <= i < len(self._items) or i in self._off:
             return
         changed = i != self._index
         self._index = i
@@ -91,22 +99,38 @@ class MenuSelect(QPushButton):
             self.currentIndexChanged.emit(i)
 
     # ---- menu ----
-    def _open(self):
+    def build_menu(self):
+        """The pop-up menu (its own: a submenu per section when cascading)."""
         menu = Menu(self)
+        target = menu
         for i, (text, _) in enumerate(self._items):
             if i in self._sections:
-                if i:
-                    menu.addSeparator()
-                if self._sections[i]:
-                    menu.addAction(self._sections[i]).setEnabled(False)   # the header
-            a = menu.addAction(text)
+                title = self._sections[i]
+                if self.cascade and title:                # a side submenu: Flow ▸
+                    target = Menu(menu)
+                    target.setTitle(title)
+                    menu.addMenu(target)
+                else:
+                    target = menu
+                    if i:
+                        menu.addSeparator()
+                    if title:
+                        menu.addAction(title).setEnabled(False)   # the header
+            if target is not menu and i == self._index:   # the current one's group
+                target.menuAction().setCheckable(True)
+                target.menuAction().setChecked(True)
+            a = target.addAction(text)
             if self._icons[i] is not None:
                 a.setIcon(self._icons[i])
             a.setCheckable(True)
             a.setChecked(i == self._index)
+            a.setEnabled(i not in self._off)
             a.triggered.connect(lambda _=False, k=i: self.setCurrentIndex(k))
         menu.setMinimumWidth(self.width())
-        menu.exec(self.mapToGlobal(self.rect().bottomLeft()))
+        return menu
+
+    def _open(self):
+        self.build_menu().exec(self.mapToGlobal(self.rect().bottomLeft()))
 
     def _fit_width(self):
         icon = 18 if self._has_icon else 0

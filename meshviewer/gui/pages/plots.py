@@ -388,6 +388,7 @@ def _kept(lo, hi):
 
 class PlotPage(QWidget):
     ranges_changed = Signal(int, object)         # plot id, (x0, x1, y0, y1): zoom / pan / fit
+    PLOT = CrossSectionPlot                      # what draws it (a probe's: ProbePlot)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -409,7 +410,7 @@ class PlotPage(QWidget):
         self.subtitle.setObjectName("InfoLine")
         lay.addWidget(self.subtitle)
         lay.addSpacing(8)
-        self.plot = CrossSectionPlot()
+        self.plot = self.PLOT()
         self.plot.ranges_changed.connect(
             lambda rng: self.ident is not None and self.ranges_changed.emit(self.ident, rng))
         lay.addWidget(self.plot, 1)

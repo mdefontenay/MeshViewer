@@ -93,6 +93,7 @@ class MeshViewerApp(QApplication):
             "unit_cad": st.value("prefs/unit_cad", "mm"),
             "ask_unit": st.value("prefs/ask_unit", True, type=bool),
         }
+        st.remove("prefs/timeline_cache_mb")               # (a setting of 2.5.2's betas)
         self._apply_theme()
         self.setStyleSheet(stylesheet())
         self.styleHints().colorSchemeChanged.connect(lambda *_: self.setStyleSheet(stylesheet()))
@@ -108,6 +109,9 @@ class MeshViewerApp(QApplication):
             a = m.addAction("Open…")
             a.setShortcut(QKeySequence.Open)
             a.triggered.connect(self.open_dialog)
+            a = m.addAction("Open Case…")
+            a.setShortcut(QKeySequence("Ctrl+Shift+O"))
+            a.triggered.connect(lambda: self.open_case_dialog())
             self.add_recent_menu(m)
             add_sample_menu(m, self.open_path)
             for a in self.app_menu_actions():          # the app menu: only here, so once
@@ -308,6 +312,18 @@ class MeshViewerApp(QApplication):
         files, _ = QFileDialog.getOpenFileNames(None, "Open", self._last_dir, FILE_FILTER)
         for f in files:
             self.open_path(Path(f))
+
+    def open_case_dialog(self, window=None):
+        """File ▸ Open Case…: an OpenFOAM case folder (or its polyMesh folder). A sheet on
+        `window`; with no window open, a dialog of its own."""
+        if window is not None:
+            from meshviewer.gui.sheets import ask_folder
+            ask_folder(window, "Open Case", self._last_dir,
+                       lambda f: self.open_path(Path(f), prefer=window))
+            return
+        folder = QFileDialog.getExistingDirectory(None, "Open Case", self._last_dir)
+        if folder:
+            self.open_path(Path(folder))
 
 
 def run(argv=None):

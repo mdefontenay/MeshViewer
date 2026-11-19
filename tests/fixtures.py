@@ -13,6 +13,10 @@ made again when missing or when this file changes (`files()`):
     box_fluent_bin.msh  the same, binary sections
     plate_fluent.msh Fluent text, 2D: quad cells as edges
     profile.dxf      DXF: a closed polyline, a circle, an arc and a line on two layers
+
+foam_case(folder, …) writes an ASCII OpenFOAM case of hex cells (constant/polyMesh, and
+time folders with fields: FOAM_FIELDS) where a test asks for it (in a temporary folder:
+cases are folders, not files).
 """
 from __future__ import annotations
 
@@ -335,6 +339,139 @@ def _dxf(path):
     msp.add_arc((30, 10), 5, 0, 180, dxfattribs={"layer": "HOLES"})
     msp.add_line((25, 10), (35, 10), dxfattribs={"layer": "HOLES"})
     doc.saveas(str(path))
+
+
+def _foam_head(cls, obj, note=""):
+    note = f'    note        "{note}";\n' if note else ""
+    return ("FoamFile\n{\n    version     2.0;\n    format      ascii;\n"
+            f"    class       {cls};\n{note}    location    \"constant/polyMesh\";\n"
+            f"    object      {obj};\n}}\n\n")
+
+
+# field -> (dimensions, value at a point (x, y, z) at time t); vectors give 3 values
+FOAM_FIELDS = {
+    "p": ("0 2 -2 0 0 0 0", lambda x, y, z, t: t * (x + 2 * y + 3 * z)),
+    "U": ("0 1 -1 0 0 0 0", lambda x, y, z, t: (t * (1 + x), t * y, t * z)),
+    "k": ("0 2 -2 0 0 0 0", lambda x, y, z, t: t * (1 + x)),
+    "omega": ("0 0 -1 0 0 0 0", lambda x, y, z, t: t * (2 + x)),
+    "epsilon": ("0 2 -3 0 0 0 0", lambda x, y, z, t: t * (3 + x)),
+    "nut": ("0 2 -1 0 0 0 0", lambda x, y, z, t: t * (4 + x) * 1e-3),
+    "T": ("0 0 0 1 0 0 0", lambda x, y, z, t: 300 + t * x),
+    "yPlus": ("0 0 0 0 0 0 0", lambda x, y, z, t: t * (5 + x)),
+    "p_rgh": ("0 2 -2 0 0 0 0", lambda x, y, z, t: t * (1 + x)),
+    "pMean": ("0 2 -2 0 0 0 0", lambda x, y, z, t: 2 + x),             # the same each step
+    "UMean": ("0 1 -1 0 0 0 0", lambda x, y, z, t: (1 + x, y, 0.0)),   # the same each step
+    "alpha.water": ("0 0 0 0 0 0 0", lambda x, y, z, t: t * y),
+    "nuTilda": ("0 2 -1 0 0 0 0", lambda x, y, z, t: t * (1 + y) * 1e-3),
+    "CourantNo": ("0 0 0 0 0 0 0", lambda x, y, z, t: t * (0.1 + x)),
+    "Q": ("0 0 -2 0 0 0 0", lambda x, y, z, t: t * (x - y)),
+    "Lambda2": ("0 0 -2 0 0 0 0", lambda x, y, z, t: t * (y - x)),
+    "vorticity": ("0 0 -1 0 0 0 0", lambda x, y, z, t: (0.0, 0.0, t * (1 + x))),
+    # a symmetric tensor: xx xy xz yy yz zz, as OpenFOAM writes it
+    "R": ("0 2 -2 0 0 0 0", lambda x, y, z, t: (t * (1 + x), 2 * t, 3 * t, t * (4 + y),
+                                                5 * t, t * (6 + z))),
+    "phi": ("0 3 -1 0 0 0 0", lambda x, y, z, t: t * x),                # on the faces
+    "phi_0": ("0 3 -1 0 0 0 0", lambda x, y, z, t: 0.0),                # zero: nothing to draw
+    "pPrime2Mean": ("2 -2 -4 0 0 0 0", lambda x, y, z, t: t * (1 + x) ** 2),
+    "UPrime2Mean": ("0 2 -2 0 0 0 0", lambda x, y, z, t: (1 + x, 0.1, 0.2, 2 + y, 0.3, 3.0)),
+}
+FOAM_TENSORS = {"R", "UPrime2Mean"}
+FOAM_FACES = {"phi", "phi_0"}                        # surfaceScalarField
+
+
+def _foam_field(path, name, label, cells, patches, t):
+    """A field file: its values at the cell centers (a face field: the inner faces'
+    centers) and at each patch's face centers."""
+    dims, fn = FOAM_FIELDS[name]
+    many = isinstance(fn(0.0, 0.0, 0.0, 1.0), tuple)
+    cls, typ = (("surfaceScalarField", "scalar") if name in FOAM_FACES else
+                ("volSymmTensorField", "symmTensor") if name in FOAM_TENSORS else
+                ("volVectorField", "vector") if many else ("volScalarField", "scalar"))
+    one = (lambda c: "(" + " ".join(f"{v:.12g}" for v in fn(*c, t)) + ")") if many else \
+        (lambda c: f"{fn(*c, t):.12g}")
+    vals = lambda cs: f"nonuniform List<{typ}> {len(cs)}\n(\n" + \
+        "".join(one(c) + "\n" for c in cs) + ")"                          # noqa: E731
+    bf = "".join(f"    {n}\n    {{\n        type empty;\n    }}\n" if kind == "empty" else
+                 f"    {n}\n    {{\n        type calculated;\n        value {vals(cs)};\n    }}\n"
+                 for n, kind, cs in patches)
+    head = _foam_head(cls, name).replace('"constant/polyMesh"', f'"{label}"')
+    path.write_text(head + f"dimensions [{dims}];\n\ninternalField {vals(cells)};\n\n"
+                    f"boundaryField\n{{\n{bf}}}\n")
+
+
+def foam_case(root, n=(2, 3, 4), size=(1.0, 1.0, 1.0), two_d=False, turned=False,
+              times=()):
+    """An OpenFOAM case of nx × ny × nz hex cells: inlet (x min), outlet (x max), walls
+    (y min and max), z min and max as `sides` (symmetry) or, two_d, `frontAndBack`
+    (empty), and `defaultFaces` with no faces. turned: x, y, z -> z, x, y (a 2D case
+    flat in YZ). times: time folders ("0", "0.5", "1"), each with FOAM_FIELDS at that
+    time (the first only p and U). Returns the case folder."""
+    nx, ny, nz = n
+    P = lambda i, j, k: i + (nx + 1) * (j + (ny + 1) * k)        # noqa: E731
+    C = lambda i, j, k: i + nx * (j + ny * k)                    # noqa: E731
+    fx = lambda i, j, k: [P(i, j, k), P(i, j + 1, k), P(i, j + 1, k + 1), P(i, j, k + 1)]  # noqa
+    fy = lambda i, j, k: [P(i, j, k), P(i, j, k + 1), P(i + 1, j, k + 1), P(i + 1, j, k)]  # noqa
+    fz = lambda i, j, k: [P(i, j, k), P(i + 1, j, k), P(i + 1, j + 1, k), P(i, j + 1, k)]  # noqa
+    pts = [(size[0] * i / nx, size[1] * j / ny, size[2] * k / nz)
+           for k in range(nz + 1) for j in range(ny + 1) for i in range(nx + 1)]
+    if turned:
+        pts = [(z, x, y) for x, y, z in pts]
+    faces, owner, nbr = [], [], []
+    for k in range(nz):                             # inner faces: by owner, then neighbour
+        for j in range(ny):
+            for i in range(nx):
+                for ok, f, other in ((i + 1 < nx, fx(i + 1, j, k), C(i + 1, j, k)),
+                                     (j + 1 < ny, fy(i, j + 1, k), C(i, j + 1, k)),
+                                     (k + 1 < nz, fz(i, j, k + 1), C(i, j, k + 1))):
+                    if ok:
+                        faces.append(f)
+                        owner.append(C(i, j, k))
+                        nbr.append(other)
+    patches = {                                     # boundary faces point out
+        "inlet": ("patch", [(fx(0, j, k)[::-1], C(0, j, k))
+                            for k in range(nz) for j in range(ny)]),
+        "outlet": ("patch", [(fx(nx, j, k), C(nx - 1, j, k))
+                             for k in range(nz) for j in range(ny)]),
+        "walls": ("wall", [(fy(i, 0, k)[::-1], C(i, 0, k)) for k in range(nz) for i in range(nx)]
+                  + [(fy(i, ny, k), C(i, ny - 1, k)) for k in range(nz) for i in range(nx)]),
+        "frontAndBack" if two_d else "sides": (
+            "empty" if two_d else "symmetry",
+            [(fz(i, j, 0)[::-1], C(i, j, 0)) for j in range(ny) for i in range(nx)]
+            + [(fz(i, j, nz), C(i, j, nz - 1)) for j in range(ny) for i in range(nx)]),
+        "defaultFaces": ("empty", []),
+    }
+    n_inner, bnd = len(faces), []
+    for name, (kind, fl) in patches.items():
+        bnd.append((name, kind, len(fl), len(faces)))
+        for f, c in fl:
+            faces.append(f)
+            owner.append(c)
+    poly = Path(root) / "constant" / "polyMesh"
+    poly.mkdir(parents=True, exist_ok=True)
+    note = f"nPoints:{len(pts)}  nCells:{nx * ny * nz}  nFaces:{len(faces)}  nInternalFaces:{n_inner}"
+    lst = lambda rows: f"{len(rows)}\n(\n" + "".join(f"{r}\n" for r in rows) + ")\n"   # noqa
+    (poly / "points").write_text(_foam_head("vectorField", "points")
+                                 + lst([f"({x:g} {y:g} {z:g})" for x, y, z in pts]))
+    (poly / "faces").write_text(_foam_head("faceList", "faces")
+                                + lst([f"4({' '.join(map(str, f))})" for f in faces]))
+    (poly / "owner").write_text(_foam_head("labelList", "owner", note) + lst(owner))
+    (poly / "neighbour").write_text(_foam_head("labelList", "neighbour", note) + lst(nbr))
+    (poly / "boundary").write_text(_foam_head("polyBoundaryMesh", "boundary") + lst(
+        [f"{name}\n{{\n    type {kind};\n    nFaces {nf};\n    startFace {start};\n}}"
+         for name, kind, nf, start in bnd]))
+    P3 = np.asarray(pts, dtype=float)
+    centers = [P3[[P(i + a, j + b, k + c) for a in (0, 1) for b in (0, 1) for c in (0, 1)]]
+               .mean(axis=0) for k in range(nz) for j in range(ny) for i in range(nx)]
+    faces_at = [(name, kind, [P3[f].mean(axis=0) for f, _ in fl])
+                for name, (kind, fl) in patches.items()]
+    inner = [P3[f].mean(axis=0) for f in faces[:n_inner]]
+    for a, label in enumerate(times):
+        folder = Path(root) / label
+        folder.mkdir(exist_ok=True)
+        for name in (("p", "U") if a == 0 else FOAM_FIELDS):
+            _foam_field(folder / name, name, label, inner if name in FOAM_FACES else centers,
+                        faces_at, float(label))
+    return Path(root)
 
 
 MAKERS = {"step": ("box.step", _step), "cgns": ("box.cgns", lambda p: _cgns(p)),

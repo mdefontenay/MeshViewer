@@ -1,5 +1,6 @@
 """Contours: Tecplot fields colored on the boundaries; several contours, each with its
-tab; the color bar."""
+tab; the color bar. OpenFOAM time steps and fields (3D and 2D), Measure Selected on them;
+▸ Color Bar / ▸ Animation header switches, the playback bar, Timeline / Current Step."""
 from conftest import ContourTool, check, open_file, run
 
 
@@ -31,7 +32,9 @@ def test(app, files):
           and rp.cmap.text() == "", f"blue–white–red: same real range, menu shows colours only")
     check("diverging" not in COLORMAPS, "blue–grey–red removed")
     import numpy as np
-    drawn = lambda: np.nansum(np.asarray(sc.results._surf.point_data["ResultT"]))   # noqa: E731
+    import pyvista as pv
+    drawn = lambda: np.nansum(np.asarray(pv.wrap(                                  # noqa: E731
+        sc.results._actor.GetMapper().GetInput()).point_data["ResultT"]))  # what is drawn
     before = drawn()
     sc.set_selection(["SPHERE"])
     app.processEvents()
@@ -407,7 +410,11 @@ def color_bar(app, w):
     grid = next(c for c in (g.itemAt(i).layout() for i in range(g.count()))
                 if c is not None and c.indexOf(ed.height_slider) >= 0)
     span = lambda wdg: grid.getItemPosition(grid.indexOf(wdg))[1:]   # noqa: E731
-    check(span(rp.cmap) == (1, 1, 3) and span(ed.height_slider) == (1, 1, 2)
+    cmap_grid = rp.cmap.parentWidget().layout()
+    cmap_grid = next(c for c in (cmap_grid.itemAt(i).layout() for i in range(cmap_grid.count()))
+                     if c is not None and c.indexOf(rp.cmap) >= 0)
+    check(cmap_grid.getItemPosition(cmap_grid.indexOf(rp.cmap))[1:] == (1, 1, 3)
+          and span(ed.height_slider) == (1, 1, 2)
           and span(ed.height_label) == (3, 1, 1) and span(ed.width_slider) == (1, 1, 2)
           and span(ed.ticks_slider) == (1, 1, 2) and span(ed.ticks_label) == (3, 1, 1),
           "Colors across; Height, Width, Ticks: slider + its value")
@@ -569,5 +576,651 @@ def view_checks(app, w):
     w._show_page("contour:2")
 
 
+def openfoam(app, files):
+    """OpenFOAM cases with time folders: the latest step, its fields (kinds and units),
+    Contours, Measure Selected ▸ Field Values — a 3D case and a 2D one."""
+    import shutil
+    import tempfile
+    from pathlib import Path
+    tmp = Path(tempfile.mkdtemp(prefix="foam-fields-"))
+    try:
+        _openfoam_core(tmp)
+        _openfoam_3d(app, tmp)
+        _openfoam_2d(app, tmp)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _at(name, c, t=1.0):
+    """A field of tests/fixtures.FOAM_FIELDS at a point (U: its magnitude)."""
+    import numpy as np
+    from fixtures import FOAM_FIELDS
+    v = FOAM_FIELDS[name][1](*c, t)
+    return float(np.linalg.norm(v)) if name == "U" else float(v)
+
+
+def _openfoam_core(tmp):
+    import numpy as np
+    from fixtures import foam_case
+    from meshviewer.core import formats
+    from meshviewer.core.field_kinds import SPEED, field_kind
+    from meshviewer.core.fields import solution_fields
+    case = foam_case(tmp / "box", times=("0", "0.5", "1"))
+    (case / "2").mkdir()                                   # a time folder without fields
+    (case / "system").mkdir()
+    m = formats.load(case, debug=False)
+    check(m.times == [0.0, 0.5, 1.0] and m.time_labels == ["0", "0.5", "1"]
+          and m.time_index == 2, f"OpenFOAM: time steps {m.time_labels}, the latest shown "
+          f"({m.time_index})")
+    fields = set(solution_fields(m.parts))
+    kinds = {"p": "p", "Ux": "u", "Uy": "v", "Uz": "w", SPEED: SPEED, "k": "k",
+             "omega": "omega", "epsilon": "epsilon", "nut": "nut", "T": "t", "yPlus": "yplus"}
+    check(set(kinds) <= fields and all(field_kind(f).key == k for f, k in kinds.items()),
+          f"OpenFOAM fields found and known: {sorted(fields - {SPEED})}")
+    u = m.field_units
+    check(u["p"] == "m²/s²" and u["Ux"] == u[SPEED] == "m/s" and u["T"] == "K"
+          and u["omega"] == "1/s" and u["epsilon"] == "m²/s³" and u["nut"] == "m²/s"
+          and u["yPlus"] == "", "their units from the files' dimensions")
+    check(field_kind("alpha.water").group == "Multiphase" and field_kind("ux") is None
+          and field_kind("wallShearStressx").key == "taux"
+          and field_kind("mag(wallShearStress)").key == "tau",
+          "alpha.water: a phase fraction; ux still unknown; wallShearStress x / magnitude")
+    inlet = m.parts["inlet"]
+    cen = np.asarray(inlet.cell_centers().points)
+    p = np.asarray(inlet.cell_data["p"])
+    check(np.allclose(p, [_at("p", c) for c in cen], atol=1e-5)
+          and "p" in inlet.point_data and "Ux" in inlet.cell_data,
+          "the inlet's own face values (and at the nodes)")
+    vol = m.volume()
+    cc = np.asarray(vol.cell_centers().points)
+    check(np.allclose(np.asarray(vol.cell_data["k"]), [_at("k", c) for c in cc], atol=1e-5),
+          "the cells carry their values (Section)")
+    early = m.case.step_arrays(1)
+    check(np.allclose(np.asarray(early["inlet"][1]["p"]), p / 2, atol=1e-5),
+          "another time step (0.5): read from the same readers")
+    mesh = foam_case(tmp / "mesh_only")
+    (mesh / "0").mkdir()
+    m = formats.load(mesh, debug=False)
+    check(m.times == [] and m.time_index is None and not solution_fields(m.parts),
+          "a case without fields: the mesh only, no time steps")
+    _catalog(tmp)
+
+
+def _catalog(tmp):
+    """The other OpenFOAM fields: known, grouped, in the files' units; R split in the
+    order OpenFOAM writes it; phi on the patches' faces."""
+    import numpy as np
+    from fixtures import FOAM_FIELDS
+    from meshviewer.core import formats
+    from meshviewer.core.field_kinds import field_kind
+    from meshviewer.core.fields import solution_fields
+    m = formats.load(tmp / "box", debug=False)
+    fields = set(solution_fields(m.parts))
+    want = {"p_rgh": ("Pressure", "m²/s²"), "pMean": ("Pressure", "m²/s²"),
+            "phi": ("Flow", "m³/s"), "alpha.water": ("Multiphase", ""),
+            "nuTilda": ("Turbulence", "m²/s"), "Rxy": ("Turbulence", "m²/s²"),
+            "UMeanx": ("Flow", "m/s"), "mag(UMean)": ("Flow", "m/s"),
+            "CourantNo": ("Flow", ""), "Q": ("Flow", "1/s²"), "Lambda2": ("Flow", "1/s²"),
+            "vorticityz": ("Turbulence", "1/s"), "mag(vorticity)": ("Turbulence", "1/s")}
+    got = {f: (field_kind(f).group if field_kind(f) else None, m.field_units.get(f))
+           for f in want}
+    check(set(want) <= fields and got == want, f"the OpenFOAM catalog: {got}")
+    from meshviewer.core.units import QUANTITIES, unit_quantity
+    pp2, phi0 = field_kind("pPrime2Mean"), field_kind("phi_0")
+    check(pp2.group == "Pressure" and pp2.title == "Mean pressure variance p'²"
+          and m.field_units["pPrime2Mean"] == "Pa²" and set(QUANTITIES[pp2.quantity]) ==
+          {"Pa²", "kPa²"} and unit_quantity("m⁴/s⁴") == "kinematic_sq"
+          and phi0.group == "Flow" and phi0.title == "Previous face flux φ₀"
+          and m.field_units["phi_0"] == "m³/s" and unit_quantity("kg/s") == "mass_flow",
+          "pPrime2Mean (Pressure: Pa², kPa², m⁴/s⁴) and phi_0 (Flow: m³/s, kg/s)")
+    check(field_kind("UPrime2Meanxy").title == "Mean Reynolds stress xy"
+          and field_kind("Q").title == "Q criterion" and field_kind("q").key == "q"
+          and field_kind("mag(UMean)").title == "Mean speed"
+          and field_kind("CourantNo").key == field_kind("Co").key,
+          "UPrime2Mean, Q (not the heat flux q), Mean speed, Co")
+    inlet, outlet = m.parts["inlet"], m.parts["outlet"]
+    c = np.asarray(inlet.cell_centers().points)
+    r = FOAM_FIELDS["R"][1]
+    check(all(np.allclose(np.asarray(inlet.cell_data["R" + k]), [r(*p, 1.0)[i] for p in c],
+                          atol=1e-5) for i, k in enumerate(("xx", "xy", "xz", "yy", "yz", "zz"))),
+          "R: Rxx, Rxy, Rxz, Ryy, Ryz, Rzz as written")
+    check(np.allclose(np.asarray(outlet.cell_data["phi"]), 1.0)
+          and "phi" not in outlet.point_data, "phi: each outlet face's own flux")
+
+
+def _openfoam_3d(app, tmp):
+    import numpy as np
+    from meshviewer.core.field_kinds import SPEED
+    from meshviewer.render.element_details import field_values
+    from meshviewer.render.elements import VOLUME
+    w = open_file(app, tmp / "box")
+    sc, sb = w.scene, w.sidebar
+    rp = ContourTool(sb.contours_panel)
+    check(sb.current_tab() == "analyze" and sb.is_open("contours")
+          and [c["name"] for c in rp.panel.contours] == ["Contour 1"] and rp.panel.active == 1,
+          "OpenFOAM with fields: opens on Analyze ▸ Contours, Contour 1")
+    check(rp.field.currentData() == "yPlus", f"its field: y+ ({rp.field.currentData()})")
+    w._show_page("contour:1")
+    app.processEvents()
+    rp.field.setCurrentIndex(rp.field.findData("p"))
+    app.processEvents()
+    panel = sb.contours_panel
+    check(sc.results.shown and sc.results.spec[0] == "p" and panel.unit_label("p") == "m²/s²",
+          f"Contour of p, in the file's unit ({panel.unit_label('p')})")
+    rp.field.setCurrentIndex(rp.field.findData(SPEED))
+    app.processEvents()
+    top = max(float(np.max(np.sqrt(sum(np.asarray(p.point_data[k], dtype=float) ** 2
+                                           for k in ("Ux", "Uy", "Uz")))))
+              for p in sc.model.parts.values())
+    check(sc.results.spec[0] == SPEED and abs(rp.range[1] - top) < 1e-6,
+          f"Speed from Ux, Uy, Uz (max {rp.range[1]:.4g}, {top:.4g} at the nodes)")
+    el, sp = sc.elements, sb.selected_panel
+    w.set_select_kind("mesh_cell")
+    el._take(("inlet", 0), False)
+    app.processEvents()
+    c = np.asarray(sc.model.parts["inlet"].cell_centers().points)[0]
+    got = dict(field_values(el)["fields"])
+    fv = field_values(el)
+    check(abs(got["p"] - _at("p", c)) < 1e-5 and abs(got[SPEED] - _at("U", c)) < 1e-5
+          and not fv["mean"], "Measure Selected, a boundary face: its own values (p, speed)")
+    rows = dict(sp.field_rows)
+    check(rows.get("Pressure p", "").endswith("m²/s²"),
+          f"…in Contours' units ({rows.get('Pressure p')})")
+    w.set_select_kind("volume_cell")
+    grid = el.volume_grid()
+    el._take((VOLUME, 5), False)
+    app.processEvents()
+    c = np.asarray(grid.cell_centers().points)[5]
+    got = dict(field_values(el)["fields"])
+    check(abs(got["omega"] - _at("omega", c)) < 1e-5 and abs(got["T"] - _at("T", c)) < 1e-4,
+          "a volume cell: its own values")
+    w.set_select_kind("part")
+    sc.set_selection(["outlet"])
+    app.processEvents()
+    got = dict(field_values(el)["fields"])
+    outlet = sc.model.parts["outlet"]
+    a = outlet.compute_cell_sizes(length=False, volume=False).cell_data["Area"]
+    want = float(np.sum(np.asarray(outlet.cell_data["k"]) * a) / np.sum(a))
+    check(abs(got["k"] - want) < 1e-6, "a part: area-weighted over its faces")
+    w.close()
+
+
+def _openfoam_2d(app, tmp):
+    import numpy as np
+    from fixtures import foam_case
+    from meshviewer.render.element_details import field_values
+    case = foam_case(tmp / "channel", n=(8, 4, 1), size=(2.0, 1.0, 0.1), two_d=True,
+                     times=("0", "1"))
+    w = open_file(app, case)
+    sc, sb = w.scene, w.sidebar
+    rp = ContourTool(sb.contours_panel)
+    from meshviewer.core.field_kinds import SPEED
+    from meshviewer.gui.panels.contour_editor import field_label
+    menu = [rp.field._items[i][1] for i in range(rp.field.count())]
+    gone = {"Uz", "UMeanz", "vorticityz", "coord:z", "Rzz", "Rxz", "Ryz", "UPrime2Meanzz",
+            "UPrime2Meanxz", "UPrime2Meanyz"}
+    check(not gone & set(menu) and {"Ux", "Uy", SPEED, "coord:x", "coord:y", "Rxx", "Ryy",
+                                    "UPrime2Meanxx"} <= set(menu)
+          and field_label(SPEED) == "Speed",
+          f"2D: no out-of-plane Uz, UMeanz, vorticity z, tensors' z or Position Z; Speed "
+          f"plainly named ({sorted(gone & set(menu))})")
+    from conftest import wait
+    panel = sb.contours_panel
+    wait(app, lambda: panel._steps_job is None, 30)
+    app.processEvents()
+    menu = [rp.field._items[i][1] for i in range(rp.field.count())]
+    check("phi_0" not in menu and "phi" not in menu and "p" in menu,
+          "2D: not offered — phi_0 (zero everywhere), phi (only on the boundary lines: "
+          "nothing for the cells, no gradient, no color bar)")
+    ed = panel.editors[panel.active][1]
+    ed.field.setCurrentIndex(ed.field.findData("UMeanx"))
+    app.processEvents()
+    t = ed.anim.section.title_label
+    check("UMeanx" in menu and t.property("unavailable") and not ed.anim.on.isEnabled(),
+          "UMeanx (varies in space, not in time): offered, ▸ Animation grayed")
+    ed.field.setCurrentIndex(ed.field.findData("p"))
+    app.processEvents()
+    zone = sc.model.parts["internalMesh"]
+    cen = np.asarray(zone.cell_centers().points) + [0, 0, 0.05]   # the cells, mid-depth
+    check(sc.model.file_type == "mesh2d" and sb.current_tab() == "analyze"
+          and rp.field.currentData() == "p",
+          f"2D OpenFOAM with fields: Contours, p first ({rp.field.currentData()})")
+    check(np.allclose(np.asarray(zone.cell_data["p"]), [_at("p", c) for c in cen], atol=1e-5),
+          "the 2D cells carry their cells' values")
+    w._show_page("contour:1")
+    app.processEvents()
+    check(sc.results.shown and sc.results.spec[0] == "p", "the 2D flow colored by p")
+    w.set_select_kind("mesh_cell")
+    x, y = sc.p.renderer.GetSize()
+    sc.click(x // 2, y // 2)
+    app.processEvents()
+    items = list(sc.elements.items)
+    got = dict(field_values(sc.elements)["fields"]) if items else {}
+    check("Uz" not in got and "Ux" in got, "Measure Selected (2D): no Uz")
+    k = items[0][1] if items else 0
+    check(items and items[0][0] == "internalMesh" and abs(got.get("p", 1e9) - _at("p", cen[k])) < 1e-5,
+          f"Measure Selected, a 2D cell: its value (p = {got.get('p')})")
+    walls = sc.model.parts["walls"]
+    check(walls.n_lines == 16 and "k" in walls.cell_data and "k" in walls.point_data,
+          "the 2D walls carry their face values")
+    # Plots on a 2D file: a line across the zone, X / Y only
+    pp = sb.plots_panel
+    check(not sb._boxes["plots"].parts[0][1].text(), "Plots: available on a 2D file")
+    i = pp.add("section", "Profile")
+    app.processEvents()
+    m, ed = pp.plot(i), pp.editors[i][1]
+    r = pp.results[i]
+    shown = [k for k, a in ed.axis.items() if ed._axis_cap.buttons[
+        list(ed.axis).index(k)].isHidden() is False]
+    values = [ed.value._items[k][1] for k in range(ed.value.count())]
+    check(m["axis"] == "x" and shown == ["x", "y"] and ed.plane_caption.text() == "Line"
+          and "coord:z" not in values and "coord:y" in values,
+          f"2D: Normal to X | Y (no Z), a Line, no Position Z ({m['axis']}, {shown})")
+    c = r["curves"][0] if r["curves"] else None
+    check(not r["empty"] and r["along"] == "y" and c is not None
+          and np.allclose(c["xyz"][:, 0], 1.0) and np.allclose(c["xyz"][:, 2], 0)
+          and np.ptp(c["x"]) > 0.99,
+          f"the line x = 1 across the channel, along Y ({r['along']})")
+    m["value"] = "p"
+    pp._compute(i)
+    c = pp.results[i]["curves"][0]
+    want = [_at("p", [1.0, y, 0.05]) for y in c["xyz"][:, 1]]
+    check(np.allclose(c["y"][1:-1], want[1:-1], atol=1e-4),
+          "p along the line: the nodes' values (from the cells, as in 3D)")
+    ed.edit_plane.setChecked(True)
+    zs = [b for b in (*ed.origin, *ed.normal)][2::3]
+    check(all(b.isHidden() for b in zs), "✎ Edit Plane: Origin / Normal without Z")
+    for b, v in zip(ed.normal, (1, 1, 5)):
+        b.setValue(v)
+    ed._normal_typed()
+    check(m["normal"] is not None and m["normal"][2] == 0 and not pp.results[i]["empty"],
+          f"a tilted line: its normal stays in XY ({m['normal']})")
+    w.close()
+
+
+def headers(app, files):
+    """▸ Color Bar: its switch in the header (on: unfolds, off: a note); ▸ Animation under
+    it, grayed on a file with one time step."""
+    from meshviewer.gui.panels.contour_animation import SINGLE
+    w = open_file(app, files["tecplot"])
+    sc, panel = w.scene, w.sidebar.contours_panel
+    w._show_page("contour:1")
+    app.processEvents()
+    ed = panel.editors[panel.active][1]
+    sec = ed.bar_section
+    check(ed.bar_on.parent() is sec.header and not sec.expanded,
+          "Show color bar: the switch on the ▸ Color Bar header, folded at first")
+    ed.bar_on.setChecked(False)
+    app.processEvents()
+    sec.set_expanded(True)
+    check(not sc.colorbar.shown and not ed.bar_note.isHidden() and ed.bar_details.isHidden()
+          and ed.bar_note.text().startswith("Off — switch on to show the color bar"),
+          "off: the color bar hidden; unfolded, one note instead of its controls")
+    sec.set_expanded(False)
+    ed.bar_on.setChecked(True)
+    app.processEvents()
+    check(sec.expanded and sc.colorbar.shown and ed.bar_note.isHidden()
+          and not ed.bar_details.isHidden(), "on: ▸ Color Bar unfolds, the bar shows")
+    card = ed.bar_section.parentWidget().layout()
+    an = ed.anim
+    check(card.indexOf(an.section) == card.indexOf(ed.bar_section) + 1,
+          "▸ Animation right below ▸ Color Bar")
+    an.section.set_expanded(True)
+    check(an.section.title_label.property("unavailable") and not an.on.isEnabled()
+          and an.note.text() == SINGLE and an.details.isHidden() and w.anim_bar.isHidden(),
+          "one time step: ▸ Animation grayed, its switch off, why in a note")
+    w.close()
+
+
+def animation(app, files):
+    import shutil
+    import tempfile
+    from pathlib import Path
+    tmp = Path(tempfile.mkdtemp(prefix="foam-anim-"))
+    try:
+        _animation(app, tmp)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _animation(app, tmp):
+    """A case with three time steps: ▸ Animation on shows the playback bar; steps, the
+    scrubber, Loop, speed; Timeline vs Current Step; the section's cut cells follow."""
+    import numpy as np
+    import pyvista as pv
+    from conftest import wait
+    from fixtures import foam_case
+    from meshviewer.gui.panels.contour_animation import OFF
+    from meshviewer.gui.widgets.animation_bar import DEFAULT_FPS
+    case = foam_case(tmp / "steps", n=(4, 3, 3), times=("0", "0.5", "1"))
+    w = open_file(app, case)
+    sc, panel = w.scene, w.sidebar.contours_panel
+    m, bar = sc.model, w.anim_bar
+    w._show_page("contour:1")
+    ed = panel.editors[panel.active][1]
+    ed.field.setCurrentIndex(ed.field.findData("p"))
+    an = ed.anim
+    an.section.set_expanded(True)
+    check(an.on.isEnabled() and not an.on.isChecked() and an.note.text() == OFF
+          and bar.isHidden(), "three steps: ▸ Animation off at first, a note, no bar")
+    an.section.set_expanded(False)
+    an.on.setChecked(True)
+    app.processEvents()
+    check(an.section.expanded and not an.details.isHidden() and not bar.isHidden()
+          and bar.count == 3 and bar.index == 2 and bar.readout.text() == "t = 1 · Step 3 / 3",
+          f"on: unfolds, the playback bar shows the latest step ({bar.readout.text()})")
+    wait(app, lambda: panel._steps_job is None, 30)
+    app.processEvents()
+    m.case.read_ranges(range(3), ["p"])
+    tops = [max(r["p"][1] for r in m.case.known_ranges(i).values() if "p" in r) for i in range(3)]
+    timeline = panel.range
+    check(abs(timeline[1] - max(tops)) < 1e-9 and an.range_acts["timeline"].isChecked(),
+          f"Timeline (default): Min / Max over every step ({timeline})")
+    actor = sc.results._actor
+    bar.step(-1)
+    app.processEvents()
+    check(m.time_index == 1 and bar.index == 1 and panel.range == timeline
+          and an.step_label.text() == "t = 0.5 · Step 2 / 3",
+          "Step Backward: step 2, the same range (no flicker)")
+    check(sc.results._actor is actor, "another step: the same actor, its colors changed in place")
+    w._show_page("model")
+    app.processEvents()
+    check(m.time_index == 2 and bar.isHidden(), "the 3D View tab: the latest step, no bar")
+    w._show_page("contour:1")
+    app.processEvents()
+    check(m.time_index == 1 and not bar.isHidden() and bar.index == 1,
+          "back to the animated contour: its step again")
+    ed.show_acts["gradient"].trigger()
+    app.processEvents()
+    check(not an.range_acts["timeline"].isEnabled() and "Gradient" in an.range_note.text(),
+          "Gradient: Color scale range grayed (each step its own), and why")
+    ed.show_acts["value"].trigger()
+    ed.lo.setValue(0.5)
+    ed.hi.setValue(3.0)
+    ed.commit()
+    panel.contour_changed(ed.c["id"])
+    app.processEvents()
+    check(not an.range_acts["timeline"].isEnabled() and panel.range == (0.5, 3.0)
+          and "typed" in an.range_note.text(), "Min and Max typed: grayed too")
+    ed.lo.setValue(None)
+    ed.hi.setValue(None)
+    ed.commit()
+    panel.contour_changed(ed.c["id"])
+    app.processEvents()
+    check(an.range_acts["timeline"].isEnabled() and an.range_note.isHidden(),
+          "cleared: Color scale range back")
+    p_in = np.asarray(m.parts["inlet"].cell_data["p"])
+    check(np.allclose(p_in, np.asarray(m.case.step_arrays(1)["inlet"][1]["p"])),
+          "the parts carry step 2's values")
+    an.range_acts["step"].trigger()
+    app.processEvents()
+    check(abs(panel.range[1] - tops[1]) < 1e-6 and panel.range[1] < timeline[1],
+          f"Current Step: this step's own Min / Max ({panel.range})")
+    ed.lo.setValue(0.25)
+    ed.commit()
+    panel.contour_changed(ed.c["id"])
+    bar.step(1)
+    app.processEvents()
+    check(panel.range[0] == 0.25 and abs(panel.range[1] - tops[2]) < 1e-6,
+          "a typed Min stays; Max follows the step")
+    ed.lo.setValue(None)
+    ed.commit()
+    an.range_acts["timeline"].trigger()
+    bar.slider.setValue(0)
+    app.processEvents()
+    check(m.time_index == 0 and bar.index == 0 and bar.readout.text() == "t = 0 · Step 1 / 3",
+          "the scrubber jumps to the first step")
+    bar.a_loop.setChecked(True)
+    bar.play()
+    bar.set_index(2)
+    bar._tick()
+    check(bar.index == 0 and bar.playing, "Loop on: after the last step, the first")
+    bar.set_index(2)
+    bar.a_loop.setChecked(False)
+    bar._tick()
+    check(bar.index == 2 and not bar.playing and bar.a_play.text() == "Play",
+          "Loop off: stops at the last step")
+    first = bar.interval
+    bar.fps.setValue(24)
+    fast = bar.interval
+    bar.fps.setValue(500)                              # (1 – 120)
+    check(bar.fps.value() == 120 and first == round(1000 / DEFAULT_FPS) and fast == 42
+          and bar.interval == 8, f"frame rate typed: {DEFAULT_FPS} fps at first, the timer "
+          f"follows ({first}, {fast}, {bar.interval} ms)")
+    widths = set()
+    for i in range(3):
+        bar.set_index(i, emit=False)
+        widths.add((bar.readout.width(), bar.slider.geometry().x(), bar.slider.width()))
+    check(len(widths) == 1 and bar.readout.minimumWidth() == bar.readout.maximumWidth(),
+          "the time readout keeps one width: the scrubber never moves")
+    bar.fps.setValue(60)
+    bar.a_loop.setChecked(True)
+    w._play_pause()                                     # Space
+    wait(app, lambda: bar.index == 1, 10)
+    w._play_pause()
+    check(not bar.playing and m.time_index == bar.index,
+          "Space plays (the steps follow the timer) and pauses")
+    sp = w.sidebar.section_panel
+    sp.enable.setChecked(True)
+    sp.fill.setChecked(True)
+    sc.section.set_plane(origin=(0.3, 0.5, 0.5), normal=(1, 0, 0))
+    wait(app, lambda: sc.section._volume is not None, 30)
+    app.processEvents()
+    bar.set_index(1)
+    app.processEvents()
+    cut = lambda: sc.section.cut_cells                                  # noqa: E731
+    first = np.asarray(cut().point_data["ResultT"]).copy()
+    p1 = float(np.nanmax(cut().point_data["p"]))
+    bar.set_index(2)
+    app.processEvents()
+    p2 = float(np.nanmax(cut().point_data["p"]))
+    check("ResultT" in cut().point_data and abs(p2 - 2 * p1) < 1e-4
+          and not np.allclose(first, cut().point_data["ResultT"]),
+          f"the section's cut cells: colored by p, and follow the step (max {p1:.4g} → {p2:.4g})")
+    src = sc.section._cut_src
+    check(list(src.point_data.keys()) == ["p"] and not len(src.cell_data.keys()),
+          "the cutter is given p only (not every field to interpolate)")
+    bar.set_index(0)
+    an.on.setChecked(False)
+    app.processEvents()
+    check(m.time_index == len(m.times) - 1 and bar.isHidden() and not bar.playing,
+          f"▸ Animation off: no bar, back to the latest step ({m.time_index})")
+    an.on.setChecked(True)
+    app.processEvents()
+    w._show_page("model")
+    app.processEvents()
+    check(bar.isHidden() and not bar.playing, "the 3D View tab: no playback bar")
+    w.close()
+
+
+def units_and_constants(app, files):
+    """Custom… units for one file only; ▸ Animation grayed for a field the same at
+    every step."""
+    import shutil
+    import tempfile
+    from pathlib import Path
+    tmp = Path(tempfile.mkdtemp(prefix="foam-units-"))
+    try:
+        _units_and_constants(app, tmp)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _units_and_constants(app, tmp):
+    import numpy as np
+    from conftest import wait
+    from fixtures import foam_case
+    from meshviewer.core.units import QUANTITIES, is_custom
+    from meshviewer.gui import memory
+    from meshviewer.gui.panels.contour_animation import CONSTANT
+    from meshviewer.gui.panels.contour_editor import CUSTOM_ITEM
+    from meshviewer.gui.store import settings
+    from meshviewer.render.element_details import field_values
+    case = foam_case(tmp / "box", times=("0", "0.5", "1"))
+    w = open_file(app, case)
+    sc, sb, panel = w.scene, w.sidebar, w.sidebar.contours_panel
+    w._show_page("contour:1")
+    ed = panel.editors[panel.active][1]
+    ed.field.setCurrentIndex(ed.field.findData("k"))
+    app.processEvents()
+    menu = [ed.file_unit._items[i][1] for i in range(ed.file_unit.count())]
+    check(menu[-1] == CUSTOM_ITEM and ed.file_unit._items[-1][0] == "Custom…",
+          "Unit in file ends with Custom…")
+    before = panel.range
+    ed.set_custom_unit("file", "m^2/s^2")
+    app.processEvents()
+    check(panel.unit_label("k") == "m^2/s^2" and is_custom("m^2/s^2")
+          and ed.file_unit.currentData() == "m^2/s^2" and panel.range == before
+          and sc.colorbar.spec["title"].endswith("(m^2/s^2)"),
+          f"a custom unit: the values as written, labeled with it ({sc.colorbar.spec['title']})")
+    w.set_select_kind("mesh_cell")
+    sc.elements._take(("outlet", 0), False)
+    app.processEvents()
+    rows = dict(sb.selected_panel.field_rows)
+    check(rows.get("Turbulent kinetic energy k", "").endswith("m^2/s^2"),
+          f"Measure Selected labels it too ({rows.get('Turbulent kinetic energy k')})")
+    ed.field.setCurrentIndex(ed.field.findData("p"))
+    ed.set_custom_unit("shown", "my p")
+    app.processEvents()
+    v = float(np.asarray(sc.model.parts["outlet"].cell_data["p"])[0])
+    check(panel.unit_label("p") == "my p" and panel.shown_values("p", v) == v,
+          "Shown in a custom unit: the file's numbers, labeled with it")
+    w.remember_view()
+    saved = (memory.load(case) or {}).get("results", {}).get("units", {})
+    st = settings()
+    leaks = [k for k in st.allKeys() if k != memory._key(case)
+             and "m^2/s^2" in str(st.value(k))]
+    check(saved.get("k", [None])[0] == "m^2/s^2" and saved.get("p", [None, None])[1] == "my p"
+          and not any("m^2/s^2" in t or "my p" in t for t in QUANTITIES.values())
+          and not leaks, "kept with this file only: not in the unit tables or the app's settings")
+    # ▸ Animation: a field the same at every step can't be animated
+    wait(app, lambda: panel._steps_job is None, 30)
+    app.processEvents()
+    an = ed.anim
+    ed.field.setCurrentIndex(ed.field.findData("p"))
+    an.on.setChecked(True)
+    app.processEvents()
+    check(an.on.isEnabled() and not w.anim_bar.isHidden(), "p varies: Animation on, the bar")
+    ed.field.setCurrentIndex(ed.field.findData("UMeanx"))
+    app.processEvents()
+    title = an.section.title_label
+    check(title.property("unavailable") and not an.on.isEnabled() and not an.on.isChecked()
+          and an.note.text() == CONSTANT and title.toolTip() == CONSTANT
+          and w.anim_bar.isHidden(),
+          "UMeanx (the same each step): title and switch grayed, off, no bar")
+    ed.field.setCurrentIndex(ed.field.findData("T"))
+    app.processEvents()
+    check(not title.property("unavailable") and an.on.isEnabled(),
+          "T (varies): ▸ Animation available again")
+    w.close()
+    other = foam_case(tmp / "other", n=(2, 2, 2), times=("0", "1"))
+    w = open_file(app, other)
+    check(w.sidebar.contours_panel.unit_label("k") == "m²/s²",
+          "another file: its own units (no custom one)")
+    w.close()
+
+
+def menus_and_cache(app, files):
+    """Field menus in submenus per group (Contours, Plots); the timeline cache: 512 MB by
+    default, set in Settings, its byte limit kept; reading ahead."""
+    import shutil
+    import tempfile
+    from pathlib import Path
+    tmp = Path(tempfile.mkdtemp(prefix="foam-cache-"))
+    try:
+        _menus_and_cache(app, tmp)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _submenus(select):
+    """{group: ([field], checked)} of a cascading MenuSelect's menu, and the field checked."""
+    menu, out, on = select.build_menu(), {}, None
+    for a in menu.actions():
+        sub = a.menu()
+        if sub is None:
+            continue
+        fields = [s.text() for s in sub.actions()]
+        out[sub.title()] = (fields, a.isChecked())
+        on = next((s.text() for s in sub.actions() if s.isChecked()), on)
+    return out, on
+
+
+def _menus_and_cache(app, tmp):
+    import numpy as np
+    from fixtures import foam_case
+    from meshviewer.core.mesh import openfoam_cache as oc
+    from meshviewer.gui.store import settings
+    case = foam_case(tmp / "box", n=(3, 3, 3), times=("0", "0.5", "1", "1.5"))
+    w = open_file(app, case)
+    sc, sb, panel = w.scene, w.sidebar, w.sidebar.contours_panel
+    ed = panel.editors[panel.active][1]
+    ed.field.setCurrentIndex(ed.field.findData("p"))
+    groups, on = _submenus(ed.field)
+    checked = [g for g, (_f, c) in groups.items() if c]
+    check({"Flow", "Pressure", "Turbulence", "Wall", "Position"} <= set(groups)
+          and checked == ["Pressure"] and on == "Pressure p"
+          and "Pressure p" in groups["Pressure"][0] and "Speed" in groups["Flow"][0]
+          and not any(a.text() == "Pressure p" for a in ed.field.build_menu().actions()),
+          f"Contours ▸ Field: a submenu per group, the field and its group checked "
+          f"({sorted(groups)})")
+    check("Face flux φ" in groups["Flow"][0], "3D: phi offered (on the patches' faces)")
+    w._show_page("contour:1")
+    names = list(sc.names)
+    sb._visibility_changed(names, False)
+    app.processEvents()
+    check(ed.stats.text() == "No visible boundary has this field."
+          and ed.lo.placeholderText() == "auto" and ed.hi.placeholderText() == "auto",
+          "nothing shown: no old auto Min / Max left beside why")
+    sb._visibility_changed(names, True)
+    app.processEvents()
+    pp = sb.plots_panel
+    sb.show_tab("analyze")
+    i = pp.add("section", "Cut")
+    app.processEvents()
+    pe = pp.editors[i][1]
+    pgroups, _on = _submenus(pe.value)
+    check(pe.value.cascade and "Pressure" in pgroups and "Position" in pgroups,
+          f"Plots ▸ Values: the same submenus ({sorted(pgroups)})")
+    # the cache: everything read stays (no limit, no setting)
+    app.show_settings()
+    app.processEvents()
+    check(not hasattr(app._settings, "cache") and "timeline_cache_mb" not in app.prefs
+          and settings().value("prefs/timeline_cache_mb") is None,
+          "no Timeline cache limit in Settings or the saved settings")
+    app._settings.close()
+    case_ = sc.model.case
+    case_.cache.wait(10)
+    case_.prefetch(0)
+    case_.cache.wait(10)
+    keys = set(case_.cache._items)
+    check(all(("field", s, "p") in keys for s in range(1, 4)),
+          "reading ahead: the next steps' fields in the cache")
+    entry = case_.cache.get(("field", 1, "p"))
+    check(all(a.dtype == np.float32 for pt, ce in entry.values() for a in (*pt.values(),
+                                                                          *ce.values())),
+          "kept as float32")
+    for s in range(4):
+        case_.step_arrays(s)
+    n = len(case_.cache._items)
+    for s in range(4):
+        case_.step_arrays(s)
+    check(all(("field", s, f) in keys | set(case_.cache._items) for s in range(4)
+              for f in case_.fields_at(s)) and len(case_.cache._items) == n
+          and case_.cache.nbytes > 0 and not hasattr(oc, "set_limit_mb"),
+          f"every step stays in memory, nothing evicted ({n} entries, "
+          f"{case_.cache.nbytes / 2 ** 20:.2f} MB)")
+    w.close()
+
+
+def _all(app, files):
+    test(app, files)
+    openfoam(app, files)
+    menus_and_cache(app, files)
+    units_and_constants(app, files)
+    headers(app, files)
+    animation(app, files)
+
+
 if __name__ == "__main__":
-    run(test)
+    run(_all)

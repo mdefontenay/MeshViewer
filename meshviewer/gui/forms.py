@@ -132,6 +132,15 @@ def xyz_fields(rows, top=2):
     return w
 
 
+def show_z(widget, on):
+    """xyz_fields' Z column shown or hidden (a 2D file: X / Y only)."""
+    g = widget.layout()
+    for r in range(g.rowCount()):
+        item = g.itemAtPosition(r, 3)
+        if item is not None and item.widget() is not None:
+            item.widget().setVisible(on)
+
+
 def switch_row(text, switch, tip=None):
     """A label with its switch at the right -> the row (a widget, to hide; .label)."""
     w = QWidget()

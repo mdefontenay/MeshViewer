@@ -1,6 +1,6 @@
 """The window's pages: the 3D model, the Inflation Layers page (CAD files), a tab per
-contour (the 3D view colored by it) and a page per plot, with the tab bar under the view
-that switches between them. Opening a contour's or a plot's tab opens its fold-out in
+contour (the 3D view colored by it), a page per plot and per probe (gui/window_probes.py),
+with the tab bar under the view that switches between them. Opening a contour's or a plot's tab opens its fold-out in
 the right sidebar and folds the others (`Sidebar.reveal`); View ▸ Fit (⌘0) fits the
 plot shown, or the 3D view (`fit_view`).
 
@@ -123,6 +123,14 @@ class Pages:
                 self._switch_parts(page)
                 self._switch_view(page)                  # its camera, its Show ▾, drawn
                 reveal = ("contours", ident)
+        elif page.startswith("probe:"):
+            ident = int(page.split(":", 1)[1])
+            if ident not in self._probe_acts:
+                page = "model"
+            else:
+                self._switch_parts("model")
+                self._show_probe(ident)
+                reveal = ("probes", ident)
         if page == "cfd" and not self._cfd_on:
             page = "model"
         if page in ("model", "cfd"):
@@ -133,13 +141,14 @@ class Pages:
             self._switch_view("model")                   # the model alone
         elif page == "cfd":
             self.a_page_cfd.setChecked(True)
-        if not page.startswith("plot:"):
+        if not page.startswith(("plot:", "probe:")):
             self.stack.setCurrentWidget(self.inflation_view if page == "cfd" else self.plotter)
         if page == "model" or page.startswith("contour:"):
             self.plotter.render()
         self._pages_scroll.show_current()
         if reveal is not None:                          # its fold-out, the others folded
             self.sidebar.reveal(*reveal)
+        self._sync_animation()                          # its playback bar, or none
 
     # ---- each tab's own shown / hidden parts ---------------------------------------------------
     def _hidden_now(self):
@@ -279,47 +288,56 @@ class Pages:
             if ed is not None:
                 ed[1].fit_view()
             return
+        if self._page.startswith("probe:"):
+            self.probe_page.plot.ranges_changed.emit((None, None, None, None))
+            return
         self.scene.fit()
+
+    def _sync_tabs(self, kind, items, tip):
+        """The tab of each contour, plot or probe (`kind`): made, renamed, or gone."""
+        acts = self._tab_acts[kind]
+        ids = {it["id"] for it in items}
+        for ident in [i for i in acts if i not in ids]:
+            a = acts.pop(ident)
+            self._page_group.removeAction(a)
+            a.deleteLater()
+        for it in items:
+            a = acts.get(it["id"])
+            if a is None:
+                a = QAction(it["name"], self)
+                a.setCheckable(True)
+                self._page_group.addAction(a)
+                a.triggered.connect(lambda _=False, k=kind, i=it["id"]:
+                                    self._show_page(f"{k}:{i}"))
+                acts[it["id"]] = a
+            a.setText(it["name"])
+            a.setToolTip(tip(it))
+
+    @property
+    def _tab_acts(self):
+        return {"contour": self._contour_acts, "plot": self._plot_acts,
+                "probe": self._probe_acts}
+
+    def _tab_items(self):
+        """(kind, its items) in the bar's order: contours, plots, probes."""
+        sc = self.scene
+        return [("contour", list(self.sidebar.contours_panel.contours) if sc else []),
+                ("plot", list(sc.plots) if sc else []),
+                ("probe", self._probe_tabs())]
 
     def _rebuild_view_bar(self):
         """The pill under the view: 3D model · Inflation Layers · each contour · each
-        plot. Shown when there is more than the 3D model."""
-        cs = list(self.sidebar.contours_panel.contours) if self.scene is not None else []
-        for ident in [i for i in self._contour_acts if i not in {c["id"] for c in cs}]:
-            a = self._contour_acts.pop(ident)
-            self._page_group.removeAction(a)
-            a.deleteLater()
-        for c in cs:
-            a = self._contour_acts.get(c["id"])
-            if a is None:
-                a = QAction(c["name"], self)
-                a.setCheckable(True)
-                self._page_group.addAction(a)
-                a.triggered.connect(lambda _=False, i=c["id"]: self._show_page(f"contour:{i}"))
-                self._contour_acts[c["id"]] = a
-            a.setText(c["name"])
-            a.setToolTip(c["name"])
-        ms = list(self.scene.plots) if self.scene is not None else []
-        for ident in [i for i in self._plot_acts if i not in {m["id"] for m in ms}]:
-            a = self._plot_acts.pop(ident)
-            self._page_group.removeAction(a)
-            a.deleteLater()
-        for m in ms:
-            a = self._plot_acts.get(m["id"])
-            if a is None:
-                a = QAction(m["name"], self)
-                a.setCheckable(True)
-                self._page_group.addAction(a)
-                a.triggered.connect(lambda _=False, i=m["id"]: self._show_page(f"plot:{i}"))
-                self._plot_acts[m["id"]] = a
-            a.setText(m["name"])
-            a.setToolTip(f"{m['name']} ({KINDS[m['kind']]['title']})")
+        plot · each probe. Shown when there is more than the 3D model."""
+        tips = {"contour": lambda c: c["name"],
+                "plot": lambda m: f"{m['name']} ({KINDS[m['kind']]['title']})",
+                "probe": lambda p: f"{p['name']} (Probe)"}
+        for kind, items in self._tab_items():
+            self._sync_tabs(kind, items, tips[kind])
         acts = self.view_bar_actions()
         self._pages_cap = Capsule(acts, name="Segmented", dividers=False)   # same gaps
         self._pages_cap.layout().setSpacing(2)
-        tab_of = {**{a: ("plot", i) for i, a in self._plot_acts.items()},
-                  **{a: ("contour", i) for i, a in self._contour_acts.items()}}
-        for b in self._pages_cap.buttons:              # right-click a plot's / contour's tab
+        tab_of = {a: (kind, i) for kind, d in self._tab_acts.items() for i, a in d.items()}
+        for b in self._pages_cap.buttons:              # right-click a tab: its menu
             what = tab_of.get(b.defaultAction())
             if what is not None:
                 b.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -331,16 +349,17 @@ class Pages:
 
     def view_bar_actions(self):
         """The tabs under the view, in order: 3D Model, Inflation Layers, each contour,
-        each plot."""
-        ms = list(self.scene.plots) if self.scene is not None else []
-        cs = list(self.sidebar.contours_panel.contours) if self.scene is not None else []
-        return [self.a_page_model] + ([self.a_page_cfd] if self._cfd_on else []) + \
-            [self._contour_acts[c["id"]] for c in cs if c["id"] in self._contour_acts] + \
-            [self._plot_acts[m["id"]] for m in ms if m["id"] in self._plot_acts]
+        each plot, each probe."""
+        out = [self.a_page_model] + ([self.a_page_cfd] if self._cfd_on else [])
+        for kind, items in self._tab_items():
+            acts = self._tab_acts[kind]
+            out += [acts[it["id"]] for it in items if it["id"] in acts]
+        return out
 
     def _tab_menu(self, kind, ident, pos):
-        """Right-click on a plot's or a contour's tab: Open, Rename…, Delete."""
-        panel = self.sidebar.plots_panel if kind == "plot" else self.sidebar.contours_panel
+        """Right-click on a contour's, a plot's or a probe's tab: Open, Rename…, Delete."""
+        panel = {"plot": self.sidebar.plots_panel, "contour": self.sidebar.contours_panel,
+                 "probe": self.sidebar.probes_panel}[kind]
         menu = Menu(self)
         menu.addAction("Open", lambda: self._show_page(f"{kind}:{ident}"))
         menu.addAction("Rename…", lambda: panel.rename(ident))

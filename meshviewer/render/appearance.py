@@ -62,7 +62,7 @@ class Appearance:
         return list(self._origin_actors)
 
     def _build_origin(self):
-        layer = self.measure._layer()             # the overlay the measure markers use
+        layer = self.overlays.layer()             # over the model (render/layers.py)
         for a in self._origin_actors:
             layer.RemoveActor(a)
         self._origin_actors = []
@@ -247,6 +247,7 @@ class Appearance:
             if self._outline is not None:
                 self._outline.GetProperty().SetColor(rgb(accent))
             self.section.set_accent(accent)
+            self.probe_marks.restyle()
         t = THEMES[self._dark]
         if mode == "color":
             self.p.set_background(value)

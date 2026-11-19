@@ -1,4 +1,4 @@
-"""F11 / F12: .msh (Gmsh, Fluent; 2D and 3D) and DXF drawings."""
+"""F11 / F12: .msh (Gmsh, Fluent; 2D and 3D) and DXF drawings; OpenFOAM cases."""
 import numpy as np
 
 from conftest import check, open_file, run, wait
@@ -158,7 +158,7 @@ def test(app, files):
     check(sc.state["feature_edges"] and e[sc._index["fluid"]].visible and blk.GetNumberOfCells()
           and sc._edges.GetProperty().GetLineWidth() >= 2.5,
           "2D: Feature edges = the zone outline (shows the hidden wall)")
-    check(bool(sb._boxes["plots"].parts[0][1].text()), "Plots: not for 2D")
+    check(not sb._boxes["plots"].parts[0][1].text(), "Plots: on 2D files too")
     w.close()
     w = open_file(app, files["fluent3d"])
     sp = w.sidebar.section_panel
@@ -338,9 +338,131 @@ def shot_checks(app, files):
     w.close()
 
 
+def openfoam(app, files):
+    """OpenFOAM cases (folders): 3D boundaries + volume cells, 2D one cell thick."""
+    import shutil
+    import tempfile
+    from pathlib import Path
+    from fixtures import foam_case
+    from meshviewer.core import formats, quality
+    tmp = Path(tempfile.mkdtemp(prefix="foam-test-"))
+    try:
+        _openfoam(app, tmp, foam_case, formats, quality)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _openfoam(app, tmp, foam_case, formats, quality):
+    case = foam_case(tmp / "box3d")
+    for p in (case, case / "constant" / "polyMesh"):             # the case or its polyMesh
+        m = formats.load(p, debug=False)
+        vol = m.volume()
+        check(m.fmt == "OpenFOAM" and m.file_type == "mesh" and m.dim == 3
+              and list(m.parts) == ["inlet", "outlet", "walls", "sides"]
+              and m.n_cells == 24 and vol.n_cells == 24 and m.units == "m",
+              f"OpenFOAM 3D ({p.name}): {m.file_type} {list(m.parts)} {m.n_cells} cells "
+              f"volume {vol.n_cells}")
+    check(m.parts["walls"].n_cells == 16 and abs(vol.volume - 1) < 1e-12
+          and np.nanmin(quality.compute(vol, "size")) > 0,
+          "OpenFOAM 3D: 16 wall faces, the cells fill the box, none inside out")
+    bad = foam_case(tmp / "broken", n=(1, 1, 1))
+    (bad / "constant" / "polyMesh" / "neighbour").unlink()
+    for p, words in ((tmp, "not an OpenFOAM case"), (bad, "neighbour is missing")):
+        try:
+            formats.load(p, debug=False)
+            msg = ""
+        except ValueError as exc:
+            msg = str(exc)
+        check(words in msg, f"OpenFOAM: a clear error ({msg})")
+    flat = foam_case(tmp / "channel", n=(4, 2, 1), size=(2.0, 1.0, 0.1), two_d=True)
+    turned = foam_case(tmp / "turned", n=(4, 2, 1), size=(2.0, 1.0, 0.1), two_d=True,
+                       turned=True)
+    for p in (flat, turned):                                     # flat in XY, or in YZ
+        m = formats.load(p, debug=False)
+        z = m.parts.get("internalMesh")
+        up = z.compute_normals(cell_normals=True, point_normals=False)["Normals"][:, 2] \
+            if z is not None else []
+        check(m.file_type == "mesh2d" and m.volume is None
+              and sorted(m.parts) == ["inlet", "internalMesh", "outlet", "walls"]
+              and z.n_cells == 8 and abs(z.area - 2.0) < 1e-12
+              and np.allclose(z.points[:, 2], 0) and np.allclose(up, 1),
+              f"OpenFOAM 2D ({p.name}): {m.file_type} {sorted(m.parts)}, 8 quads flat in XY, "
+              "facing +Z")
+        check(m.parts["walls"].n_lines == 8 and m.parts["inlet"].n_lines == 2
+              and not m.parts["walls"].GetNumberOfPolys(),
+              "OpenFOAM 2D: the walls as 8 edges, the inlet as 2")
+    # in the app: the summary, Section's cut cells, Open Recent
+    w = open_file(app, case)
+    sb = w.sidebar
+    check(sb.summary == "OpenFOAM mesh · 24 cells" and w.path == case,
+          f"OpenFOAM case opens: {sb.summary}")
+    check(str(case.resolve()) in app.recent_files(), "the case folder is in Open Recent")
+    sp = sb.section_panel
+    sp.enable.setChecked(True)
+    sp.fill.setChecked(True)
+    w.scene.section.set_plane(origin=(0.25, 0.5, 0.5), normal=(1, 0, 0))
+    wait(app, lambda: w.scene.section._volume is not None, 30)
+    app.processEvents()
+    import pyvista as pv
+    cut = w.scene.section._vol_cut
+    area = pv.wrap(cut.GetMapper().GetInput()).area if cut is not None else 0
+    check(abs(area - 1) < 1e-9, f"OpenFOAM 3D: the section cuts its cells (area {area:g})")
+    check(not sb._boxes["cells"].parts[0][1].text(), "OpenFOAM 3D: Cell Quality applies")
+    w.close()
+    w = open_file(app, flat)
+    sb, sc = w.sidebar, w.scene
+    check(sc.model.file_type == "mesh2d" and abs(abs(sc.p.camera.direction[2]) - 1) < 1e-9
+          and sb.summary.startswith("OpenFOAM 2D mesh"),
+          f"OpenFOAM 2D in the app: seen along Z ({sb.summary})")
+    w.set_select_kind("mesh_cell")
+    x, y = sc.p.renderer.GetSize()
+    sc.click(x // 2, y // 2)
+    check(len(sc.elements.items) == 1 and sc.elements.items[0][0] == "internalMesh"
+          and sb.sel_label.text() == "1 mesh cell selected",
+          f"OpenFOAM 2D: Select ▾ Mesh Cell picks a cell ({sb.sel_label.text()})")
+    check(not sb._boxes["cells"].parts[0][1].text(), "OpenFOAM 2D: Cell Quality applies")
+    w.close()
+
+
+def welcome_solver(app, files):
+    """The welcome screen's Solver pop-up and Open Case…; File ▸ Open Case… ⇧⌘O."""
+    from PySide6.QtGui import QKeySequence
+    from PySide6.QtWidgets import QFileDialog
+    w = app.new_window()
+    for _ in range(5):
+        app.processEvents()
+    wel = w.welcome
+    sel = wel.solver
+    names = [sel._items[i][0] for i in range(sel.count())]
+    on = [names[i] for i in range(sel.count()) if sel.isItemEnabled(i)]
+    check(names == ["OpenFOAM", "FUN3D", "Overflow", "LAVA", "SU2", "Nastran"]
+          and on == ["OpenFOAM"] and sel.currentData() == "openfoam"
+          and set(sel._sections.values()) == {"CFD", "FEA"},
+          f"welcome: Solver lists {names}, only OpenFOAM can be picked yet")
+    sel.setCurrentIndex(names.index("SU2"))
+    check(sel.currentData() == "openfoam", "a grayed solver can't be picked")
+    check(wel.case_row.isVisible() and wel.open_case_button.text() == "Open Case…",
+          "welcome: Open Case… next to the solver")
+    wel.open_case_button.click()
+    app.processEvents()
+    d = getattr(w, "_sheet", None)
+    check(isinstance(d, QFileDialog) and d.fileMode() == QFileDialog.Directory,
+          "Open Case…: a folder sheet")
+    if d is not None:
+        d.hide()
+    file_menu = next(a.menu() for a in w.menuBar().actions() if a.menu().title() == "File")
+    texts = [a.text() for a in file_menu.actions()]
+    check(texts[texts.index("Open…") + 1] == "Open Case…"
+          and w.a_open_case.shortcut() == QKeySequence("Ctrl+Shift+O"),
+          "File ▸ Open Case… ⇧⌘O, under Open…")
+    w.close()
+
+
 def _all(app, files):
     test(app, files)
     shot_checks(app, files)
+    openfoam(app, files)
+    welcome_solver(app, files)
 
 
 if __name__ == "__main__":

@@ -91,6 +91,7 @@ class CollapsibleSection(QWidget):
             h.setContentsMargins(0, 4, 0, 0)
         h.addWidget(title_label)
         h.addStretch(1)
+        self.trailing = trailing
         if trailing is not None:
             # FIX: keep a widget's own cursor (the Section switch is a hand)
             if not trailing.testAttribute(Qt.WA_SetCursor):
@@ -123,12 +124,16 @@ class CollapsibleSection(QWidget):
         self.title_label.setText(text)
 
     def set_unavailable(self, on):
-        """The tool doesn't apply to the open file: its name lighter (the reason inside)."""
+        """The tool doesn't apply to the open file: its name lighter and its header switch
+        grayed (the reason inside). on: False, True or the reason (then its hover text)."""
         lab = self.title_label
         if lab.property("unavailable") != bool(on):
             lab.setProperty("unavailable", bool(on))
             lab.style().unpolish(lab)
             lab.style().polish(lab)
+        lab.setToolTip(on if isinstance(on, str) else "")
+        if self.trailing is not None:
+            self.trailing.setEnabled(not on)
 
     def set_expanded(self, on):
         self.expanded = bool(on) or self._locked

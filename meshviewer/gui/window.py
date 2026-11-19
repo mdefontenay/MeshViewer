@@ -15,7 +15,6 @@ from meshviewer.core.formats import load, supported_extensions
 from meshviewer.core.model import MissingDependency
 from meshviewer.gui import memory
 from meshviewer.gui.access import name_controls
-from meshviewer.gui.dialogs.units import default_unit, FileUnitDialog
 from meshviewer.gui.feedback import show_error
 from meshviewer.gui.jobs import run_job
 from meshviewer.gui.pages.inflation import InflationView
@@ -26,6 +25,9 @@ from meshviewer.gui.style import accent, is_dark
 from meshviewer.gui.undo import Changes
 from meshviewer.gui.viewport import make_view
 from meshviewer.gui.welcome import Welcome
+from meshviewer.gui.window_animation import Animation
+from meshviewer.gui.window_probes import Probes
+from meshviewer.gui.window_units import Units
 from meshviewer.gui.window_bars import Bars
 from meshviewer.gui.window_export import Exports
 from meshviewer.gui.window_pages import Pages, TabScroll
@@ -42,7 +44,7 @@ def _settings():
 # Window
 # ---------------------------------------------------------------------------
 
-class ViewerWindow(Bars, Pages, Exports, QMainWindow):
+class ViewerWindow(Bars, Pages, Exports, Animation, Probes, Units, QMainWindow):
     def __init__(self, app_controller):
         super().__init__()
         self.ctl = app_controller
@@ -62,6 +64,7 @@ class ViewerWindow(Bars, Pages, Exports, QMainWindow):
         self.plotter.enable_anti_aliasing("msaa", multi_samples=4)
         self.welcome = Welcome(self.ctl.recent_files)     # an empty window: the way in
         self.welcome.open_dialog.connect(self.ctl.open_dialog)
+        self.welcome.open_case.connect(lambda _solver: self.ctl.open_case_dialog(self))
         self.welcome.open_file.connect(lambda f: self.ctl.open_path(Path(f), prefer=self))
         self.empty = self.welcome
         self.stack = QStackedWidget()
@@ -135,6 +138,8 @@ class ViewerWindow(Bars, Pages, Exports, QMainWindow):
         rp.renamed.connect(lambda _i: self._rebuild_view_bar())
         rp.show_contour.connect(lambda i: self._show_page(f"contour:{i}"))
         pp.value_unit = lambda f: (lambda v: rp.shown_values(f, v), rp.unit_label(f))
+        pp.value_list = lambda: rp.fields if rp.scene is pp.scene else None   # as Contours
+        rp.fields_changed.connect(lambda: [ed.sync() for _s, ed in pp.editors.values()])
         self.sidebar.activity_changed.connect(self._activity_changed)   # a tab, a tool
         self.sidebar.contours_panel.units_changed.connect(     # a field's unit: the plots too
             lambda: self._active_plot is not None and self._refresh_plot(self._active_plot))
@@ -147,6 +152,8 @@ class ViewerWindow(Bars, Pages, Exports, QMainWindow):
         ep.undo_requested.connect(lambda: self.scene and self.changes.undo_last_edit())
         ep.reset_requested.connect(lambda: self.scene and self.changes.reset_edits())
         ep.original_toggled.connect(lambda on: self.scene and self.scene.set_show_original(on))
+        self._build_animation(va, va.indexOf(self.view_bar))   # the playback bar
+        self._build_probes()                                    # Probe: their tabs
         self.splitter = QSplitter(Qt.Horizontal)
         self.splitter.addWidget(self.sidebar)          # the parts list
         self.splitter.addWidget(self.view_area)
@@ -237,7 +244,7 @@ class ViewerWindow(Bars, Pages, Exports, QMainWindow):
         if model.is_cad and ip.enabled and page.get("page") == "cfd":
             self.a_page_cfd.setChecked(True)
             self._show_page("cfd")
-        elif str(page.get("page", "")).startswith("plot:"):   # a plot's tab
+        elif str(page.get("page", "")).startswith(("plot:", "probe:")):   # a plot's tab
             self._show_page(page["page"])
         memory.restore_camera(self.scene, saved)
         self._view_page, self._model_view = "model", self._view_state()   # the 3D View's
@@ -245,6 +252,8 @@ class ViewerWindow(Bars, Pages, Exports, QMainWindow):
             self._show_page(page["page"])
         name_controls(self)                            # (the tools' controls are built now)
         self.ctl.add_recent(self.path)                   # File ▸ Open Recent
+        self._bind_animation()                           # time steps (OpenFOAM)
+        self._bind_probes()
         self.changes.watch(self.scene)                   # clicks and camera moves: undoable
         self.changes.clear()                             # from where the file opened
         self.plotter.render()
@@ -255,6 +264,10 @@ class ViewerWindow(Bars, Pages, Exports, QMainWindow):
             detail = str(exc)
             step = (f"Install it into the app's Python environment:\n"
                     f"   .venv/bin/pip install {exc.package}\n(then rebuild with build_app.sh)")
+        elif self.path is not None and self.path.is_dir():       # File ▸ Open Case…
+            detail = str(exc) or exc.__class__.__name__
+            step = ("Choose an OpenFOAM case folder (the one with constant/polyMesh in it) "
+                    "or its polyMesh folder.")
         else:
             detail = str(exc) or exc.__class__.__name__
             step = ("Check that the file is complete (not still being copied or written) and "
@@ -358,49 +371,6 @@ class ViewerWindow(Bars, Pages, Exports, QMainWindow):
             a.setChecked(on)
             a.blockSignals(False)
 
-    # --- Inflation Layers (CAD files) -------------------------------------
-    # --- Plots: one tab per plot under the 3D view --------------------------------
-    def _sync_units(self):
-        """Select the shown unit (the file's own unless another was picked)."""
-        unit = self.scene.measure.display_unit or self.scene.model.units
-        for a in self.a_units:
-            a.setChecked(a.data() == unit)
-        self.a_units_menu.setText(unit or "Units")      # the toolbar's pull-down
-
-    def _ask_file_unit(self):
-        """First time this file is opened: which unit are its numbers in?"""
-        m = self.scene.model
-        unit = default_unit(m, self.ctl.prefs)
-        self._set_file_unit(unit)                      # works meanwhile; the answer replaces it
-        if self.ctl.prefs["ask_unit"]:                 # Settings ▸ Units
-            self._open_unit_sheet(unit)
-
-    def _edit_file_unit(self):
-        """Toolbar ✎: change the file's unit (the same sheet as on the first open)."""
-        if self.scene is not None:
-            self._open_unit_sheet(self.scene.model.units
-                                  or default_unit(self.scene.model, self.ctl.prefs))
-
-    def _open_unit_sheet(self, unit):
-        self._unit_dialog = FileUnitDialog(self, self.path.name, unit,
-                                           self.scene.model.file_units)
-        self._unit_dialog.chosen.connect(self._set_file_unit)
-        self._unit_dialog.open()
-
-    def _set_file_unit(self, unit):
-        sc = self.scene
-        if sc is None or not unit:
-            return
-        sc.model.units = unit
-        sc.measure.set_display_unit(sc.measure.display_unit)    # None: follows the file
-        self._sync_units()
-        self.sidebar.info_panel.refresh()
-        self.sidebar.edit_panel.refresh()
-        self.sidebar.cfd_panel.model_changed()         # lengths in metres
-        self.sidebar.inflation_panel.model_changed()
-        self.sidebar.contours_panel.length_unit_changed()   # positions X / Y / Z
-        self.sidebar.plots_panel.model_changed()       # positions in the new unit
-
     def _toggle_section(self, on):
         self.sidebar.section_panel.enable.setChecked(on)
 
@@ -455,18 +425,6 @@ class ViewerWindow(Bars, Pages, Exports, QMainWindow):
         self.sidebar.inflation_panel.model_changed()   # walls, arrows, auto length
         self.sidebar.contours_panel.model_changed()     # results follow the edits
         self.sidebar.plots_panel.model_changed()       # cuts of the moved model
-
-    def _unit_chosen(self, a):
-        if self.scene:
-            self.scene.measure.set_display_unit(a.data())
-            self._sync_units()
-            self.sidebar.info_panel.refresh()           # Info in the new unit
-            self.sidebar.selected_panel.refresh()       # Measure Selected too
-            self.sidebar._show_info(self.scene.selected_parts)   # a picked length / area
-            self.sidebar.cfd_panel.model_changed()      # mesh length in metres
-            self.sidebar.inflation_panel.model_changed()   # auto length in metres
-            self.sidebar.contours_panel.length_unit_changed()   # positions X / Y / Z
-            self.sidebar.plots_panel.model_changed()       # plots in the new unit
 
     # --- Export ----------------------------------------------------------
     def _toggle_measure(self, on):
@@ -555,6 +513,8 @@ class ViewerWindow(Bars, Pages, Exports, QMainWindow):
             box.open()
             return
         self.remember_view()
+        if self.scene is not None and self.scene.model.case is not None:
+            self.scene.model.case.cache.stop()            # no more reading ahead
         self.plotter.close()
         self.ctl.forget(self)
         super().closeEvent(e)

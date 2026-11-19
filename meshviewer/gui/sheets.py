@@ -7,6 +7,7 @@ OK / Save (not on Cancel).
 
     ask_save(window, "Export", "/path/name.stl", "STL (*.stl)", done)     done(path)
     ask_open(window, "Import Points", folder, "CSV (*.csv)", done)        done(path)
+    ask_folder(window, "Open Case", folder, done)                         done(path)
     ask_text(window, "Rename Plot", "Name", "Root", done)                 done(text)
     ask_color(window, "#ff0000", "Color of Wing", done)                   done("#rrggbb")
     save_folder(path)       where to save next to a file (Documents for the bundled samples)
@@ -60,6 +61,15 @@ def ask_open(window, title, folder, filters, done):
     d = QFileDialog(window, title, str(folder or ""), filters)
     d.setAcceptMode(QFileDialog.AcceptOpen)
     d.setFileMode(QFileDialog.ExistingFile)
+    d.fileSelected.connect(lambda fn: fn and done(fn))
+    return _sheet(window, d)
+
+
+def ask_folder(window, title, folder, done):
+    d = QFileDialog(window, title, str(folder or ""))
+    d.setAcceptMode(QFileDialog.AcceptOpen)
+    d.setFileMode(QFileDialog.Directory)
+    d.setOption(QFileDialog.ShowDirsOnly, True)
     d.fileSelected.connect(lambda fn: fn and done(fn))
     return _sheet(window, d)
 

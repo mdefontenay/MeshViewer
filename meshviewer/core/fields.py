@@ -10,6 +10,9 @@ INTERNAL_NAMES = {"face_id", "Normals", "TextureCoordinates", "Texture Coordinat
                   "RGB", "RGBA", "Colors", "colors"}
 from meshviewer.core.field_kinds import SPEED   # noqa: E402  |u, v, w| (u, v, w in the file)
 
+# the velocity's components as files write them: u, v, w, or OpenFOAM's Ux, Uy, Uz
+VELOCITY = (("u", "v", "w"), ("Ux", "Uy", "Uz"))
+
 
 YPLUS_STOPS = ((0.0, "#0a84ff"), (1.0, "#30b350"), (2.0, "#ff9f0a"), (3.0, "#ff453a"))
 
@@ -163,19 +166,85 @@ def ticks(lo, hi, count=5, log=False, tick_log=False):
     return [(float(p), float(v)) for p, v in zip(pos, values)]
 
 
-def field_values(poly, name):
-    """(values, "point" | "cell") of a field on a boundary, or (None, None)."""
-    if name in poly.point_data:
-        return np.asarray(poly.point_data[name], dtype=float), "point"
-    if name in poly.cell_data:
-        return np.asarray(poly.cell_data[name], dtype=float), "cell"
+def field_values(poly, name, prefer="point"):
+    """(values, "point" | "cell") of a field on a boundary, or (None, None); a field
+    stored both ways: as `prefer`."""
+    order = (("point", poly.point_data), ("cell", poly.cell_data))
+    for where, data in (order if prefer == "point" else order[::-1]):
+        if name in data:
+            return np.asarray(data[name], dtype=float), where
     return None, None
+
+
+def planar(fields, model):
+    """The fields a file offers: on a 2D file (dim 2), not the out-of-plane z components
+    (w, Uz, UMeanz, any vector's z the reader names in model.z_fields)."""
+    if getattr(model, "dim", 3) != 2:
+        return list(fields)
+    from meshviewer.core.field_kinds import Z_KEYS, field_kind
+    z = set(getattr(model, "z_fields", ()) or ())
+    return [f for f in fields if f not in z
+            and not (field_kind(f) is not None and field_kind(f).key in Z_KEYS)]
+
+
+DEAD = 1e-12                          # a field this flat everywhere draws nothing
+
+
+def faces_of(parts):
+    """The parts a contour can color: those with faces (not a 2D file's boundary lines)."""
+    return {n for n, p in parts.items() if p.GetNumberOfPolys() or p.GetNumberOfStrips()}
+
+
+def dead_fields(parts, fields, steps=None):
+    """The fields a contour can't show: on no part with faces (a 2D case's face flux phi,
+    only on its boundary lines), or with one value there (max − min ≤ DEAD) — over every
+    time step when `steps` gives each step's ranges ({part: {field: (min, max, …)}}),
+    else on `parts` as they are: no colors, no gradient, nothing for a color bar."""
+    faces = faces_of(parts)
+    out = set()
+    for f in fields:
+        if steps is not None:
+            spans = [per[f][:2] for s in steps for n in faces
+                     if (per := s.get(n)) is not None and f in per]
+        else:
+            if not any(f in p.point_data.keys() or f in p.cell_data.keys() or
+                       (f == SPEED and velocity_names(p)) for p in parts.values()):
+                continue                       # not on the step shown: nothing to say
+            spans = []
+            for n in faces:
+                part = parts[n]
+                vals, _ = speed_values(part) if f == SPEED else field_values(part, f)
+                if vals is not None and len(vals):
+                    vals = vals[np.isfinite(vals)]
+                    if len(vals):
+                        spans.append((float(vals.min()), float(vals.max())))
+        if not spans or max(b for _, b in spans) - min(a for a, _ in spans) <= DEAD:
+            out.add(f)
+    return out
+
+
+def velocity_names(ds):
+    """The velocity components a dataset has ("u", "v", "w" or "Ux", "Uy", "Uz"), or None."""
+    keys = set(ds.point_data.keys()) | set(ds.cell_data.keys())
+    return next((t for t in VELOCITY if set(t) <= keys), None)
+
+
+def speed_values(ds, prefer="point"):
+    """(|velocity|, "point" | "cell") of a dataset, or (None, None)."""
+    names = velocity_names(ds)
+    if names is None:
+        return None, None
+    parts = [field_values(ds, k, prefer) for k in names]
+    if len({w for _, w in parts}) != 1:
+        return None, None
+    u, v, w = (a for a, _ in parts)
+    return np.sqrt(u * u + v * v + w * w), parts[0][1]
 
 
 def solution_fields(parts):
     """Names of the solution fields on the parts ({name: PolyData}): floating-point
     arrays with one value per node or face, not the ids and normals VTK adds.
-    Ends with SPEED when u, v, w are there."""
+    Ends with SPEED when u, v, w (or Ux, Uy, Uz) are there."""
     names = []
     for part in parts.values():
         for data in (part.point_data, part.cell_data):
@@ -185,7 +254,7 @@ def solution_fields(parts):
                 a = np.asarray(data[k])
                 if a.ndim == 1 and np.issubdtype(a.dtype, np.floating):
                     names.append(k)
-    if {"u", "v", "w"} <= set(names):
+    if any(set(t) <= set(names) for t in VELOCITY):
         names.append(SPEED)
     return names
 
@@ -205,3 +274,35 @@ def gradient_magnitude(poly, vals):
     surf.point_data["f"] = np.array(vals, dtype=float)
     g = surf.compute_derivative(scalars="f", gradient="g", preference="point")
     return np.linalg.norm(np.asarray(g.point_data["g"], dtype=float), axis=1)
+
+
+def replace_fields(ds, point, cell, drop=True):
+    """Another time step's fields on a dataset, in place: each field's values copied into
+    its array (the same size: no new array), new fields added, the solution fields this
+    step lacks and the arrays worked out from them ("__" names: speed, gradients) gone
+    (drop False: kept — fields added to the step shown) — the geometry, colors and ids
+    stay. At the VTK level: no wrapper per array."""
+    from vtkmodules.util.numpy_support import numpy_to_vtk, vtk_to_numpy
+    from vtkmodules.vtkCommonCore import VTK_DOUBLE, VTK_FLOAT
+    for attrs, new in ((ds.GetPointData(), point), (ds.GetCellData(), cell)):
+        for i in reversed(range(attrs.GetNumberOfArrays()) if drop else ()):
+            arr = attrs.GetAbstractArray(i)
+            name = arr.GetName() or ""
+            if name in new:
+                continue
+            if name.startswith("__") or (name not in INTERNAL_NAMES
+                                         and arr.GetNumberOfComponents() == 1
+                                         and arr.GetDataType() in (VTK_FLOAT, VTK_DOUBLE)):
+                attrs.RemoveArray(i)
+        for k, a in new.items():
+            a = np.asarray(a)
+            old = attrs.GetArray(k)
+            if old is not None and old.GetNumberOfTuples() == len(a) and a.ndim == 1 \
+                    and old.GetNumberOfComponents() == 1:
+                vtk_to_numpy(old)[:] = a                  # in place
+                old.Modified()
+            else:
+                arr = numpy_to_vtk(np.ascontiguousarray(a), deep=True)
+                arr.SetName(k)
+                attrs.AddArray(arr)
+    ds.Modified()

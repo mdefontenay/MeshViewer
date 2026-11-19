@@ -13,6 +13,8 @@ Section ("section"):
     middle of the model); along the cut, a value — a solution field (cp, Mach…) or a
     position (X, Y, Z: the shape) — against a coordinate in the plane (auto: the longer
     way of the cut), optionally divided by the chord (x/c). One curve per cut loop.
+    A 2D file: the plane is normal to X or Y (or any way in XY), so it cuts the flat zone
+    along a line; no Z anywhere (`flat`).
 
     m = new_plot("section", "Root", ident=1, model=model)
     r = compute(m, model.parts, visible_names)
@@ -29,7 +31,7 @@ import numpy as np
 import pyvista as pv
 from vtkmodules.vtkFiltersCore import vtkStripper
 
-from meshviewer.core.fields import SPEED, field_values, solution_fields
+from meshviewer.core.fields import SPEED, field_values, solution_fields, velocity_names
 from meshviewer.core.polys import bare
 
 AXES = "xyz"
@@ -44,9 +46,14 @@ def _bounds(parts, names):
                      b[:, 4].min(), b[:, 5].max()])
 
 
-def values_of(parts):
-    """What a section plot can show: the solution fields, then X / Y / Z."""
-    return list(solution_fields(parts)) + [COORD + a for a in AXES]
+def axes_of(flat=False):
+    """The axes a plot uses: X, Y (a 2D file: `flat`), Z."""
+    return AXES[:2] if flat else AXES
+
+
+def values_of(parts, flat=False):
+    """What a section plot can show: the solution fields, then X / Y / Z (2D: X / Y)."""
+    return list(solution_fields(parts)) + [COORD + a for a in axes_of(flat)]
 
 
 def value_title(v):
@@ -60,12 +67,13 @@ def value_title(v):
 # ---- section ----------------------------------------------------------------------------
 def _section_defaults(model):
     names = list(model.parts)
-    b = _bounds(model.parts, names).reshape(3, 2)
+    axes = axes_of(model.dim == 2)                       # 2D: a line across the zone
+    b = _bounds(model.parts, names).reshape(3, 2)[:len(axes)]
     span = b[:, 1] - b[:, 0]
     fields = solution_fields(model.parts)
     lower = {f.lower(): f for f in fields}
-    field = lower.get("cp") or (fields[0] if fields else COORD + AXES[int(np.argmin(span))])
-    return {"axis": AXES[int(np.argmax(span))],          # a wing: across the span
+    field = lower.get("cp") or (fields[0] if fields else COORD + axes[int(np.argmin(span))])
+    return {"axis": axes[int(np.argmax(span))],          # a wing: across the span
             "pos": None, "normal": None, "value": field, "along": None, "chord": False,
             "flip": None, "ref": None, "show": True,
             # the plot's axes as drawn (Axes under each plot): typed ranges (None = auto,
@@ -88,8 +96,9 @@ def y_flipped(m, value):
     return bool(flip)
 
 
-def in_plane(axis):
-    return [a for a in AXES if a != axis]
+def in_plane(axis, flat=False):
+    """The axes in the plane (a 2D file: the one along its line)."""
+    return [a for a in axes_of(flat) if a != axis]
 
 
 def _point_values(poly, value):
@@ -97,7 +106,10 @@ def _point_values(poly, value):
     if value.startswith(COORD):
         return np.asarray(poly.points[:, AXES.index(value[len(COORD):])], dtype=float)
     if value == SPEED:
-        uvw = [_point_values(poly, k) for k in ("u", "v", "w")]
+        names = velocity_names(poly)
+        if names is None:
+            return None
+        uvw = [_point_values(poly, k) for k in names]
         if any(c is None for c in uvw):
             return None
         return np.sqrt(sum(c * c for c in uvw))

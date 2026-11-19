@@ -35,6 +35,7 @@ from meshviewer.gui.panels.measure import MeasurePanel
 from meshviewer.gui.panels.meshing import MeshingPanel
 from meshviewer.gui.panels.parts import PartTree
 from meshviewer.gui.panels.plots import PlotsPanel
+from meshviewer.gui.panels.probes import ProbesPanel
 from meshviewer.gui.panels.quality import QualityPanel
 from meshviewer.gui.panels.section import SectionPanel
 from meshviewer.gui.panels.selected import SelectedPanel
@@ -152,6 +153,12 @@ class Sidebar(PartMenu, QWidget):
         self.plots_panel = PlotsPanel()                # plots -> tabs under the view
         self.plots_section = self._add("plots", self.plots_panel, card=False)
 
+        self.probes_panel = ProbesPanel()              # probes -> tabs (time steps)
+        self.probes_section = self._add("probes", self.probes_panel, card=False)
+        self.probes_panel.units = self.contours_panel  # values in its units, its fields
+        self.contours_panel.units_changed.connect(self.probes_panel.refresh)
+        self.contours_panel.fields_changed.connect(self.probes_panel.refresh)
+
     def _build_quality(self):
         self.meshing_panel = MeshingPanel()          # its level: in the header
         self.meshing_panel.level_requested.connect(self.quality_requested)
@@ -201,7 +208,8 @@ class Sidebar(PartMenu, QWidget):
     def reveal(self, key, ident):
         """A contour's or a plot's tab opened: its tool shown, its fold-out open (the
         others folded) and scrolled into view."""
-        panel = {"contours": self.contours_panel, "plots": self.plots_panel}[key]
+        panel = {"contours": self.contours_panel, "plots": self.plots_panel,
+                 "probes": self.probes_panel}[key]
         if ident not in panel.editors:
             return
         self.show_section(key, expand=True)
@@ -343,6 +351,7 @@ class Sidebar(PartMenu, QWidget):
         self.cfd_panel.bind(scene)
         self.contours_panel.bind(scene)
         self.plots_panel.bind(scene)
+        self.probes_panel.bind(scene)
         self.inflation_panel.bind(scene)
         self._apply_support(scene)
 
@@ -419,9 +428,13 @@ class Sidebar(PartMenu, QWidget):
     def _elements_changed(self, scene):
         """Select ▾ picked or cleared: Info and Measure Selected follow; something picked
         opens Measure Selected (its Measure tab in front, when the inspector is shown)."""
+        if self.probes_panel.vertex_picked():           # Select Vertex Point: the probe's
+            return                                     # point, nothing else opens
         self._show_info(scene.selected_parts)
         self.selected_panel.refresh()
-        if scene.elements.items and not self.inspector.isHidden():
+        if self.probes_panel.following is not None:     # a probe follows Select ▾: it moves
+            self.probes_panel.selection_changed()
+        elif scene.elements.items and not self.inspector.isHidden():
             self.show_section("selected", expand=True)
 
     def _selection_changed(self, names):
@@ -430,6 +443,7 @@ class Sidebar(PartMenu, QWidget):
             self._show_info(names)
             if self.scene.elements.kind == "part":
                 self.selected_panel.refresh()          # Part: the parts' field values
+                self.probes_panel.selection_changed()
 
     def _clear_selection(self):
         if self.scene:

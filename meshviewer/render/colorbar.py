@@ -119,10 +119,13 @@ class ColorBar:
         False: bands between them; title "": none; height, width: percent of BASE;
         text: "auto" | "white" | "black"."""
         clip = lambda v: float(min(max(v, SIZE_RANGE[0]), SIZE_RANGE[1]))   # noqa: E731
-        self.spec = dict(stops=tuple(stops), lo=float(lo), hi=float(hi),
-                         ticks=[(float(a), float(b)) for a, b in ticks], title=title,
-                         smooth=bool(smooth), height=clip(height), width=clip(width),
-                         text=text if text in TEXT_COLORS else "auto")
+        spec = dict(stops=tuple(stops), lo=float(lo), hi=float(hi),
+                    ticks=[(float(a), float(b)) for a, b in ticks], title=title,
+                    smooth=bool(smooth), height=clip(height), width=clip(width),
+                    text=text if text in TEXT_COLORS else "auto")
+        if spec == self.spec and self._actors:           # as drawn (a time step, Timeline)
+            return
+        self.spec = spec
         self._rebuild()
 
     def hide(self):

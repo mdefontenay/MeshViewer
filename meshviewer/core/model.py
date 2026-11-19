@@ -34,6 +34,18 @@ class Model:
     part_info: dict = field(default_factory=dict)
     # Volume cells in the file (CGNS, UGRID: from their headers), or None
     n_cells: Optional[int] = None
+    # Time steps with fields (OpenFOAM: its time folders, earliest first; [] = one or none),
+    # their folder names, and the one shown (an index, the latest at first)
+    times: list = field(default_factory=list)
+    time_labels: list = field(default_factory=list)
+    time_index: Optional[int] = None
+    # The unit each solution field is in, as the file says ({"p": "m²/s²"}); Contours'
+    # Unit in file starts there
+    field_units: dict = field(default_factory=dict)
+    # The z components of the file's vectors ("Uz", "UMeanz"): left out on a 2D file
+    z_fields: list = field(default_factory=list)
+    # An open case kept for reading its cells and other time steps (OpenFOAM: FoamCase)
+    case: Optional[object] = None
     # Edit section: rotations / mirrors (3×3 integers) and move applied so
     # far — new point = transform @ original + offset. Parts are moved in memory;
     # Export saves the result.

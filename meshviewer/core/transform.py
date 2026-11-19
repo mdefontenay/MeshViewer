@@ -115,15 +115,26 @@ def set_surface(poly: pv.PolyData, original_points, r, t, flipped_now: bool):
 
 
 def grid_from(original: pv.UnstructuredGrid, r, t=(0.0, 0.0, 0.0)) -> pv.UnstructuredGrid:
-    """A moved copy of the ORIGINAL volume grid (mirrored cells reordered)."""
+    """A moved copy of the ORIGINAL volume grid (mirrored cells reordered), with its
+    fields (vectors are not turned)."""
     if is_identity(r, t):
         return original
     pts = move_points(original.points, r, t)
     if not flips(r):
         # a NEW grid (a shallow copy would share — and overwrite — the file's points)
-        return pv.UnstructuredGrid(original.cells, original.celltypes, pts)
-    cells = {}
-    for ctype, conn in original.cells_dict.items():
-        order = MIRROR_ORDER.get(ctype)
-        cells[ctype] = conn[:, order] if order is not None else conn
-    return pv.UnstructuredGrid(cells, pts)
+        out = pv.UnstructuredGrid(original.cells, original.celltypes, pts)
+        order = None
+    else:
+        cells = {}
+        for ctype, conn in original.cells_dict.items():
+            o = MIRROR_ORDER.get(ctype)
+            cells[ctype] = conn[:, o] if o is not None else conn
+        out = pv.UnstructuredGrid(cells, pts)
+        types = np.asarray(original.celltypes)            # cells grouped by type now
+        order = np.concatenate([np.flatnonzero(types == c) for c in cells])
+    for k in original.point_data.keys():
+        out.point_data[k] = np.array(original.point_data[k])
+    for k in original.cell_data.keys():
+        a = np.asarray(original.cell_data[k])
+        out.cell_data[k] = np.array(a if order is None else a[order])
+    return out

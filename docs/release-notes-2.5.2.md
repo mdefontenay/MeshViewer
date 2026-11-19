@@ -1,3 +1,89 @@
+## What's new in 2.5.2
+
+**OpenFOAM cases**, mesh and results:
+
+- **File ▸ Open Case… (⇧⌘O)**, or **Open Case…** on the welcome screen next to the new
+  **Solver** pop-up (OpenFOAM; FUN3D, Overflow, LAVA, SU2 and Nastran are listed grayed,
+  for later), opens a case folder: the one with `constant/polyMesh` in it, its
+  `polyMesh` folder, a `.foam` file, or a decomposed case (`processor*` folders). ASCII
+  or binary, gzipped or not. You can also drop the folder on a window.
+- **3D cases**: each boundary patch is a part, and the cells are there for Section
+  (filled cut cells) and Cell Quality; the left sidebar says "OpenFOAM mesh · 24,000
+  cells". Polyhedral cells (snappyHexMesh) are split into pyramids and tetrahedra to
+  their center for those two tools.
+- **2D cases are found by themselves**: a case one cell thick between `empty` patches
+  opens as a 2D mesh, its cells flat in XY and the other patches as boundary lines, with
+  the 2D view, Select ▾ Mesh Cell and Cell Quality.
+- **Results from the time folders**: the latest time step opens, with every field in
+  it ready for **Contours**: the case opens on Analyze ▸ Contours with Contour 1.
+  Velocity and Speed, UMean and Mean speed, p, p_rgh, pMean, T, ρ, αt, k, ω, ε, νt, ν̃,
+  the Reynolds stresses R and UPrime2Mean (xx … zz), vorticity, Q and λ2, Mach and
+  Courant numbers, y+, wall shear stress, phase fractions (alpha.water…), the mean
+  pressure variance p'² and the face fluxes φ and φ₀ on the boundaries. A field a contour
+  can't show isn't offered: one value over the faces at every step, or (2D) only on the
+  boundary lines. A vector gives its x, y and z and its magnitude. Each field's
+  **Unit in file** comes from the file's own dimensions (kinematic p in m²/s², T in K).
+- **2D cases** list only the in-plane components (no Uz, no Rzz or Rxz, no Position Z).
+- **2D cases are colored over the whole flow**: the cells carry their own values, and
+  the boundary lines theirs.
+- **Measure Selected ▸ Field Values**: a picked face or cell gives its own values (not
+  an average of its corners); nodes, edges and parts as before (weighted averages).
+- **Animate across time steps**: switch on **▸ Animation** in a contour (under ▸ Color
+  Bar) and a playback bar shows under the 3D view: Step Backward, Play / Pause (Space),
+  Step Forward, a scrubber, the time and step (t = 0.5 · Step 2 / 3), Loop and the speed
+  (1 – 120 frames a second, typed). Switch it off and the case goes back to its latest
+  step. The camera, hidden parts and selection stay as they are; each step is
+  read once and kept, and the next steps are read ahead in the background, so playing
+  is smooth: every step read stays in memory while the case is open.
+- **Smooth playback**: a step shown from memory takes about 17 ms on a 20,000-cell
+  case (25 ms with Section's cut cells): only the colors change, nothing is rebuilt.
+- **Each tab its own step**: an animated contour's tab keeps its step when you look
+  elsewhere; every other tab shows the latest step.
+- **Steady colors**: Color scale range **Timeline** (the default) keeps Min / Max over
+  every time step, so a color means the same all along; **Current Step** follows each
+  step. A Min or Max you type stays either way. A field that is the same at every step
+  (UMean, pMean…) can't be animated: ▸ Animation is grayed for it.
+- **Inside the flow**: with Section on and Fill cut faces, the cut cells are colored by
+  the contour shown, and follow the time step. Plots and Measure Selected follow it too.
+- A case with only a mesh (or an empty 0 folder) opens as before. Nothing is written
+  into the case folder. Open Recent remembers case folders.
+
+**Probe** (Analyze tab), new:
+
+- **New Probe** at a point, along a line or over an area: pick a node, a cell, edges,
+  faces or a whole boundary with **Select ▾** first, or Follow Select ▾ so each pick
+  moves it, or type X, Y and Z. **Select Vertex Point** in a probe's card: click a
+  vertex in the 3D view and the probe goes there (Measure Selected stays closed). Each probe has a marker in the 3D
+  view, its name on a tag; its eye hides it.
+- **On a case with time steps**, a probe's field is plotted over time in its own tab
+  under the view: the step shown is a dashed line with its time (t = 0.4) and a dot on
+  the curve, the playback bar is under it,
+  and a click or a drag on the plot goes to that step. Export CSV saves time and value
+  (with min and max along a line or over an area).
+- **On a file with one step** (.dat, .msh), the probe's card lists every field there:
+  exact at a point, length- or area-weighted along a line or over an area, with min and
+  max. Copy Values, Export CSV.
+
+**Plots on 2D files**: the same Plots as in 3D, without Z: a line across the flow,
+normal to X or Y (or tilted in the plane with ✎ Edit Plane), with the field along it.
+
+**Long cases are quick**: an LES of 601 steps (pitzDaily) opens in 3.6 s, its probes
+plot all the steps in about 6 s, and it takes 269 MB of memory instead of over 1 GB —
+only the fields shown are read. The busy spinner no longer keeps turning.
+
+**Contours**:
+
+- **Custom… units**: at the bottom of Unit in file and Shown in, type any unit (m^2/s^2,
+  slug/ft^3…) for this file only. Nothing converts it: the values are shown as written,
+  labeled with it on the color bar, plots and Measure Selected.
+- **Speed** is now simply "Speed".
+- **The Field menu in submenus**: Flow ▸, Pressure ▸, Turbulence ▸, Position ▸… (only
+  the groups with fields), the field and its group checked. Plots ▸ Values too.
+
+- **Show color bar** is now the switch on the **▸ Color Bar** header: switching it on
+  unfolds the color bar's settings. **Colors** moved up, next to Color scale (it colors
+  the model, bar or not).
+
 ## What's new in 2.5.1
 
 **Contours** (was Results), as many as you like:

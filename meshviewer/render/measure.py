@@ -26,7 +26,7 @@ from vtkmodules.vtkFiltersCore import vtkMassProperties
 from vtkmodules.vtkFiltersGeometry import vtkDataSetSurfaceFilter
 from vtkmodules.vtkFiltersModeling import vtkSelectEnclosedPoints
 from vtkmodules.vtkRenderingCore import (
-    vtkActor, vtkBillboardTextActor3D, vtkPolyDataMapper, vtkRenderer,
+    vtkActor, vtkBillboardTextActor3D, vtkPolyDataMapper,
 )
 from meshviewer.core.units import UNITS, fmt
 
@@ -70,7 +70,6 @@ class Measure:
         self.normals = []            # angle: the faces' normals at those points
         self.display_unit = None     # unit chosen in the toolbar (None: the file's unit)
         self.on_changed = None       # UI hook: called with self.result()
-        self._overlay = None
         self._marker_actors = []
 
     # ---- mode ------------------------------------------------------------
@@ -311,67 +310,11 @@ class Measure:
             total += vol if depth % 2 == 0 else -vol
         return total
 
-    # ---- screenshots: show the same markers in an off-screen window -----------
-    def add_to(self, ren_win, camera, k, clone=lambda a: a):
-        actors = [*self._marker_actors, *self.scene.origin_actors()]   # + origin
-        if not actors:
-            return
-        ren_win.SetNumberOfLayers(3)
-        self._shot_layer, self._shot_text = vtkRenderer(), vtkRenderer()
-        for lay, n in ((self._shot_layer, 1), (self._shot_text, 2)):
-            lay.SetLayer(n)
-            lay.SetActiveCamera(camera)
-        self._shot_saved = []
-        for a in actors:
-            if isinstance(a, vtkBillboardTextActor3D):
-                tp = a.GetTextProperty()
-                self._shot_saved.append((tp, "font", tp.GetFontSize()))
-                tp.SetFontSize(tp.GetFontSize() * k)
-                t2 = vtkBillboardTextActor3D()            # text: a fresh copy
-                t2.SetInput(a.GetInput())
-                t2.SetPosition(a.GetPosition())
-                t2.SetTextProperty(tp)
-                self._shot_text.AddActor(t2)
-            else:
-                prop = a.GetProperty()
-                self._shot_saved.append((prop, "line", prop.GetLineWidth()))
-                self._shot_saved.append((prop, "point", prop.GetPointSize()))
-                prop.SetLineWidth(prop.GetLineWidth() * k)
-                prop.SetPointSize(prop.GetPointSize() * k)
-                self._shot_layer.AddActor(clone(a))
-        ren_win.AddRenderer(self._shot_layer)
-        ren_win.AddRenderer(self._shot_text)
-
-    def remove_from(self, ren_win):
-        layer = getattr(self, "_shot_layer", None)
-        if layer is None:
-            return
-        setter = {"font": "SetFontSize", "line": "SetLineWidth", "point": "SetPointSize"}
-        for obj, kind, v in self._shot_saved:
-            getattr(obj, setter[kind])(v)
-        for lay in (layer, self._shot_text):
-            lay.RemoveAllViewProps()
-            ren_win.RemoveRenderer(lay)
-        self._shot_layer = self._shot_text = None
-
     def _changed(self):
         if self.on_changed:
             self.on_changed(self.result())
 
-    # ---- markers (overlay layer, always visible) -------------------------------
-    def _layer(self, text=False):
-        """Overlay renderers on top of the model: layer 1 = markers, 2 = labels."""
-        if self._overlay is None:
-            rw = self.p.ren_win
-            rw.SetNumberOfLayers(max(3, rw.GetNumberOfLayers()))
-            self._overlay, self._text_overlay = vtkRenderer(), vtkRenderer()
-            for lay, n in ((self._overlay, 1), (self._text_overlay, 2)):
-                lay.SetLayer(n)
-                lay.InteractiveOff()
-                lay.SetActiveCamera(self.p.renderer.GetActiveCamera())
-                rw.AddRenderer(lay)
-        return self._text_overlay if text else self._overlay
-
+    # ---- markers (render/layers.py: over the model, always visible) ----------------
     def _add(self, poly, color, line_width=2.0, lit=True):
         m = vtkPolyDataMapper()
         m.SetInputData(poly)
@@ -382,7 +325,7 @@ class Measure:
         a.GetProperty().SetLineWidth(line_width)
         a.GetProperty().SetLighting(lit)
         a.PickableOff()
-        self._layer().AddActor(a)
+        self.scene.overlays.add(a)
         self._marker_actors.append(a)
         return a
 
@@ -393,10 +336,8 @@ class Measure:
         dots.GetProperty().SetRenderPointsAsSpheres(True)
 
     def _draw(self):
-        if self._marker_actors:
-            for a in self._marker_actors:
-                self._layer().RemoveActor(a)
-                self._layer(text=True).RemoveActor(a)
+        for a in self._marker_actors:
+            self.scene.overlays.remove(a)
         self._marker_actors = []
         if self.mode == "angle" and self.points:      # dots + short normal lines
             size = self.scene.section.diag * 0.06
@@ -436,6 +377,6 @@ class Measure:
                 tp.SetBackgroundOpacity(0.9)
                 tp.SetFrame(False)
                 label.PickableOff()
-                self._layer(text=True).AddActor(label)
+                self.scene.overlays.add(label, text=True)
                 self._marker_actors.append(label)
         self.p.render()

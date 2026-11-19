@@ -58,7 +58,7 @@ from meshviewer.gui.access import name_controls
 from meshviewer.gui.panels.section import edit_plane_action
 from meshviewer.gui.forms import (
     _grid, _label, button, buttons, caption, link, note, rule, segmented,
-    label_width, sheet_title, xyz_fields,
+    label_width, sheet_title, show_z, xyz_fields,
 )
 from meshviewer.gui.sheets import ask_open, ask_save, ask_text, save_folder
 from meshviewer.gui.widgets import (
@@ -100,10 +100,12 @@ class SectionEditor(QWidget):
         lay.addWidget(card)
 
         # -- where the plane cuts (laid out like the Section section)
-        cl.addWidget(caption("Plane"))
+        self.plane_caption = caption("Plane")           # (a 2D file: Line)
+        cl.addWidget(self.plane_caption)
         g = _grid()
         self.axis, cap = segmented(self, [(a, a.upper(), f"The plane is normal to {a.upper()}")
                                            for a in plots.AXES], self._axis)
+        self._axis_cap = cap
         self.axis_group = next(iter(self.axis.values())).actionGroup()
         self.axis_group.setExclusionPolicy(QActionGroup.ExclusionPolicy.ExclusiveOptional)
         self.edit_plane = edit_plane_action(self)        # ✎: origin and normal, any way
@@ -146,6 +148,7 @@ class SectionEditor(QWidget):
         cl.addWidget(caption("Plot"))
         g = _grid()
         self.value = MenuSelect()
+        self.value.cascade = True                       # a submenu per group
         self.value.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.value.setToolTip("What is plotted: a solution field, or a position (the shape)")
         self.value.currentIndexChanged.connect(self._value)
@@ -250,15 +253,28 @@ class SectionEditor(QWidget):
         for k, a in self.axis.items():
             a.setChecked(straight and k == main)
 
+    @property
+    def flat(self):
+        """A 2D file: the plane cuts the zone along a line; X / Y only."""
+        return self.scene is not None and self.scene.model.dim == 2
+
     def sync(self):
         if hasattr(self, "axis_range"):
             self.sync_axes()
         m = self.m
+        flat = self.flat
+        self.plane_caption.setText("Line" if flat else "Plane")
+        self._axis_cap.show_only([a for k, a in self.axis.items()
+                                  if k in plots.axes_of(flat)])
+        show_z(self.advanced, not flat)
         self.sync_axis()
         self.value.blockSignals(True)
         self.value.clear()
         from meshviewer.gui.panels.contour_editor import grouped
-        for title, group in grouped(plots.values_of(self.scene.model.parts)):
+        offered = self.panel.value_list() if self.panel.value_list else None
+        offered = [v for v in offered or plots.values_of(self.scene.model.parts, flat)
+                   if not (flat and v == plots.COORD + "z")]
+        for title, group in grouped(offered):
             self.value.addSection(title)                # as Contours ▸ Field
             for v in group:
                 self.value.addItem(value_label(v), v)
@@ -302,9 +318,10 @@ class SectionEditor(QWidget):
                 b.blockSignals(False)
 
     def _build_along(self):
-        """Only the two axes in the plane."""
+        """Only the axes in the plane (a 2D file: the one along its line)."""
         main = plots.main_axis(plots.plane_normal(self.m))
-        self._along_cap.show_only([a for k, a in self.along.items() if k != main])
+        keep = plots.in_plane(main, self.flat)
+        self._along_cap.show_only([a for k, a in self.along.items() if k in keep])
 
     def sync_result(self, r):
         """After a compute: which way the x axis runs, flip, how many points."""
@@ -361,11 +378,15 @@ class SectionEditor(QWidget):
     def _origin_typed(self, *_):
         s, _u = self._scale()
         vals = [b.value() for b in self.origin]
+        if self.flat:
+            vals[2] = 0.0 if vals[2] is None else vals[2]
         if None not in vals:
             self._plane_typed(origin=[v / s for v in vals])
 
     def _normal_typed(self, *_):
         vals = [b.value() for b in self.normal]
+        if self.flat:
+            vals[2] = 0.0                              # (in XY: the line stays in the zone)
         if None not in vals and any(vals):
             self._plane_typed(normal=vals)
 
@@ -647,6 +668,7 @@ class PlotsPanel(QWidget):
         self.scene = None
         self.file_stem = "plot"
         self.value_unit = None     # field -> (convert, label): Contours' units (window.py)
+        self.value_list = None     # -> the fields Contours offers (window.py), or None
         self.results = {}          # id -> core.plots.compute() result
         self.editors = {}          # id -> (CollapsibleSection, editor)
         self.tab = None            # the plot whose tab shows (its parts: the scene's)
@@ -674,9 +696,15 @@ class PlotsPanel(QWidget):
         self.tab = None
         if self.scene is not None and self.model_changed in self.scene.visibility_listeners:
             self.scene.visibility_listeners.remove(self.model_changed)
+        if self.scene is not None and self.time_changed in self.scene.time_listeners:
+            self.scene.time_listeners.remove(self.time_changed)
         self.scene = scene
         self.file_stem = file_stem
         scene.visibility_listeners.append(self.model_changed)   # cut the shown boundaries
+        scene.time_listeners.append(self.time_changed)          # another time step
+        scene.field_users.append(lambda: [m.get("value") for m in scene.plots
+                                          if not str(m.get("value") or "").startswith(
+                                              plots.COORD)])
         if not hasattr(scene, "plots") or scene.plots is None:
             scene.plots = []
         scene.plots = [m for m in scene.plots if m.get("kind") in plots.KINDS]
@@ -782,11 +810,21 @@ class PlotsPanel(QWidget):
         m = self.plot(ident)
         if m is None:
             return
+        if not str(m.get("value") or "").startswith(plots.COORD):
+            self.scene.ensure_fields([m.get("value")])  # (a step read for other fields)
         r = plots.compute(m, self.scene.model.parts, self._visible(ident))
         self.results[ident] = r
         self.editors[ident][1].sync_result(r)
         if emit:
             self.changed.emit(ident)
+
+    def time_changed(self):
+        """Another time step: the plots of a field again (a shape, X / Y / Z, stays)."""
+        if not self.scene:
+            return
+        for m in self.scene.plots:
+            if not str(m.get("value") or "").startswith(plots.COORD):
+                self._compute(m["id"])
 
     def model_changed(self):
         """Visibility, the model (Edit) or the unit changed: every plot again."""

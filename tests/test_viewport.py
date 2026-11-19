@@ -85,6 +85,42 @@ def test(app, files):
     check(screen().shape[1] > 100 and differ(screen(), screen()) == 0, "after a resize: drawn at the new size")
     w.close()
     tab_checks(app, files, screen_of=lambda view: screen_fn(app, view), differ=differ)
+    step_checks(app, screen_of=lambda view: screen_fn(app, view), differ=differ)
+
+
+def step_checks(app, screen_of, differ):
+    """Another time step (the playback bar): drawn once, new colors, the camera as it was."""
+    import shutil
+    import tempfile
+    from pathlib import Path
+    from fixtures import foam_case
+    tmp = Path(tempfile.mkdtemp(prefix="foam-view-"))
+    try:
+        w = open_file(app, foam_case(tmp / "steps", n=(6, 4, 4), times=("0.5", "1")))
+        _float_on_top(w)
+        sc, view, panel = w.scene, w.plotter, w.sidebar.contours_panel
+        pump = lambda: [app.processEvents() for _ in range(5)]        # noqa: E731
+        w._show_page("contour:1")
+        ed = panel.editors[panel.active][1]
+        ed.field.setCurrentIndex(ed.field.findData("p"))
+        ed.anim.on.setChecked(True)
+        ed.anim.range_acts["timeline"].trigger()
+        from conftest import wait
+        wait(app, lambda: panel._steps_job is None, 30)
+        pump()
+        drawn = []
+        view.ren_win.AddObserver("StartEvent", lambda *_: drawn.append(1))
+        before, cam = screen_of(view), [tuple(v) for v in sc.p.camera_position]
+        drawn.clear()
+        w.anim_bar.step(-1)
+        pump()
+        check(len(drawn) == 1 and sc.model.time_index == 0
+              and [tuple(v) for v in sc.p.camera_position] == cam,
+              f"Step Backward: drawn once, the camera as it was ({len(drawn)})")
+        check(differ(before, screen_of(view)) > 300, "…and the new step's colors are on screen")
+        w.close()
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def screen_fn(app, view):

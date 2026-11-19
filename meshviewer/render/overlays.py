@@ -310,31 +310,67 @@ def results_lut(stops, edges=None, n=1024):
 
 class ResultsView(YplusView):
     """The visible boundaries that carry `field`, coloured on lo..hi (drawn just in
-    front of the model, cut by the section plane, edges like the model's)."""
+    front of the model, cut by the section plane, edges like the model's).
+
+    Drawn again with the same boundaries and the same kind of values (another time step,
+    range, colors, field): only the colors change, in place (`_recolor`) — no new actor,
+    no normals computed again."""
 
     def __init__(self, scene):
         super().__init__(scene)
         self.spec = None                      # (field, lo, hi, stops, log, edges) while shown
+        self._layout = None                   # what the actor is made of (`_layout_of`)
+        self._lut_key = None
+
+    def _layout_of(self, values):
+        """The drawn geometry: each piece's part (the same object, its points unmoved),
+        where its values are, how many."""
+        parts = self.scene.model.parts
+        return tuple((n, id(parts[n]), parts[n].GetPoints().GetMTime(), w, len(v))
+                     for n, w, v in values)
+
+    def _lut(self, stops, edges):
+        key = (tuple(stops), None if edges is None else tuple(edges))
+        if key != self._lut_key and self._actor is not None:
+            self._actor.GetMapper().SetLookupTable(results_lut(stops, edges))
+            self._lut_key = key
+
+    def hide(self, render=True):
+        super().hide(render)
+        self._layout = self._lut_key = None
 
     def show_field(self, field, lo, hi, stops, log=False, edges=None):
         """edges: None smooth, else the band borders 0…1 (the color bar's ticks)."""
-        self.hide(render=False)
         sc = self.scene
-        self.spec = (field, lo, hi, stops, log, None if edges is None else tuple(edges))
-        polys, self._pieces = [], []          # (part name, "point" | "cell", t 0…1)
+        values = []                           # (part name, "point" | "cell", values)
         for n in sc.names:
             part = sc.model.parts.get(n)
             if part is None or not sc.visible.get(n):
                 continue
             vals, where = field_values(part, field)
-            if vals is None:
-                continue
-            surf = bare(part)
+            if vals is not None:
+                values.append((n, where, vals))
+        spec = (field, lo, hi, stops, log, None if edges is None else tuple(edges))
+        same = len({w for _n, w, _v in values}) == 1 and self._layout == self._layout_of(values)
+        if self._actor is not None and values and same:
+            self.spec = spec
+            self._pieces = [(n, w, ramp_t(v, lo, hi, log)) for n, w, v in values]
+            self._lut(stops, edges)
+            self.show_selection(render=False)          # the colors, in place
+            sc.section.contour_changed()
+            self.p.render()
+            return
+        self.hide(render=False)
+        self.spec = spec
+        polys, self._pieces = [], []          # (part name, "point" | "cell", t 0…1)
+        for n, where, vals in values:
+            surf = bare(sc.model.parts[n])
             t = ramp_t(vals, lo, hi, log)
             (surf.point_data if where == "point" else surf.cell_data)["ResultT"] = t
             polys.append(surf)
             self._pieces.append((n, where, t))
         if not polys:
+            sc.section.contour_changed()
             self.p.render()
             return
         # merge_points=False keeps every piece's points in order (see show_selection)
@@ -346,15 +382,17 @@ class ResultsView(YplusView):
                                       pickable=False, reset_camera=False, lighting=True,
                                       smooth_shading=True, ambient=0.25, diffuse=0.8)
         m = self._actor.GetMapper()
-        m.SetLookupTable(results_lut(stops, edges))
+        self._lut(stops, edges)
         m.SetUseLookupTableScalarRange(False)
         m.SetScalarRange(0.0, 3.0)
         m.Update()                             # (the copy exists once the mapper has run)
         self._surf = pv.wrap(m.GetInput())     # what is drawn (smooth shading copies it)
+        self._layout = self._layout_of(values)
         m.SetResolveCoincidentTopologyToPolygonOffset()
         m.SetRelativeCoincidentTopologyPolygonOffsetParameters(-2, -2)
         sc.section.clip(self._actor)
         self.apply_lines()
+        sc.section.contour_changed()                # the cut cells colored the same way
         self.p.render()
 
     def show_selection(self, render=True):
@@ -366,20 +404,36 @@ class ResultsView(YplusView):
         if len(where) > 1:                     # mixed point / cell fields: leave as is
             return
         t = np.concatenate([c + SELECTED if n in sel else c for n, _, c in self._pieces])
-        data = self._surf.point_data if where == {"point"} else self._surf.cell_data
-        data["ResultT"] = t
-        self._surf.Modified()
+        # into the drawn array itself (pv.wrap gives a shallow copy: an array set on it
+        # would never reach the screen)
+        drawn = self._actor.GetMapper().GetInput() if self._actor is not None else None
+        attrs = None if drawn is None else \
+            (drawn.GetPointData() if where == {"point"} else drawn.GetCellData())
+        arr = attrs.GetArray("ResultT") if attrs is not None else None
+        if arr is not None and arr.GetNumberOfTuples() == len(t):
+            from vtkmodules.util.numpy_support import vtk_to_numpy
+            vtk_to_numpy(arr)[:] = t
+            arr.Modified()
+            drawn.Modified()
+        else:
+            data = self._surf.point_data if where == {"point"} else self._surf.cell_data
+            data["ResultT"] = t
+            self._surf.Modified()
         if render:
             self.p.render()
 
     def refresh(self):
         """Visibility or the model changed: draw again with the same field."""
         if self.spec is not None:
+            self._layout = None                        # (made again)
             self.show_field(*self.spec)
 
     def clear(self):
+        had = self.spec is not None
         self.spec = None
         self.hide()
+        if had:
+            self.scene.section.contour_changed()
 
 
 class CutLineView:

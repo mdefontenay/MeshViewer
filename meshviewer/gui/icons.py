@@ -34,6 +34,7 @@ SF = {   # icon name -> SF Symbol
     "mesh_quality": "dial.medium", "mesh_edges": "square.split.diagonal.2x2",
     "faces": "cube.fill", "plus": "plus.circle", "edit_unit": "square.and.pencil",
     "plots": "chart.xyaxis.line", "eye": "eye", "eye_off": "eye.slash",
+    "probe": "scope",                      # Probe: a point, a line, an area
     "advanced": "gearshape",
     "settings_general": "gearshape", "settings_appearance": "paintpalette",
     "settings_units": "ruler",
@@ -45,6 +46,8 @@ SF = {   # icon name -> SF Symbol
     "filter_menu": "line.3.horizontal.decrease",   # the parts list's options
     "axis_indicator": "move.3d",           # Show ▸ Axis Indicator (the XYZ arrows)
     "lock": "lock", "lock_open": "lock.open",      # a plot's zoom locked / free
+    "play": "play.fill", "pause": "pause.fill",    # the playback bar (time steps)
+    "step_back": "backward.frame", "step_forward": "forward.frame", "loop": "repeat",
 }
 _sf_cache = {}
 
@@ -461,7 +464,53 @@ def _draw_tetra(p):
     _line(p, (2, 11.5), (16, 11.5))
 
 
+def _filled(p, *pts):
+    path = QPainterPath(QPointF(*pts[0]))
+    for pt in pts[1:]:
+        path.lineTo(QPointF(*pt))
+    path.closeSubpath()
+    p.fillPath(path, QColor(p.pen().color()))
+
+
+def _draw_play(p):
+    _filled(p, (5.5, 3.5), (14.5, 9), (5.5, 14.5))
+
+
+def _draw_pause(p):
+    _filled(p, (4.5, 3.5), (7.5, 3.5), (7.5, 14.5), (4.5, 14.5))
+    _filled(p, (10.5, 3.5), (13.5, 3.5), (13.5, 14.5), (10.5, 14.5))
+
+
+def _draw_step(p, forward):
+    """A frame back / forward: a triangle against a bar."""
+    f = (lambda x: 18 - x) if forward else (lambda x: x)
+    _filled(p, (f(14), 4), (f(6.5), 9), (f(14), 14))
+    _line(p, (f(4.5), 4), (f(4.5), 14))
+
+
+def _draw_loop(p):
+    """Two arrows going round (repeat)."""
+    _line(p, (13, 5.5), (5.5, 5.5), (3.5, 7.5), (3.5, 9))
+    _line(p, (5, 12.5), (12.5, 12.5), (14.5, 10.5), (14.5, 9))
+    _line(p, (11, 3.5), (13, 5.5), (11, 7.5))
+    _line(p, (7, 10.5), (5, 12.5), (7, 14.5))
+
+
+def _draw_probe(p):
+    """A ring with a crosshair (a scope)."""
+    p.drawEllipse(QRectF(4, 4, 10, 10))
+    for a, b in (((9, 1.5), (9, 6)), ((9, 12), (9, 16.5)), ((1.5, 9), (6, 9)),
+                 ((12, 9), (16.5, 9))):
+        _line(p, a, b)
+
+
 DRAWINGS = {
+    "probe": _draw_probe,
+    "play": _draw_play,
+    "pause": _draw_pause,
+    "step_back": lambda p: _draw_step(p, False),
+    "step_forward": lambda p: _draw_step(p, True),
+    "loop": _draw_loop,
     "filter_menu": _draw_filter_menu,
     "pick_volume_cell": _draw_tetra,
     "undo": _draw_undo,

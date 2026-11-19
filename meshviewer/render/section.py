@@ -20,6 +20,10 @@ from vtkmodules.vtkFiltersCore import (
 from vtkmodules.vtkFiltersGeneral import vtkContourTriangulator
 
 from meshviewer.core import transform as xf
+from meshviewer.core.field_kinds import SPEED
+from meshviewer.core.fields import field_values, ramp_t, speed_values, velocity_names
+
+POSITION = "__pos_"                    # a contour of X / Y / Z (gui/panels/contours.POS)
 
 
 def _darker(hex_color, f=0.78):
@@ -38,7 +42,10 @@ class Section:
         self._volume = None                # pv.UnstructuredGrid once loaded, False if none
         self._volume_orig = None           # as read from the file (Edit recomputes from it)
         self._vol_cutter = None            # kept: re-cutting reuses its search tree
+        self._cut_src = None               # what it cuts: the cells, only the arrays drawn
+        self._cut_key = None
         self._vol_cut = None               # actor: cut cells with their edges
+        self.cut_cells = None              # what it draws (its fields, "ResultT")
         self.show_handle = True
         self.on_widget_moved = None        # UI hook: called with (origin, normal)
 
@@ -152,12 +159,7 @@ class Section:
         if not self.enabled:
             self.p.render()
             return
-        plane = vtkPlane()
-        # Nudge the cut a hair (1e-6 of the model size) so it never runs exactly
-        # through mesh vertices or along a face lying in the plane — those
-        # degenerate cuts made the cap triangulation take seconds per part.
-        plane.SetOrigin(*(self.origin + self.normal * self.diag * 1e-6))
-        plane.SetNormal(*self.normal)
+        plane = self._cut_plane()
         outlines, caps = vtkAppendPolyData(), vtkAppendPolyData()
         n_lines = n_caps = 0
         cap_part = []
@@ -239,6 +241,9 @@ class Section:
             except Exception as exc:                   # unreadable: plain fill instead
                 print(f"volume cells could not be read: {exc}")
                 self._volume = False
+            m = self.scene.model
+            if self._volume and m.case is not None and len(m.times) > 1:
+                m.case.prefetch(m.time_index, self.scene.wanted_fields())   # cells, ahead
         if not self._volume:
             self.has_volume = False
             return None
@@ -263,27 +268,111 @@ class Section:
         Returns False when the file has no volume cells (-> ordinary fill)."""
         if self.volume_grid() is None:
             return False
-        if self._vol_cutter is None:
-            self._vol_cutter = vtkPlaneCutter()        # multi-threaded, builds a search tree
-            self._vol_cutter.SetInputData(self._volume)
-        # Cell quality ▸ Colour by quality -> each cut cell gets its colour
+        # Cell quality ▸ Colour by quality -> each cut cell gets its colour; else the
+        # contour shown (its field on the cells: OpenFOAM) colors the cut the same way
         rgb = self.scene.quality.rgb
         colored = rgb is not None and len(rgb) == self._volume.n_cells
         if colored:
             self._volume.cell_data["QualityRGB"] = rgb
-        self._vol_cutter.SetInterpolateAttributes(colored)
+        spec = None if colored else self.scene.results.spec
+        names = ["QualityRGB"] if colored else self._cut_arrays(spec)
+        src = self._cut_source(names)
+        if self._vol_cutter is None:
+            self._vol_cutter = vtkPlaneCutter()        # multi-threaded, builds a search tree
+            self._vol_cutter.SetInputData(src)
+        src.Modified()                                 # (its arrays may have new values)
+        self._vol_cutter.SetInterpolateAttributes(bool(names))
         self._vol_cutter.SetPlane(plane)
         self._vol_cutter.Update()
         cut = pv.wrap(self._vol_cutter.GetOutput())
+        self.cut_cells = cut if cut.n_cells else None
         if cut.n_cells:
             t = self.scene.theme_colors()
-            # edges look like the model's mesh edges (same colour and width)
             look = dict(scalars="QualityRGB", rgb=True) if colored else dict(color=t["cut_fill"])
+            contour = spec is not None and self._contour_colors(cut, spec)
+            if contour:
+                look = dict(scalars="ResultT", show_scalar_bar=False)
+            # edges look like the model's mesh edges (same colour and width)
             self._vol_cut = self.p.add_mesh(
                 cut, **look, show_edges=True, edge_color=t["edge"],
                 line_width=1, lighting=False, pickable=False, reset_camera=False)
+            if contour:
+                from meshviewer.render.overlays import results_lut
+                m = self._vol_cut.GetMapper()
+                m.SetLookupTable(results_lut(spec[3], spec[5]))
+                m.SetUseLookupTableScalarRange(False)
+                m.SetScalarRange(0.0, 3.0)
             self.sync_cut_edges()
         return True
+
+    def _cut_arrays(self, spec):
+        """The cells' arrays the cut is colored by: the contour's field (speed: the
+        velocity's components; a position or a gradient: none)."""
+        if spec is None:
+            return []
+        field, vol = spec[0], self._volume
+        if field == SPEED:
+            return list(velocity_names(vol) or [])
+        if field.startswith(POSITION):
+            return []
+        return [field] if field in vol.point_data.keys() or field in vol.cell_data.keys() \
+            else []
+
+    def _cut_source(self, names):
+        """What the cutter cuts: the cells with only `names` (it interpolates every array
+        it is given onto the cut: all of them cost about twice the cut itself) — a
+        shallow copy sharing the cells' arrays, made again when they or the arrays
+        change (a new search tree then)."""
+        vol = self._volume
+        arrays = [a for a in (vol.GetPointData().GetArray(n) or vol.GetCellData().GetArray(n)
+                              for n in names) if a is not None]
+        key = (id(vol), tuple(a.GetAddressAsString("vtkObject") for a in arrays))
+        if key != self._cut_key:
+            src = pv.UnstructuredGrid()
+            src.shallow_copy(vol)
+            at_nodes = {n for n in names if vol.GetPointData().GetArray(n) is not None}
+            for attrs, keep in ((src.GetPointData(), set(names)),        # as the contour
+                                (src.GetCellData(), set(names) - at_nodes)):   # reads them
+                for i in reversed(range(attrs.GetNumberOfArrays())):
+                    if attrs.GetAbstractArray(i).GetName() not in keep:
+                        attrs.RemoveArray(i)
+            self._cut_src, self._cut_key = src, key
+            self._vol_cutter = None
+        return self._cut_src
+
+    def _cut_plane(self):
+        """The plane the caps are cut with: nudged a hair (1e-6 of the model size) so it
+        never runs exactly through mesh vertices or along a face lying in the plane —
+        those degenerate cuts made the cap triangulation take seconds per part."""
+        plane = vtkPlane()
+        plane.SetOrigin(*(self.origin + self.normal * self.diag * 1e-6))
+        plane.SetNormal(*self.normal)
+        return plane
+
+    def _contour_colors(self, cut, spec):
+        """The contour's field on the cut cells as "ResultT" (0…1 on its range); False
+        when the cells don't carry it (a gradient, a file without cell fields)."""
+        field, lo, hi, _stops, log, _edges = spec
+        if field == SPEED:
+            vals, where = speed_values(cut)
+        elif field.startswith(POSITION):
+            vals, where = np.asarray(cut.points[:, "xyz".index(field[-1])], dtype=float), "point"
+        else:
+            vals, where = field_values(cut, field)
+        if vals is None:
+            return False
+        (cut.point_data if where == "point" else cut.cell_data)["ResultT"] = \
+            ramp_t(vals, lo, hi, log)
+        return True
+
+    def contour_changed(self):
+        """The contour shown changed (field, range, time step): the cut cells again —
+        only them (the parts' outlines and fills stay)."""
+        if self.enabled and self.fill and self._vol_cut is not None:
+            self.p.remove_actor(self._vol_cut, render=False)
+            self._vol_cut = None
+            self._cut_volume(self._cut_plane())
+            self.p.render()
 
     def sync_cut_edges(self):
         """Cut-cell edges follow the Mesh edges toggle, and hide while the view

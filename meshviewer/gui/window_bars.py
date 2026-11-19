@@ -3,7 +3,8 @@
 The menu bar, as Mac apps lay it out — every toolbar button is in it too:
 
     Mesh Viewer   About, Check for Updates…, Settings… ⌘,          (macOS's app menu)
-    File          Open… ⌘O, Open Recent, Open Sample, Close ⌘W, Revert to Original…, Export… ⇧⌘E,
+    File          Open… ⌘O, Open Case… ⇧⌘O, Open Recent, Open Sample, Close ⌘W,
+                  Revert to Original…, Export… ⇧⌘E,
                   Save Screenshot… ⇧⌘S, File Unit…
     Edit          Undo ⌘Z, Redo ⇧⌘Z, Select All ⌘A, Deselect All ⌥⌘A, Select ▸, Hide / Isolate
                   Selection, Show All, Find… ⌘F
@@ -67,6 +68,8 @@ class Bars:
 
     def _build_actions(self):
         self.a_open = self._act("Open…", self.ctl.open_dialog, QKeySequence.Open)
+        self.a_open_case = self._act("Open Case…", lambda: self.ctl.open_case_dialog(self),
+                                     "Ctrl+Shift+O")           # an OpenFOAM case folder
         self.a_close = self._act("Close", self.close, QKeySequence.Close)
         self.a_revert = self._act("Revert to Original…", self.revert_to_original)
         self.a_shot = self._act("Save Screenshot…", self.save_screenshot, "Ctrl+Shift+S")
@@ -306,6 +309,7 @@ class Bars:
             for a in self.ctl.app_menu_actions():
                 m.addAction(a)
         m.addAction(self.a_open)
+        m.addAction(self.a_open_case)
         self.ctl.add_recent_menu(m)                     # Open Recent
         add_sample_menu(m, lambda p: self.ctl.open_path(p, prefer=self))
         m.addSeparator()

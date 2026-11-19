@@ -28,7 +28,8 @@ from vtkmodules.vtkCommonCore import vtkIdList
 from meshviewer.core import element_info as ei
 from meshviewer.core import quality
 from meshviewer.core.field_kinds import SPEED
-from meshviewer.core.fields import field_values as _values_of, solution_fields
+from meshviewer.core.fields import (field_values as _values_of, planar, solution_fields,
+                                    speed_values)
 from meshviewer.core.polys import bare
 from meshviewer.core.units import fmt
 
@@ -227,15 +228,12 @@ def _volume_cell(el, cell, u):
 
 
 # ---- solution field values over what is picked --------------------------------------------
-def _arrays(ds, field):
-    """(values, "point" | "cell") of a field on a surface or a grid; speed from u, v, w."""
+def _arrays(ds, field, prefer="point"):
+    """(values, "point" | "cell") of a field on a surface or a grid (stored both ways:
+    as `prefer`); speed from u, v, w (or Ux, Uy, Uz)."""
     if field == SPEED:
-        parts = [_values_of(ds, k) for k in ("u", "v", "w")]
-        if all(v is not None for v, _ in parts) and len({w for _, w in parts}) == 1:
-            u, v, w = (np.asarray(a, dtype=float) for a, _ in parts)
-            return np.sqrt(u * u + v * v + w * w), parts[0][1]
-        return None, None
-    return _values_of(ds, field)
+        return speed_values(ds, prefer)
+    return _values_of(ds, field, prefer)
 
 
 def _at_points(poly, field):
@@ -251,8 +249,9 @@ def _at_points(poly, field):
 
 
 def _at_cells(poly, field):
-    """The field on every cell (a point field: the mean of each cell's points)."""
-    vals, where = _arrays(poly, field)
+    """The field on every cell: its own value when the file has one (OpenFOAM's faces),
+    else the mean of its points."""
+    vals, where = _arrays(poly, field, prefer="cell")
     if vals is None:
         return None
     if where == "cell":
@@ -291,7 +290,7 @@ def field_values(el):
     "edge" | "area" | "cell"} for what Select ▾ picked (Part: the selected parts) — or
     None (no solution fields, nothing picked)."""
     sc = el.scene
-    fields = solution_fields(sc.model.parts)
+    fields = planar(solution_fields(sc.model.parts), sc.model)
     if not fields:
         return None
     k = el.kind
@@ -316,7 +315,7 @@ def field_values(el):
             return None
         cells = [int(c) for _, c in el.items if 0 <= int(c) < grid.n_cells]
         for f in fields:
-            vals, where = _arrays(grid, f)
+            vals, where = _arrays(grid, f, prefer="cell")
             if vals is None:
                 continue
             vals = np.asarray(vals, dtype=float)
@@ -327,7 +326,7 @@ def field_values(el):
         out = acc.result(fields)
         return {"fields": out, "mean": len(cells) > 1, "n": len(cells), "how": "cell"} \
             if out else None
-    by_part = {}
+    by_part, own = {}, k == "mesh_cell" and len(el.items) == 1   # one face: its own values?
     for name, key in el.items:
         if name in sc.model.parts:
             by_part.setdefault(name, []).append(key)
@@ -355,6 +354,7 @@ def field_values(el):
             cells = cells.astype(int)
             a = _areas(poly)[cells]
             for f in fields:
+                own = own and _arrays(poly, f, prefer="cell")[1] in ("cell", None)
                 cv = _at_cells(poly, f)
                 if cv is not None:
                     acc.add(f, cv[cells], a)
@@ -364,4 +364,6 @@ def field_values(el):
     how = {"mesh_node": "node", "feature_node": "node", "mesh_edge": "edge",
            "feature_edge": "edge"}.get(k, "area")
     n = len(el.items)
+    if own:                                          # one face with values of its own
+        return {"fields": out, "mean": False, "n": 1, "how": "cell"}
     return {"fields": out, "mean": how != "node" or n > 1, "n": n, "how": how}

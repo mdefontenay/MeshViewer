@@ -167,6 +167,7 @@ QLineEdit:disabled {{ color: {secondary}; background: {capsule}; border-color: {
 #PageTitle {{ color: {text}; font-size: 17px; font-weight: 700; }}
 #TileValue {{ color: {text}; font-size: 17px; font-weight: 600; }}
 #ViewBar {{ background: {page}; border-top: 1px solid {divider}; }}
+#AnimationBar {{ background: {page}; border-top: 1px solid {divider}; }}
 #TabScroll, #TabScroll > QWidget {{ background: transparent; border: none; }}
 #TabScroll QScrollBar:horizontal {{ background: transparent; height: 6px; margin: 0 2px; border: none; }}
 #TabScroll QScrollBar::handle:horizontal {{ background: {scroll}; border-radius: 3px; min-width: 28px; }}
@@ -174,6 +175,7 @@ QLineEdit:disabled {{ color: {secondary}; background: {capsule}; border-color: {
 #TabScroll QScrollBar::add-page:horizontal, #TabScroll QScrollBar::sub-page:horizontal {{ background: transparent; }}
 /* sub-groups in a section, the "Values" pop-up */
 #SubHeader {{ color: {text}; font-size: 12px; font-weight: 600; }}
+#SubHeader[unavailable="true"] {{ color: {tertiary}; }}
 #ValuesBody {{ background: {menu}; border: 1px solid {menu_border}; border-radius: 10px; }}
 #ValuesBody QLabel {{ background: transparent; }}
 #FormulasScroll, #FormulasInner {{ background: transparent; }}

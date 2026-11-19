@@ -21,7 +21,7 @@ others could benefit from it.
 - **CAD assemblies**: STEP / IGES / BREP read with OpenCASCADE: the assembly tree,
   colors and materials, exact areas and volumes. Sort and filter parts by name, size or
   volume; hide, isolate, recolor, rename; choose how finely each file is meshed.
-- **Meshes**: CGNS (polyhedra too), UGRID, Gmsh and Fluent .msh, 2D or 3D, with their
+- **Meshes**: CGNS (polyhedra too), UGRID, Gmsh and Fluent .msh, OpenFOAM cases, 2D or 3D, with their
   named boundaries. The section plane cuts the volume cells; Cell Quality finds the
   skewed, stretched and inverted ones.
 - **CFD results and plots**: FUN3D / Tecplot results on the boundaries as contours, each
@@ -52,7 +52,7 @@ others could benefit from it.
 
 | Kind | Formats |
 |------|---------|
-| Mesh | CGNS `.cgns` (MIXED, polyhedral NGON / NFACE cells too), UGRID `.lb8/.b8/.lb4/.b4.ugrid` (boundary names from `.mapbc`), Gmsh and Fluent `.msh` (2D or 3D, found from the file) |
+| Mesh | CGNS `.cgns` (MIXED, polyhedral NGON / NFACE cells too), UGRID `.lb8/.b8/.lb4/.b4.ugrid` (boundary names from `.mapbc`), Gmsh and Fluent `.msh` (2D or 3D, found from the file), OpenFOAM case folders (File ▸ Open Case…: `constant/polyMesh` and the latest time folder's fields, ASCII or binary, decomposed too; 2D one-cell-thick cases found by themselves) |
 | Results | Tecplot ASCII `.dat` (FUN3D `project_tec_boundary.dat`: the boundaries with their solution) |
 | CAD, exact geometry | STEP `.step/.stp`, IGES `.iges/.igs`, BREP `.brep/.brp` |
 | CAD, triangulated | STL `.stl`, OBJ `.obj`, PLY `.ply`, glTF `.gltf/.glb`, VRML `.wrl/.vrml` |

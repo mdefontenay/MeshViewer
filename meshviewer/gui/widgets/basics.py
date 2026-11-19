@@ -59,7 +59,8 @@ class Switch(QAbstractButton):
 
     @staticmethod
     def set_silently(sw, on):
-        """Set the state without emitting toggled or animating."""
+        """Set the state without emitting toggled or animating (a slide under way stops)."""
+        sw._anim.stop()
         sw.blockSignals(True)
         sw.setChecked(bool(on))
         sw._pos = 1.0 if on else 0.0
@@ -89,7 +90,7 @@ class Switch(QAbstractButton):
         x = 2 + t * (self.W - d - 4)
         p.setBrush(QColor(0, 0, 0, 40))                    # soft knob shadow
         p.drawEllipse(QRectF(x, 2.6, d, d))
-        p.setBrush(QColor("white"))
+        p.setBrush(QColor(255, 255, 255, 255 if self.isEnabled() else 150))   # grayed: dim
         p.drawEllipse(QRectF(x, 2, d, d))
         if self.hasFocus():                                # keyboard focus (Tab): a ring
             ring = QColor(on)

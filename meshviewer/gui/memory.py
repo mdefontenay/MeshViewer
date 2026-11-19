@@ -90,6 +90,7 @@ def capture(scene):
         "inflation_page": getattr(scene, "inflation_page", None),  # tab, zoom…
         "results": getattr(scene, "results_settings", None),      # Contours
         "plots": list(getattr(scene, "plots", None) or []),      # Plots
+        "probes": list(getattr(scene, "probes", None) or []),    # Probe
         "inspector": getattr(scene, "inspector_state", None),     # its tab, the tools open
         "hidden_faces": {orig.get(n, n): sorted(v) for n, v in scene.hidden_faces.items()
                          if v},
@@ -142,6 +143,8 @@ def restore(scene, state):
         scene.results_settings = state["results"]
     if isinstance(state.get("plots"), list):
         scene.plots = [dict(m) for m in state["plots"] if isinstance(m, dict) and "id" in m]
+    if isinstance(state.get("probes"), list):
+        scene.probes = [dict(p) for p in state["probes"] if isinstance(p, dict) and "id" in p]
     ins = state.get("inspector")                     # (2.5 beta 2 and before: ignored)
     if isinstance(ins, dict):
         scene.inspector_state = {

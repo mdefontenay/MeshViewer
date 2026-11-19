@@ -64,7 +64,11 @@ class SelectedPanel(QWidget):
         self.refresh()
 
     def bind(self, scene):
+        if self.scene is not None and self._time_changed in self.scene.time_listeners:
+            self.scene.time_listeners.remove(self._time_changed)
         self.scene = scene
+        scene.time_listeners.append(self._time_changed)         # another time step
+        scene.field_users.append(self._fields_shown)
         self.diameter.blockSignals(True)
         self.diameter.setChecked(scene.elements.show_diameter)
         self.diameter.blockSignals(False)
@@ -74,6 +78,16 @@ class SelectedPanel(QWidget):
         if self.scene is not None:
             self.scene.elements.set_show_diameter(on)
 
+    def _fields_shown(self):
+        """Every field while it lists a pick (None), else none."""
+        sc = self.scene
+        return None if self.isVisible() and (sc.elements.items or sc.selected_parts) else []
+
+    def _time_changed(self):
+        """Another time step: the Field Values of what is picked (nothing: nothing to do)."""
+        if self.scene.elements.items or self.scene.selected_parts:
+            self.refresh()
+
     def refresh(self):
         """After a pick (Elements.on_changed, a part selected) or a change of unit."""
         for w in self._cells:
@@ -81,6 +95,9 @@ class SelectedPanel(QWidget):
         self._cells = []
         got = fv = None
         if self.scene is not None:
+            sc = self.scene
+            if sc.elements.items or sc.selected_parts:
+                sc.ensure_fields(None)                  # every field, on the step shown
             try:
                 got = details(self.scene.elements)
                 fv = field_values(self.scene.elements)

@@ -37,17 +37,20 @@ from meshviewer.render.editing import Editing
 from meshviewer.render.elements import Elements
 from meshviewer.render.measure import Measure
 from meshviewer.render.overlays import CutLineView, FlowView, ResultsView, WallView, YplusView
+from meshviewer.render.layers import Overlays
 from meshviewer.render.picking import Picking
+from meshviewer.render.probes import ProbeMarks
 from meshviewer.render.quality_overlay import GHOST_OPACITY, QualityView
 from meshviewer.render.screenshot import Screenshots
 from meshviewer.render.section import Section
+from meshviewer.render.timesteps import TimeSteps
 from meshviewer.render.style import (
     AXIS_FONT_DEFAULT, EDGE_WIDTHS, FEATURE_ANGLE, HEAVY_OUTLINE, lighter, PART_COLORS, rgb,
     SELECT_COLOR, THEMES,
 )
 
 
-class Scene(Picking, Camera, Editing, Appearance, Screenshots):
+class Scene(Picking, Camera, Editing, Appearance, Screenshots, TimeSteps):
     def __init__(self, plotter: pv.BasePlotter, model: Model, dark: bool = False,
                  accent: str = SELECT_COLOR):
         self.p = plotter
@@ -120,12 +123,16 @@ class Scene(Picking, Camera, Editing, Appearance, Screenshots):
         self.plot_cut = CutLineView(self)         # Plots ▸ the cuts shown
         self.plots = []                           # Plots: each plot's settings (memory)
         self.visibility_listeners = []            # called after parts are shown / hidden
+        self.time_listeners = []                  # called after another time step is shown
+        self.field_users = []                     # -> the fields each tool shows
         self.results_settings = None              # field, range (remembered)
         self.inspector_state = None               # {"tab", "open": tools} (None: first open)
         self.cfd_settings = None                  # CFD section (remembered per file)
         self.inflation_settings = None            # Inflation Layers (CAD), remembered too
         self.inflation_page = None                # Inflation page tab, zoom… (memory)
+        self.overlays = Overlays(self)            # drawn over the model: marks, labels
         self.measure = Measure(self)
+        self.probe_marks = ProbeMarks(self)       # Probe ▸ the markers shown
         self.elements = Elements(self)            # Select ▾: what a click picks
         self.set_theme(dark, render=False)
         self.set_parallel(self.state["parallel"])

@@ -83,7 +83,8 @@ class SpinField(NoWheelSpinBox):
         self.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
 
     def textFromValue(self, v):
-        t = f"{v:.{self.decimals()}f}".rstrip("0").rstrip(".")
+        t = f"{v:.{self.decimals()}f}"
+        t = t.rstrip("0").rstrip(".") if "." in t else t       # (10 stays 10)
         return "0" if t in ("", "-0") else t
 
 

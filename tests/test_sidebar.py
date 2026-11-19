@@ -17,7 +17,7 @@ def test(app, files):
           f"CAD opens on View, tools closed ({sb.current_tab()})")
     check(IN_TAB == {"view": ["quality", "section", "edit"],
                      "measure": ["info", "measure", "selected"],
-                     "analyze": ["cfd", "cells", "contours", "plots"]}, f"tabs {IN_TAB}")
+                     "analyze": ["cfd", "cells", "contours", "plots", "probes"]}, f"tabs {IN_TAB}")
     firsts = {tab: keys[0] for tab, keys in IN_TAB.items()}    # no line above the first tool
     check(all(sb._boxes[k].divider.isHidden() == (k in firsts.values())
               for keys in IN_TAB.values() for k in keys),

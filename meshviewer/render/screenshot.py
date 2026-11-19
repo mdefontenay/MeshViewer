@@ -129,7 +129,7 @@ class Screenshots:
             if self.state.get("axis_indicator", True):
                 self._corner_axes(off, line_width=3 * k, color=t["grid"])
             self.colorbar.add_to(r2, k, dark=dark_vis)   # Contours: its color bar
-            self.measure.add_to(off.ren_win, cam, k, _clone_actor)  # markers, on top
+            self.overlays.add_to(off.ren_win, cam, k, _clone_actor)  # marks, on top
             off.enable_anti_aliasing("ssaa") if k == 1 else None
             off.render()
             img = off.screenshot(None, transparent_background=transparent, return_img=True)
@@ -138,7 +138,7 @@ class Screenshots:
             for prop, lw, ps in widths:
                 prop.SetLineWidth(lw)
                 prop.SetPointSize(ps)
-            self.measure.remove_from(off.ren_win)
+            self.overlays.remove_from(off.ren_win)
             off.renderer.RemoveAllViewProps()         # shared actors stay in the main view
             off.close()
         return path

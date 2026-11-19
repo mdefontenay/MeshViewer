@@ -84,7 +84,16 @@ def _scratch_settings():
     os.environ["MESHVIEWER_SETTINGS"] = os.path.join(tempfile.mkdtemp(), "settings.ini")
 
 
+def _uncaught(kind, exc, tb):
+    """An error raised inside the app (a Qt slot, a timer) — printed and left running by
+    Qt — fails the test instead of passing unseen."""
+    import traceback
+    traceback.print_exception(kind, exc, tb)
+    check(False, f"no error inside the app ({kind.__name__}: {exc})")
+
+
 def make_app():
+    sys.excepthook = _uncaught
     _scratch_settings()
     from PySide6.QtCore import QEvent
     from meshviewer.gui.app import MeshViewerApp

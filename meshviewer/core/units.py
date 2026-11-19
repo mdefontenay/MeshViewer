@@ -99,6 +99,12 @@ TKE_UNITS = {"m²/s²": 1.0, "ft²/s²": 0.09290304}
 DISSIPATION_UNITS = {"m²/s³": 1.0, "ft²/s³": 0.09290304}
 RATE_UNITS = {"1/s": 1.0, "1/min": 1 / 60}
 KINEMATIC_UNITS = {"m²/s": 1.0, "cSt": 1e-6, "ft²/s": 0.09290304}
+VOLUME_FLOW_UNITS = {"m³/s": 1.0, "L/s": 1e-3, "m³/h": 1 / 3600, "ft³/s": 0.028316847,
+                     "gpm": 6.3090196e-5}                  # (US gallons a minute)
+MASS_FLOW_UNITS = {"kg/s": 1.0, "kg/h": 1 / 3600, "lb/s": 0.45359237}
+RATE_SQ_UNITS = {"1/s²": 1.0}                              # Q criterion, λ2
+PRESSURE_SQ_UNITS = {"Pa²": 1.0, "kPa²": 1e6}               # a pressure's variance
+KINEMATIC_SQ_UNITS = {"m⁴/s⁴": 1.0}                         # …of a kinematic pressure
 # a field's quantity -> its units (the first one: SI). Every unit name is in one table
 # only (unit_quantity relies on it); lengths add µm for displacements.
 QUANTITIES = {"pressure": PRESSURE_UNITS, "density": DENSITY_UNITS, "speed": SPEED_UNITS,
@@ -106,15 +112,27 @@ QUANTITIES = {"pressure": PRESSURE_UNITS, "density": DENSITY_UNITS, "speed": SPE
               "kinematic": KINEMATIC_UNITS, "length": {**LENGTH_UNITS, "µm": 1e-6},
               "strain": STRAIN_UNITS, "force": FORCE_UNITS, "heat_flux": HEAT_FLUX_UNITS,
               "htc": HTC_UNITS, "energy": ENERGY_UNITS, "tke": TKE_UNITS,
-              "dissipation": DISSIPATION_UNITS, "rate": RATE_UNITS}
+              "dissipation": DISSIPATION_UNITS, "rate": RATE_UNITS,
+              "volume_flow": VOLUME_FLOW_UNITS, "mass_flow": MASS_FLOW_UNITS,
+              "rate_sq": RATE_SQ_UNITS, "pressure_sq": PRESSURE_SQ_UNITS,
+              "kinematic_sq": KINEMATIC_SQ_UNITS}
 QUANTITY_TITLES = {"pressure": "Pressure and Stress", "density": "Density",
                    "speed": "Speed", "temperature": "Temperature", "viscosity": "Viscosity",
                    "kinematic": "Kinematic Viscosity", "length": "Length",
                    "strain": "Strain", "force": "Force", "heat_flux": "Heat Flux",
                    "htc": "Heat Transfer Coefficient", "energy": "Energy per Mass",
                    "tke": "Turbulent Kinetic Energy", "dissipation": "Dissipation",
-                   "rate": "Rate"}
+                   "rate": "Rate", "volume_flow": "Volume Flow Rate",
+                   "mass_flow": "Mass Flow Rate", "rate_sq": "Rate Squared",
+                   "pressure_sq": "Pressure Squared",
+                   "kinematic_sq": "Kinematic Pressure Squared"}
 NO_UNIT = ""                       # the file's numbers as they are (often non-dimensional)
+CUSTOM = "custom"                  # the "quantity" of a unit typed for one file (no tables)
+
+
+def is_custom(unit):
+    """A unit typed for one file (Custom…): a name in no table, so nothing converts it."""
+    return bool(unit) and unit_quantity(unit) is None
 
 
 def unit_quantity(unit):
